@@ -94,6 +94,58 @@ class PointMassSpec:
 
 
 @dataclass(slots=True)
+class UnbalanceSpec:
+    position_mm: float
+    magnitude_g_mm: float
+    phase_deg: float = 0.0
+    tag: str = ""
+
+    def validate(self) -> None:
+        if self.magnitude_g_mm < 0:
+            raise DomainError("Unbalance magnitude cannot be negative.")
+        if not isfinite(float(self.phase_deg)):
+            raise DomainError("Unbalance phase must be finite.")
+
+
+@dataclass(slots=True)
+class ProbeSpec:
+    position_mm: float
+    coordinate: int = 1
+    orientation_deg: float = 0.0
+    tag: str = ""
+
+    def validate(self) -> None:
+        if self.coordinate not in (1, 2):
+            raise DomainError("Probe coordinate must be 1 or 2.")
+        if not isfinite(float(self.orientation_deg)):
+            raise DomainError("Probe orientation must be finite.")
+
+
+@dataclass(slots=True)
+class SupportSpec:
+    bearing_index: int
+    kxx: float
+    kzz: float
+    mass_kg: float
+    kxz: float = 0.0
+    kzx: float = 0.0
+    cxx: float = 0.0
+    czz: float = 0.0
+    cxz: float = 0.0
+    czx: float = 0.0
+    tag: str = ""
+
+    def validate(self, bearing_count: int) -> None:
+        if self.bearing_index < 0 or self.bearing_index >= bearing_count:
+            raise DomainError("Flexible support bearing index is invalid.")
+        if self.mass_kg <= 0:
+            raise DomainError("Flexible support mass must be positive.")
+        values = (self.kxx, self.kzz, self.kxz, self.kzx, self.cxx, self.czz, self.cxz, self.czx)
+        if not all(isfinite(float(v)) for v in values):
+            raise DomainError("Flexible support K/C coefficients must be finite.")
+
+
+@dataclass(slots=True)
 class CoefficientBearingSpec:
     position_mm: float
     kxx: float
@@ -323,9 +375,12 @@ class RotorProject:
     disks: list[DiskSpec] = field(default_factory=list)
     point_masses: list[PointMassSpec] = field(default_factory=list)
     bearings: list[BearingSpec] = field(default_factory=list)
+    unbalances: list[UnbalanceSpec] = field(default_factory=list)
+    probes: list[ProbeSpec] = field(default_factory=list)
+    supports: list[SupportSpec] = field(default_factory=list)
     analyses: AnalysisRequest = field(default_factory=AnalysisRequest)
     metadata: dict[str, Any] = field(default_factory=dict)
-    schema_version: int = 2
+    schema_version: int = 3
 
     @property
     def shaft_length_mm(self) -> float:
@@ -345,7 +400,7 @@ class RotorProject:
             if section.material not in known_materials:
                 raise DomainError(f"Unknown shaft material: {section.material}")
         length = self.shaft_length_mm
-        for collection in (self.disks, self.point_masses, self.bearings):
+        for collection in (self.disks, self.point_masses, self.bearings, self.unbalances, self.probes):
             for item in collection:
                 item.validate()
                 if not 0 <= item.position_mm <= length:
@@ -355,6 +410,12 @@ class RotorProject:
                 linked = getattr(item, "n_link_position_mm", None)
                 if linked is not None and not 0 <= linked <= length:
                     raise DomainError("Bearing link position is outside the shaft.")
+        seen_support_bearings: set[int] = set()
+        for support in self.supports:
+            support.validate(len(self.bearings))
+            if support.bearing_index in seen_support_bearings:
+                raise DomainError("Only one flexible support may be associated with each bearing.")
+            seen_support_bearings.add(support.bearing_index)
         self.analyses.validate()
 
     def to_dict(self) -> dict[str, Any]:
