@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtWidgets import QHeaderView, QLabel, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from ..domain import RotorProject
@@ -102,13 +102,29 @@ class IndustrialModelPage(ModelPage):
             self._put(self.loads_table, row, values)
 
     def set_project(self, project: RotorProject):
-        super().set_project(project)
-        self.project_name.setText(project.reference or "Untitled")
-        self.description.setPlainText(str(project.metadata.get("description", project.metadata.get("component", ""))))
-        self.speed.setText(f"{float(project.metadata.get('rotor_speed_rpm', 0.0)):,.0f}")
-        self.material.clear()
-        self.material.addItems([m.name for m in project.materials])
-        self._populate_component_tables()
+        # Loading must be atomic.  The base page connects textChanged/editingFinished
+        # callbacks that write widgets back into self.project.  If those callbacks run
+        # while a new project is only partially reflected in the widgets, stale values
+        # from the previous project (e.g. demo 1800 rpm) can overwrite imported data.
+        blockers = [
+            QSignalBlocker(self.project_name),
+            QSignalBlocker(self.description),
+            QSignalBlocker(self.speed),
+            QSignalBlocker(self.material),
+            QSignalBlocker(self.table),
+        ]
+        try:
+            super().set_project(project)
+            self.project_name.setText(project.reference or "Untitled")
+            self.description.setPlainText(str(project.metadata.get("description", project.metadata.get("component", ""))))
+            self.speed.setText(f"{float(project.metadata.get('rotor_speed_rpm', 0.0)):,.0f}")
+            self.material.clear()
+            self.material.addItems([m.name for m in project.materials])
+            self._populate_component_tables()
+        finally:
+            # Keep blockers alive through the complete widget refresh; deleting them
+            # restores the original signal state.
+            del blockers
 
 
 __all__ = ["IndustrialModelPage"]
