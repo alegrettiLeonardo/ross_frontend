@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import pi
 from types import SimpleNamespace
 
 
@@ -16,7 +17,18 @@ class FakeMaterial(Captured):
 
 
 class FakeShaftElement(Captured):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.n_l = self.n
+        self.n_r = self.n + 1
+        odl = float(self.odl)
+        odr = float(self.odr)
+        idl = float(self.idl)
+        idr = float(self.idr)
+        od = 0.5 * (odl + odr)
+        inner = 0.5 * (idl + idr)
+        self.Ie = pi * (od**4 - inner**4) / 64.0
+        self.dof_global_index = None
 
 
 class FakeDiskElement(Captured):
@@ -98,11 +110,30 @@ class StaticResult:
 
 
 class FakeRotor:
+    number_dof = 6
+
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
-        self.ndof = 24
+        self.shaft_elements = list(kwargs.get("shaft_elements", []))
+        self.disk_elements = list(kwargs.get("disk_elements", []))
+        self.bearing_elements = list(kwargs.get("bearing_elements", []))
+        self.point_mass_elements = list(kwargs.get("point_mass_elements", []))
+        nodes = [0]
+        for element in self.shaft_elements:
+            nodes.extend([int(element.n), int(element.n) + 1])
+        for element in [*self.disk_elements, *self.bearing_elements, *self.point_mass_elements]:
+            if hasattr(element, "n"):
+                nodes.append(int(element.n))
+            linked = getattr(element, "n_link", None)
+            if linked is not None:
+                nodes.append(int(linked))
+        self.ndof = (max(nodes) + 1) * self.number_dof
         self.calls = []
+
+    def K(self, frequency):
+        import numpy as np
+        return np.zeros((self.ndof, self.ndof), dtype=float)
 
     def run_modal(self, **kwargs):
         self.calls.append(("modal", kwargs))
