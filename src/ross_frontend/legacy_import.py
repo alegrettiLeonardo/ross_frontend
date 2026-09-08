@@ -15,8 +15,10 @@ from .domain import (
     RotorProject,
     ShaftSectionSpec,
     SupportSpec,
+    UMPRegionSpec,
     UnbalanceSpec,
 )
+from .ross_ext.ump import LEGACY_KGF_MM2_TO_N_M2, legacy_ump_to_si
 
 _GRID_KEY = re.compile(r"^(\d+)\s*,\s*(\d+)$")
 
@@ -123,6 +125,17 @@ def _rotordin_disk_inertias(mass_kg: float, length_mm: float, od_mm: float, id_m
     return diametral, polar
 
 
+def _convert_legacy_ump(value: float, source_unit: str) -> tuple[float, str, float]:
+    unit = source_unit.strip().casefold().replace(" ", "")
+    if unit in {"kgf/mm2", "kgf/mm^2", "kgf/mm²"}:
+        return legacy_ump_to_si(value), "kgf/mm²", LEGACY_KGF_MM2_TO_N_M2
+    if unit in {"n/m2", "n/m^2", "n/m²"}:
+        return float(value), "N/m²", 1.0
+    raise LegacyImportError(
+        f"Unsupported legacy UMP source unit {source_unit!r}; use 'kgf/mm2' or 'N/m2'."
+    )
+
+
 def _table_bearing(row: dict[int, str], bearing_index: int) -> CoefficientBearingSpec:
     raw = _cell(row, 11).strip()
     position = _number(_cell(row, 0))
@@ -170,7 +183,12 @@ def _table_bearing(row: dict[int, str], bearing_index: int) -> CoefficientBearin
     )
 
 
-def loads_irdin_project(text: str, *, source_name: str = "legacy.irdin") -> RotorProject:
+def loads_irdin_project(
+    text: str,
+    *,
+    source_name: str = "legacy.irdin",
+    ump_source_unit: str = "kgf/mm2",
+) -> RotorProject:
     document = _parse_document(text)
     header = document.get("irdin", {})
     data = document["dados"]
@@ -205,9 +223,12 @@ def loads_irdin_project(text: str, *, source_name: str = "legacy.irdin") -> Roto
         )
 
     disks: list[DiskSpec] = []
+    ump_regions: list[UMPRegionSpec] = []
     mass_audit: list[dict[str, float | bool]] = []
     warnings: list[str] = []
+    ump_audit: list[dict[str, float | str]] = []
     global_ump = _number(data.get("ump_crg"), 0.0)
+    ump_si, resolved_ump_unit, ump_factor = _convert_legacy_ump(global_ump, ump_source_unit)
     for idx, row in enumerate(_grid_rows(document.get("massas")), start=1):
         xi = _number(_cell(row, 0))
         length = _number(_cell(row, 1))
@@ -223,11 +244,35 @@ def loads_irdin_project(text: str, *, source_name: str = "legacy.irdin") -> Roto
         package = _bool(_cell(row, 4))
         ump = _bool(_cell(row, 5))
         if ump:
-            warnings.append(
-                f"Distributed mass #{idx} has UMP enabled (value={global_ump:g}); UMP load realization is not enabled in ROSS yet."
+            region = UMPRegionSpec(
+                start_mm=xi,
+                end_mm=xi + length,
+                stiffness_per_length_n_m2=ump_si,
+                tag=f"UMP active span {idx}",
+                source_value=global_ump,
+                source_unit=resolved_ump_unit,
+            )
+            ump_regions.append(region)
+            ump_audit.append(
+                {
+                    "mass_row": idx,
+                    "start_mm": xi,
+                    "end_mm": xi + length,
+                    "source_value": global_ump,
+                    "source_unit": resolved_ump_unit,
+                    "conversion_factor_to_n_m2": ump_factor,
+                    "stiffness_per_length_n_m2": ump_si,
+                    "integrated_stiffness_n_m": region.integrated_stiffness_n_m,
+                }
             )
         mass_audit.append(
             {"xi_mm": xi, "length_mm": length, "mass_kg": mass, "od_mm": od, "id_mm": inner, "package": package, "ump": ump}
+        )
+
+    if ump_regions and resolved_ump_unit == "kgf/mm²":
+        warnings.append(
+            "Legacy INI has no explicit UMP unit token; ump_crg was interpreted as kgf/mm² and converted to N/m². "
+            "Use ump_source_unit='N/m2' only for projects known to already store SI values."
         )
 
     bearings = [_table_bearing(row, idx) for idx, row in enumerate(_grid_rows(document.get("mancais")), start=1)]
@@ -306,6 +351,7 @@ def loads_irdin_project(text: str, *, source_name: str = "legacy.irdin") -> Roto
             "user": header.get("usuario", ""),
             "warnings": warnings,
             "distributed_mass_audit": mass_audit,
+            "ump_audit": ump_audit,
         },
         "response": {
             "initial_rpm": _number(data.get("d_rpmi"), 0.0),
@@ -326,6 +372,7 @@ def loads_irdin_project(text: str, *, source_name: str = "legacy.irdin") -> Roto
         unbalances=unbalances,
         probes=probes,
         supports=supports,
+        ump_regions=ump_regions,
         analyses=analyses,
         metadata=metadata,
     )
@@ -333,9 +380,17 @@ def loads_irdin_project(text: str, *, source_name: str = "legacy.irdin") -> Roto
     return project
 
 
-def load_irdin_project(path: str | Path) -> RotorProject:
+def load_irdin_project(
+    path: str | Path,
+    *,
+    ump_source_unit: str = "kgf/mm2",
+) -> RotorProject:
     source = Path(path)
-    return loads_irdin_project(_read_text(source), source_name=source.name)
+    return loads_irdin_project(
+        _read_text(source),
+        source_name=source.name,
+        ump_source_unit=ump_source_unit,
+    )
 
 
 __all__ = ["LegacyImportError", "load_irdin_project", "loads_irdin_project"]
