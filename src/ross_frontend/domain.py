@@ -122,6 +122,46 @@ class ProbeSpec:
 
 
 @dataclass(slots=True)
+class UMPRegionSpec:
+    """Linearized Unbalanced Magnetic Pull distributed over an active rotor span.
+
+    ``stiffness_per_length_n_m2`` is the radial electromagnetic stiffness per
+    axial length.  For small perturbations the UMP force density is
+    ``f_ump = k'_ump * u`` and therefore acts as a negative structural
+    stiffness in the equation of motion.
+    """
+
+    start_mm: float
+    end_mm: float
+    stiffness_per_length_n_m2: float
+    tag: str = ""
+    source_value: float | None = None
+    source_unit: str = "N/m^2"
+    model: str = "linearized_negative_stiffness"
+
+    @property
+    def length_mm(self) -> float:
+        return self.end_mm - self.start_mm
+
+    @property
+    def integrated_stiffness_n_m(self) -> float:
+        return self.stiffness_per_length_n_m2 * self.length_mm / 1000.0
+
+    def validate(self, shaft_length_mm: float) -> None:
+        values = (self.start_mm, self.end_mm, self.stiffness_per_length_n_m2)
+        if not all(isfinite(float(v)) for v in values):
+            raise DomainError("UMP region values must be finite.")
+        if self.start_mm < 0 or self.end_mm <= self.start_mm or self.end_mm > shaft_length_mm:
+            raise DomainError(
+                f"UMP region [{self.start_mm:g}, {self.end_mm:g}] mm must lie inside shaft [0, {shaft_length_mm:g}] mm."
+            )
+        if self.stiffness_per_length_n_m2 < 0:
+            raise DomainError("UMP linearized stiffness per length cannot be negative.")
+        if self.model != "linearized_negative_stiffness":
+            raise DomainError(f"Unsupported UMP model: {self.model}")
+
+
+@dataclass(slots=True)
 class SupportSpec:
     bearing_index: int
     kxx: float
@@ -378,9 +418,10 @@ class RotorProject:
     unbalances: list[UnbalanceSpec] = field(default_factory=list)
     probes: list[ProbeSpec] = field(default_factory=list)
     supports: list[SupportSpec] = field(default_factory=list)
+    ump_regions: list[UMPRegionSpec] = field(default_factory=list)
     analyses: AnalysisRequest = field(default_factory=AnalysisRequest)
     metadata: dict[str, Any] = field(default_factory=dict)
-    schema_version: int = 3
+    schema_version: int = 4
 
     @property
     def shaft_length_mm(self) -> float:
@@ -416,6 +457,8 @@ class RotorProject:
             if support.bearing_index in seen_support_bearings:
                 raise DomainError("Only one flexible support may be associated with each bearing.")
             seen_support_bearings.add(support.bearing_index)
+        for ump in self.ump_regions:
+            ump.validate(length)
         self.analyses.validate()
 
     def to_dict(self) -> dict[str, Any]:
