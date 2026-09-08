@@ -65,15 +65,22 @@ class RossBackend:
                 "domain_count": len(project.supports),
                 "ross_topology": (
                     "BearingElement(rotor_n, n_link=housing) + "
-                    "PointMass(housing, mx=my=mass, mz=0) + "
+                    "PointMass(housing, mx=my=mz=mass) + "
                     "BearingElement(housing)->ground"
                 ),
                 "housing_link_nodes": {
                     str(index): node for index, node in build.support_link_node_by_bearing.items()
                 },
                 "housing_mass_elements": len(build.support_mass_elements),
-                "axial_housing_mass": 0.0,
-                "reason": "Canonical ROSS 2.3.0 linked-bearing/support topology; preserves lateral pedestal DOFs.",
+                "lateral_housing_mass_source": "SupportSpec.mass_kg mapped to x/y",
+                "support_link_axial_completion": (
+                    "PointMass mz=mass_kg is a ROSS 3-DOF n_link numerical completion; "
+                    "the axial housing DOF has zero K/C and zero off-diagonal M coupling to the lateral subsystem"
+                ),
+                "reason": (
+                    "Canonical ROSS 2.3.0 linked-bearing/support topology. Positive mz prevents a singular global "
+                    "mass matrix while leaving the historical RotorDin lateral x/z dynamics unchanged."
+                ),
             },
             "concentrated_masses": {
                 "domain_count": len(project.point_masses),
