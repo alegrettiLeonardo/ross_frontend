@@ -116,6 +116,27 @@ def test_real_w60_legacy_ump_is_continuous_across_internal_station():
     )
     assert all(item.legacy_rotary_term for item in build.ump_contributions)
 
+    # The only PointMass is the historical [Concent] mass. Housing masses live
+    # on the native support BearingElements at the link DOFs.
+    assert len(build.point_mass_elements) == 1
+    front_support = build.bearing_elements[1]
+    rear_support = build.bearing_elements[3]
+    assert front_support.n == build.support_link_node_by_bearing[0]
+    assert rear_support.n == build.support_link_node_by_bearing[1]
+    assert np.asarray(front_support.M(0.0))[0, 0] == pytest.approx(175.0)
+    assert np.asarray(front_support.M(0.0))[1, 1] == pytest.approx(175.0)
+    assert np.asarray(front_support.M(0.0))[2, 2] == pytest.approx(0.0)
+    assert np.asarray(rear_support.M(0.0))[0, 0] == pytest.approx(175.0)
+    assert np.asarray(rear_support.M(0.0))[1, 1] == pytest.approx(175.0)
+
+    global_mass = np.asarray(build.rotor.M(0.0), dtype=float)
+    front_dofs = list(front_support.dof_global_index.values())
+    rear_dofs = list(rear_support.dof_global_index.values())
+    assert global_mass[front_dofs[0], front_dofs[0]] == pytest.approx(175.0)
+    assert global_mass[front_dofs[1], front_dofs[1]] == pytest.approx(175.0)
+    assert global_mass[rear_dofs[0], rear_dofs[0]] == pytest.approx(175.0)
+    assert global_mass[rear_dofs[1], rear_dofs[1]] == pytest.approx(175.0)
+
     k_without = np.asarray(build.rotor.K_without_ump(0.0), dtype=float)
     k_ump = np.asarray(build.K_ump, dtype=float)
     assert np.linalg.norm(k_ump) > 0.0
