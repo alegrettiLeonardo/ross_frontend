@@ -1,5 +1,6 @@
 """Scientific extensions that preserve RotorDin-specific physics on top of ROSS."""
 
+from .flexible_support import make_flexible_support_element_class
 from .ump import (
     LEGACY_KGF_MM2_TO_N_M2,
     ROTORDIN_LEGACY_MAX_REGIONS,
@@ -24,6 +25,7 @@ __all__ = [
     "assemble_ump_global",
     "consistent_ump_matrix",
     "legacy_ump_to_si",
+    "make_flexible_support_element_class",
     "make_ump_rotor_class",
     "rotordin_legacy_ump_matrix",
 ]
