@@ -6,6 +6,15 @@ calculation cannot be compared consistently (missing/non-finite data, mismatched
 speed/probe counts). Numerical similarity thresholds must be justified from the
 correlation evidence before they become release gates.
 
+Two unbalance magnitude interpretations are reported deliberately:
+
+* ``PHYSICAL_G_MM`` converts the legacy numeric field as g.mm -> kg.m (1e-6).
+* ``ROTORDIN_RAW`` reproduces the Fortran execution, which reads the same VALUE
+  and uses it directly in ``mu * omega**2`` with no conversion.
+
+The second path is a compatibility diagnostic, not a claim that the legacy source
+field has a validated SI unit.
+
 RotorDin and ROSS use equivalent synchronous unbalance force vectors with a
 constant complex phase factor. The legacy RotorDin formulation is proportional
 to ``[i, 1]`` while ROSS uses ``[1, -i]``; therefore ROSS is globally -90 deg
@@ -33,6 +42,8 @@ CASE_DIR = ROOT / "cases" / "OP-W60-500-60Hz-IC611-P3"
 INPUT = CASE_DIR / "irdin_input.txt"
 REFERENCE = CASE_DIR / "rotordin_unbalance_keypoints.csv"
 PHASE_CONVENTION_ADJUSTMENT_DEG = 90.0
+PHYSICAL_G_MM_TO_KG_M = 1e-6
+ROTORDIN_RAW_TO_KG_M = 1.0
 
 
 def load_reference(path: Path) -> tuple[list[float], list[list[float]], list[list[float]]]:
@@ -60,13 +71,23 @@ def percentile(values: list[float], q: float) -> float:
     return float(np.percentile(np.asarray(values, dtype=float), q))
 
 
-def projected_responses(rotor, build, project, rpm: list[float]):
+def projected_responses(
+    rotor,
+    build,
+    project,
+    rpm: list[float],
+    *,
+    source_value_to_kg_m: float,
+):
     speed = rpm_to_rad_s(rpm)
     nodes = [
         build.node_by_position_mm[RossModelBuilder._p(item.position_mm)]
         for item in project.unbalances
     ]
-    magnitude = [item.magnitude_g_mm * 1e-6 for item in project.unbalances]
+    magnitude = [
+        item.magnitude_g_mm * source_value_to_kg_m
+        for item in project.unbalances
+    ]
     phase = [item.phase_deg * pi / 180.0 for item in project.unbalances]
     native = rotor.run_unbalance_response(
         node=nodes,
@@ -168,19 +189,54 @@ if __name__ == "__main__":
         "Phase convention: ROSS force vector is -90 deg relative to RotorDin; "
         f"aligned comparison adds +{PHASE_CONVENTION_ADJUSTMENT_DEG:g} deg to ROSS phase."
     )
+    print(
+        "Legacy VALUE semantics: RotorDin reads VALUE and uses it directly as mu in mu*omega^2; "
+        "the source field has no validated unit declaration in this file."
+    )
     print("Unbalance planes: " + ", ".join(
-        f"x={item.position_mm:g} mm, U={item.magnitude_g_mm:g} g.mm, phase={item.phase_deg:g} deg"
+        f"x={item.position_mm:g} mm, source VALUE={item.magnitude_g_mm:g}, phase={item.phase_deg:g} deg"
         for item in project.unbalances
     ))
     print("Production dynamic path: UmpRotor" if build.rotor is not build.base_rotor else "Production dynamic path: native Rotor")
 
-    production = projected_responses(build.rotor, build, project, rpm)
-    production_metrics = summarize("UMP", rpm, reference_amp, reference_phase, production)
+    physical = projected_responses(
+        build.rotor,
+        build,
+        project,
+        rpm,
+        source_value_to_kg_m=PHYSICAL_G_MM_TO_KG_M,
+    )
+    physical_metrics = summarize(
+        "PHYSICAL_G_MM_UMP", rpm, reference_amp, reference_phase, physical
+    )
+
+    legacy_raw = projected_responses(
+        build.rotor,
+        build,
+        project,
+        rpm,
+        source_value_to_kg_m=ROTORDIN_RAW_TO_KG_M,
+    )
+    legacy_raw_metrics = summarize(
+        "ROTORDIN_RAW_UMP", rpm, reference_amp, reference_phase, legacy_raw
+    )
 
     # Diagnostic only: isolate how much the legacy-compatible UMP extension shifts
-    # the response. This is not a substitute production model.
-    base = projected_responses(build.base_rotor, build, project, rpm)
-    base_metrics = summarize("NO_UMP_DIAGNOSTIC", rpm, reference_amp, reference_phase, base)
+    # the RotorDin-raw compatibility response. This is not a substitute production model.
+    legacy_raw_base = projected_responses(
+        build.base_rotor,
+        build,
+        project,
+        rpm,
+        source_value_to_kg_m=ROTORDIN_RAW_TO_KG_M,
+    )
+    legacy_raw_base_metrics = summarize(
+        "ROTORDIN_RAW_NO_UMP_DIAGNOSTIC",
+        rpm,
+        reference_amp,
+        reference_phase,
+        legacy_raw_base,
+    )
 
     payload = {
         "case": "OP-W60-500-60Hz-IC611-P3",
@@ -188,10 +244,15 @@ if __name__ == "__main__":
         "reference_points": len(rpm),
         "rpm_start": rpm[0],
         "rpm_final": rpm[-1],
+        "source_unbalance_value_unit": "legacy_unknown",
+        "physical_g_mm_to_kg_m": PHYSICAL_G_MM_TO_KG_M,
+        "rotordin_raw_to_kg_m_for_compatibility": ROTORDIN_RAW_TO_KG_M,
+        "rotordin_raw_basis": "Fortran entrada.f reads VALUE into mu; resp_f.f uses mu*omega^2 with no conversion",
         "phase_convention_adjustment_deg": PHASE_CONVENTION_ADJUSTMENT_DEG,
         "phase_convention_basis": "RotorDin [i,1] versus ROSS [1,-i] = global -i factor",
         "production_path": type(build.rotor).__name__,
-        "production": production_metrics,
-        "without_ump_diagnostic": base_metrics,
+        "physical_g_mm": physical_metrics,
+        "rotordin_raw_compatibility": legacy_raw_metrics,
+        "rotordin_raw_without_ump_diagnostic": legacy_raw_base_metrics,
     }
     print("W60_CORRELATION_JSON=" + json.dumps(payload, separators=(",", ":"), sort_keys=True))
