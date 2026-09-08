@@ -5,7 +5,7 @@ import pytest
 from ross_frontend.backends.ross.builder import RossModelBuilder
 from ross_frontend.domain import UmpFormulation
 from ross_frontend.legacy_import import LegacyImportError, load_irdin_project
-from fakes import FakeDiskElement, FakeRoss, FakeShaftElement
+from fakes import FakeDiskElement, FakePointMass, FakeRoss, FakeShaftElement
 
 
 CASE = Path(__file__).resolve().parents[1] / "cases" / "OP-W60-500-60Hz-IC611-P3" / "irdin_input.txt"
@@ -72,47 +72,49 @@ def test_w60_case_imports_without_losing_legacy_physics():
     assert any("legacy_unknown" in warning and "fail-closed" in warning for warning in warnings)
 
 
-def test_w60_supports_and_ump_build_as_global_rotor_stiffness_extension():
+def test_w60_supports_and_ump_build_as_native_ross_link_topology():
     project = load_irdin_project(CASE)
     build = RossModelBuilder(FakeRoss()).build(project)
 
     assert set(build.support_link_node_by_bearing) == {0, 1}
     assert len(build.bearing_elements) == 4
     assert len(build.point_mass_elements) == 1
+    assert len(build.support_mass_elements) == 2
 
     front_link = build.support_link_node_by_bearing[0]
     rear_link = build.support_link_node_by_bearing[1]
-    front_shaft_node = build.node_by_position_mm[467.8]
-    rear_shaft_node = build.node_by_position_mm[2202.2]
     rotor_front = build.bearing_elements[0].kwargs
     support_front = build.bearing_elements[1].kwargs
     rotor_rear = build.bearing_elements[2].kwargs
     support_rear = build.bearing_elements[3].kwargs
 
-    # Both support elements retain a valid physical shaft node as n; the housing
-    # exists exclusively as n_link. Their overridden matrices act only on the
-    # lower-right link block.
-    assert rotor_front["n"] == front_shaft_node
+    # Canonical ROSS pattern: rotor bearing points to n_link; ground support and
+    # housing PointMass both live at that link node.
+    assert rotor_front["n"] == build.node_by_position_mm[467.8]
     assert rotor_front["n_link"] == front_link
-    assert rotor_rear["n"] == rear_shaft_node
+    assert rotor_rear["n"] == build.node_by_position_mm[2202.2]
     assert rotor_rear["n_link"] == rear_link
-    assert support_front["n"] == front_shaft_node
-    assert support_front["n_link"] == front_link
-    assert support_rear["n"] == rear_shaft_node
-    assert support_rear["n_link"] == rear_link
-    assert type(build.bearing_elements[1]).__name__ == "RossFlexibleSupportElement"
-    assert type(build.bearing_elements[3]).__name__ == "RossFlexibleSupportElement"
+    assert support_front["n"] == front_link
+    assert support_rear["n"] == rear_link
     assert support_front["kxx"] == pytest.approx(43.68e7)
     assert support_front["kyy"] == pytest.approx(90.34e7)
-    assert support_front["mxx"] == pytest.approx(175.0)
-    assert support_front["myy"] == pytest.approx(175.0)
-    assert support_front["mzz"] == pytest.approx(0.0)
-    assert support_rear["mxx"] == pytest.approx(175.0)
-    assert support_rear["myy"] == pytest.approx(175.0)
+    assert "kzz" not in support_front
 
-    # ROSS 2.3.0 cannot position PointMass at a shaft-only station. The adapter
-    # uses a dynamically equivalent zero-inertia DiskElement carrier and keeps
-    # it separately classified as a point mass in RossBuild.
+    front_mass = build.support_mass_elements[0]
+    rear_mass = build.support_mass_elements[1]
+    assert type(front_mass) is FakePointMass
+    assert type(rear_mass) is FakePointMass
+    assert front_mass.kwargs["n"] == front_link
+    assert rear_mass.kwargs["n"] == rear_link
+    assert front_mass.kwargs["mx"] == pytest.approx(175.0)
+    assert front_mass.kwargs["my"] == pytest.approx(175.0)
+    assert front_mass.kwargs["mz"] == pytest.approx(0.0)
+    assert rear_mass.kwargs["mx"] == pytest.approx(175.0)
+    assert rear_mass.kwargs["my"] == pytest.approx(175.0)
+    assert rear_mass.kwargs["mz"] == pytest.approx(0.0)
+
+    # Shaft-only [Concent] mass is a zero-inertia disk carrier internally but
+    # stays separately classified as a point mass in RossBuild/domain output.
     carrier = build.point_mass_elements[0]
     assert type(carrier) is FakeDiskElement
     assert carrier.kwargs["n"] == build.node_by_position_mm[105.0]
@@ -120,7 +122,7 @@ def test_w60_supports_and_ump_build_as_global_rotor_stiffness_extension():
     assert carrier.kwargs["Id"] == pytest.approx(0.0)
     assert carrier.kwargs["Ip"] == pytest.approx(0.0)
     assert len(build.rotor.disk_elements) == 5
-    assert build.rotor.point_mass_elements == []
+    assert len(build.rotor.point_mass_elements) == 2
 
     assert 918.0 in build.node_by_position_mm
     assert 1275.5 in build.node_by_position_mm
