@@ -12,13 +12,46 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
     """Build a deterministic RotorDin-compatibility rotor on top of ROSS.
 
     This migration/regression adapter keeps the verified topology but reproduces
-    two historical numerical contracts that differ from native ROSS:
+    historical numerical contracts that differ from native ROSS:
 
     * shaft lateral M/K/G are the exact ``coemas/coerig/coegir`` matrices;
-    * TABLE bearings use ``intlag`` local three-point quadratic interpolation.
+    * TABLE bearings use ``intlag`` local three-point quadratic interpolation;
+    * the RotorDin default ``DIV/MXDIV`` rule subdivides the first largest gap.
 
-    New projects continue to use ``RossModelBuilder`` and native ROSS physics.
+    The mesh rule is parameterized because the current domain schema does not yet
+    expose the legacy UI's ``s_div``/``s_mxdiv`` fields. For the W60 golden case
+    they are explicitly 1 and 3. New projects continue to use
+    ``RossModelBuilder`` and native ROSS physics.
     """
+
+    def __init__(self, ross_module=None, *, min_divisions: int = 1, max_divisions: int = 3):
+        super().__init__(ross_module=ross_module)
+        self.min_divisions = int(min_divisions)
+        self.max_divisions = int(max_divisions)
+        if self.min_divisions < 1 or self.max_divisions < self.min_divisions:
+            raise ValueError("RotorDin legacy DIV/MXDIV must satisfy 1 <= DIV <= MXDIV.")
+
+    def _breakpoints(self, project) -> list[float]:
+        """Reproduce W60 ``predad.f`` automatic subdivision for LDR=0.
+
+        ``predad`` first merges the physical stations, finds the first largest
+        distance between adjacent positions and applies MXDIV to that interval;
+        every other interval receives DIV when no explicit per-section DIV is
+        supplied. The W60 writer emits all section DIV values as zero, so this is
+        the exact rule used by the golden reference.
+        """
+        physical = super()._breakpoints(project)
+        if len(physical) < 2:
+            return physical
+        gaps = [physical[i + 1] - physical[i] for i in range(len(physical) - 1)]
+        largest_index = max(range(len(gaps)), key=gaps.__getitem__)
+        refined = [physical[0]]
+        for i, gap in enumerate(gaps):
+            divisions = self.max_divisions if i == largest_index else self.min_divisions
+            x0 = physical[i]
+            for j in range(1, divisions + 1):
+                refined.append(self._p(x0 + gap * j / divisions))
+        return sorted(set(refined))
 
     def _build_bearing(self, spec, node_by_position, *, n_link_override: int | None = None):
         if not isinstance(spec, CoefficientBearingSpec) or spec.frequency_rpm is None:
@@ -58,9 +91,10 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
         if "legacy_import" not in project.metadata:
             raise ValueError("RotorDinLegacyModelBuilder requires a legacy-imported RotorProject.")
 
-        # Polymorphic _build_bearing() means this first pass already has RotorDin
-        # TABLE interpolation. The shaft is replaced below because the base builder
-        # intentionally remains native ROSS for production projects.
+        # Polymorphic _breakpoints() and _build_bearing() mean this pass already
+        # has the RotorDin W60 mesh and TABLE interpolation. The shaft matrices
+        # are replaced below because the production builder intentionally remains
+        # native ROSS.
         native = super().build(project)
         legacy_cls = make_rotordin_legacy_shaft_class(self.rs.ShaftElement)
         shaft_elements = []
@@ -109,9 +143,20 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
             ump_contributions = []
             ump_audit = {"active": False, "formulations": [], "element_contributions": []}
 
+        physical_points = super()._breakpoints(project)
+        refined_points = self._breakpoints(project)
+        inserted_points = [value for value in refined_points if value not in set(physical_points)]
         ump_audit = dict(ump_audit)
         ump_audit["shaft_matrix_formulation"] = "rotordin_coemas_coerig_coegir"
         ump_audit["bearing_table_interpolation"] = "rotordin_intlag_local_quadratic"
+        ump_audit["legacy_mesh"] = {
+            "rule": "predad_first_largest_gap_DIV_MXDIV",
+            "min_divisions": self.min_divisions,
+            "max_divisions": self.max_divisions,
+            "physical_station_count": len(physical_points),
+            "refined_station_count": len(refined_points),
+            "inserted_positions_mm": inserted_points,
+        }
 
         return RossBuild(
             rotor=rotor,
