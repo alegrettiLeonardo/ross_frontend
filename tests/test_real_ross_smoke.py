@@ -104,7 +104,7 @@ def test_real_ross_ump_rotor_has_single_global_negative_stiffness_path():
 
 
 @pytest.mark.ross
-def test_real_w60_legacy_ump_is_continuous_across_internal_station():
+def test_real_w60_legacy_ump_supports_and_point_mass_are_matrix_equivalent():
     project = load_irdin_project(CASE)
     build = RossModelBuilder().build(project)
 
@@ -116,26 +116,51 @@ def test_real_w60_legacy_ump_is_continuous_across_internal_station():
     )
     assert all(item.legacy_rotary_term for item in build.ump_contributions)
 
-    # The only PointMass is the historical [Concent] mass. Housing masses live
-    # on the native support BearingElements at the link DOFs.
+    # The historical 34 kg [Concent] item is carried by a zero-inertia native
+    # DiskElement because ROSS 2.3.0 cannot position PointMass at shaft-only
+    # stations. Its local mass matrix is exactly the intended translational mass.
     assert len(build.point_mass_elements) == 1
+    carrier = build.point_mass_elements[0]
+    assert type(carrier).__name__ == "DiskElement"
+    carrier_m = np.asarray(carrier.M(), dtype=float)
+    assert np.diag(carrier_m)[:3] == pytest.approx([34.0, 34.0, 34.0])
+    assert np.diag(carrier_m)[3:] == pytest.approx([0.0, 0.0, 0.0])
+    assert np.allclose(carrier.G(), np.zeros((6, 6)), atol=1e-12)
+
     front_support = build.bearing_elements[1]
     rear_support = build.bearing_elements[3]
-    assert front_support.n == build.support_link_node_by_bearing[0]
-    assert rear_support.n == build.support_link_node_by_bearing[1]
-    assert np.asarray(front_support.M(0.0))[0, 0] == pytest.approx(175.0)
-    assert np.asarray(front_support.M(0.0))[1, 1] == pytest.approx(175.0)
-    assert np.asarray(front_support.M(0.0))[2, 2] == pytest.approx(0.0)
-    assert np.asarray(rear_support.M(0.0))[0, 0] == pytest.approx(175.0)
-    assert np.asarray(rear_support.M(0.0))[1, 1] == pytest.approx(175.0)
+    assert type(front_support).__name__ == "RossFlexibleSupportElement"
+    assert type(rear_support).__name__ == "RossFlexibleSupportElement"
+    assert front_support.n == build.node_by_position_mm[467.8]
+    assert rear_support.n == build.node_by_position_mm[2202.2]
+    assert front_support.n_link == build.support_link_node_by_bearing[0]
+    assert rear_support.n_link == build.support_link_node_by_bearing[1]
+
+    # Support-to-ground matrices must act only on housing/link DOFs. The upper
+    # rotor block and cross blocks are identically zero.
+    front_m = np.asarray(front_support.M(0.0), dtype=float)
+    front_k = np.asarray(front_support.K(0.0), dtype=float)
+    front_c = np.asarray(front_support.C(0.0), dtype=float)
+    for matrix in (front_m, front_k, front_c):
+        assert matrix.shape == (6, 6)
+        assert np.allclose(matrix[:3, :], 0.0, atol=1e-12)
+        assert np.allclose(matrix[:, :3], 0.0, atol=1e-12)
+
+    assert np.diag(front_m)[3:] == pytest.approx([175.0, 175.0, 0.0])
+    assert front_k[3, 3] == pytest.approx(project.supports[0].kxx)
+    assert front_k[4, 4] == pytest.approx(project.supports[0].kzz)
+    assert front_c[3, 3] == pytest.approx(project.supports[0].cxx)
+    assert front_c[4, 4] == pytest.approx(project.supports[0].czz)
 
     global_mass = np.asarray(build.rotor.M(0.0), dtype=float)
     front_dofs = list(front_support.dof_global_index.values())
     rear_dofs = list(rear_support.dof_global_index.values())
-    assert global_mass[front_dofs[0], front_dofs[0]] == pytest.approx(175.0)
-    assert global_mass[front_dofs[1], front_dofs[1]] == pytest.approx(175.0)
-    assert global_mass[rear_dofs[0], rear_dofs[0]] == pytest.approx(175.0)
-    assert global_mass[rear_dofs[1], rear_dofs[1]] == pytest.approx(175.0)
+    assert len(front_dofs) == 6
+    assert len(rear_dofs) == 6
+    assert global_mass[front_dofs[3], front_dofs[3]] == pytest.approx(175.0)
+    assert global_mass[front_dofs[4], front_dofs[4]] == pytest.approx(175.0)
+    assert global_mass[rear_dofs[3], rear_dofs[3]] == pytest.approx(175.0)
+    assert global_mass[rear_dofs[4], rear_dofs[4]] == pytest.approx(175.0)
 
     k_without = np.asarray(build.rotor.K_without_ump(0.0), dtype=float)
     k_ump = np.asarray(build.K_ump, dtype=float)
