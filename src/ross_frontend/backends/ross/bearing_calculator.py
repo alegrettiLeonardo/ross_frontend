@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import degrees
+from math import degrees, isfinite
 from typing import Any, Callable
 
 from ...domain import CylindricalBearingSpec
@@ -59,14 +59,7 @@ class BearingCalculationResult:
 
 
 class RossBearingCalculator:
-    """Calculate one bearing independently from the complete rotor.
-
-    Fluid-film constructors in ROSS execute their Reynolds/THD solution and expose
-    a ``FluidFilmBearingResults`` object through ``_results``. This adapter turns
-    those native results into solver-neutral data for Bearing Studio. Simple K/C
-    and rolling-element bearings use the same path and return their native dynamic
-    coefficient arrays without pretending to have pressure/temperature fields.
-    """
+    """Calculate a bearing independently and normalize native ROSS results."""
 
     def __init__(self, builder: RossModelBuilder | None = None):
         self.builder = builder or RossModelBuilder()
@@ -143,20 +136,18 @@ class RossBearingCalculator:
         if len(speeds) == 1 and count > 1:
             speeds *= count
 
-        def at(values: list, i: int) -> float:
+        def at(values: list, index: int) -> float:
             if not values:
                 return 0.0
-            return float(values[i] if i < len(values) else values[-1])
+            return float(values[index] if index < len(values) else values[-1])
 
-        rows = []
-        for i in range(count):
-            rows.append(
-                BearingCoefficientRow(
-                    rpm=float(speeds[i] if i < len(speeds) else speeds[-1]),
-                    **{name: at(arrays[name], i) for name in names},
-                )
+        return [
+            BearingCoefficientRow(
+                rpm=float(speeds[i] if i < len(speeds) else speeds[-1]),
+                **{name: at(arrays[name], i) for name in names},
             )
-        return rows
+            for i in range(count)
+        ]
 
     @classmethod
     def _fluid_operating_points(cls, results: Any, speeds: list[float]) -> list[BearingOperatingPoint]:
@@ -169,24 +160,34 @@ class RossBearingCalculator:
             film_values = list(cls._flatten(film_fields[i])) if i < len(film_fields) else []
             temp_values = list(cls._flatten(temp_fields[i])) if i < len(temp_fields) else []
             pressure_values = list(cls._flatten(pressure_fields[i])) if i < len(pressure_fields) else []
-            max_temp_k = max(temp_values) if temp_values else None
+            max_temp_k = max(temp_values) if temp_values else cls._scalar(out.get("max_pad_temperature"))
             message_raw = out.get("non_convergence", [""])
             message = str(message_raw[0] if isinstance(message_raw, (list, tuple)) and message_raw else message_raw or "")
             flow_m3_s = cls._scalar(out.get("differential_flow_rate"))
             power_w = cls._scalar(out.get("power_loss"))
+            max_pressure = cls._scalar(out.get("max_pressure"))
+            if max_pressure is None and pressure_values:
+                max_pressure = max(pressure_values)
+            eccentricity = cls._scalar(out.get("eccentricity"))
+            attitude = cls._scalar(out.get("attitude"))
+            numeric = [eccentricity, attitude, max_pressure, power_w, flow_m3_s]
+            invalid = any(v is not None and not isfinite(v) for v in numeric)
+            converged = not message.strip() and not invalid and bool(pressure_values or eccentricity is not None)
+            if invalid and not message.strip():
+                message = "ROSS returned non-finite values for this operating point."
             points.append(
                 BearingOperatingPoint(
                     rpm=float(speeds[i] if i < len(speeds) else 0.0),
-                    eccentricity_ratio=cls._scalar(out.get("eccentricity")),
-                    attitude_deg=(None if cls._scalar(out.get("attitude")) is None else degrees(cls._scalar(out.get("attitude")))),
-                    min_film_thickness_mm=(min(film_values) * 1000.0 if film_values else None),
-                    max_pressure_pa=(cls._scalar(out.get("y_max_p")) if out.get("y_max_p") is not None else (max(pressure_values) if pressure_values else None)),
-                    max_temperature_c=(max_temp_k - 273.15 if max_temp_k is not None and max_temp_k > 100.0 else None),
-                    power_loss_kw=(power_w / 1000.0 if power_w is not None else None),
-                    flow_l_min=(flow_m3_s * 60000.0 if flow_m3_s is not None else None),
+                    eccentricity_ratio=eccentricity,
+                    attitude_deg=None if attitude is None else degrees(attitude),
+                    min_film_thickness_mm=min(film_values) * 1000.0 if film_values else None,
+                    max_pressure_pa=max_pressure,
+                    max_temperature_c=(max_temp_k - 273.15 if max_temp_k is not None and max_temp_k > 100.0 else max_temp_k),
+                    power_loss_kw=power_w / 1000.0 if power_w is not None else None,
+                    flow_l_min=flow_m3_s * 60000.0 if flow_m3_s is not None else None,
                     journal_x_over_clearance=cls._scalar(out.get("xj_cb")),
                     journal_y_over_clearance=cls._scalar(out.get("yj_cb")),
-                    converged=not bool(message.strip()),
+                    converged=converged,
                     convergence_message=message.strip(),
                 )
             )
@@ -195,14 +196,13 @@ class RossBearingCalculator:
     def calculate(self, spec, progress: BearingProgress | None = None) -> BearingCalculationResult:
         spec.validate()
         self._emit(progress, f"Building {type(spec).__name__} with ROSS...")
-        # This adapter lives in the same backend package and deliberately reuses
-        # the single authoritative construction path from RossModelBuilder.
         node_map = {self.builder._p(spec.position_mm): 0}
         bearing = self.builder._build_bearing(spec, node_map)
         self._emit(progress, "ROSS bearing object created; collecting dynamic coefficients...")
         coefficients = self._coefficient_rows(bearing, spec)
         native = getattr(bearing, "_results", None)
         speeds = [row.rpm for row in coefficients]
+
         if native is None:
             operating_points: list[BearingOperatingPoint] = []
             if isinstance(spec, CylindricalBearingSpec):
@@ -219,7 +219,7 @@ class RossBearingCalculator:
             self._emit(progress, "Bearing calculation completed.")
             return BearingCalculationResult(type(spec).__name__, spec.tag, coefficients, operating_points)
 
-        self._emit(progress, "Native BearingResults found; extracting THD fields and operating points...")
+        self._emit(progress, "Native FluidFilmBearingResults found; extracting THD fields and operating points...")
         operating_points = self._fluid_operating_points(native, speeds)
         initial = getattr(native, "initial_time", None)
         final = getattr(native, "final_time", None)
@@ -236,5 +236,5 @@ class RossBearingCalculator:
             axial_grids_mm=[self._scale_nested(v, 1000.0) for v in getattr(native, "z_grids", [])],
             execution_time_s=execution,
         )
-        self._emit(progress, "Native ROSS BearingResults extraction completed.")
+        self._emit(progress, "Native ROSS FluidFilmBearingResults extraction completed.")
         return result
