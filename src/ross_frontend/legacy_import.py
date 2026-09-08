@@ -15,10 +15,16 @@ from .domain import (
     RotorProject,
     ShaftSectionSpec,
     SupportSpec,
+    UmpFormulation,
     UMPRegionSpec,
     UnbalanceSpec,
 )
-from .ross_ext.ump import LEGACY_KGF_MM2_TO_N_M2, legacy_ump_to_si
+from .ross_ext.ump import (
+    LEGACY_KGF_MM2_TO_N_M2,
+    ROTORDIN_LEGACY_MAX_REGIONS,
+    ROTORDIN_LEGACY_THRESHOLD_N_M2,
+    legacy_ump_to_si,
+)
 
 _GRID_KEY = re.compile(r"^(\d+)\s*,\s*(\d+)$")
 
@@ -125,22 +131,22 @@ def _rotordin_disk_inertias(mass_kg: float, length_mm: float, od_mm: float, id_m
     return diametral, polar
 
 
-def _convert_legacy_ump(value: float, source_unit: str) -> tuple[float, str, float]:
-    """Resolve an explicit UMP source-unit choice to the ROSS SI contract.
-
-    RotorDin's Fortran assembly documents the distributed UMP coefficient as
-    N/m/m (N/m²) and the current frontend writes the stored value directly to
-    that field.  N/m² is therefore the compatibility default.  kgf/mm² remains
-    available only as an explicit opt-in conversion for separately documented
-    external data sets.
-    """
+def _resolve_ump_source(value: float, source_unit: str, formulation: UmpFormulation) -> tuple[float, str, float]:
+    """Resolve legacy source semantics without silently trusting the historical UI label."""
     unit = source_unit.strip().casefold().replace(" ", "")
+    if unit in {"legacy_unknown", "unknown", "legacy"}:
+        if formulation == UmpFormulation.PHYSICAL_CORRECTED:
+            raise LegacyImportError(
+                "PHYSICAL_CORRECTED UMP cannot be imported from a legacy_unknown unit. "
+                "Declare the physical source unit explicitly."
+            )
+        return float(value), "legacy_unknown", 1.0
     if unit in {"n/m2", "n/m^2", "n/m²"}:
         return float(value), "N/m²", 1.0
     if unit in {"kgf/mm2", "kgf/mm^2", "kgf/mm²"}:
         return legacy_ump_to_si(value), "kgf/mm²", LEGACY_KGF_MM2_TO_N_M2
     raise LegacyImportError(
-        f"Unsupported legacy UMP source unit {source_unit!r}; use 'N/m2' or explicitly 'kgf/mm2'."
+        f"Unsupported legacy UMP source unit {source_unit!r}; use legacy_unknown, N/m2, or explicitly kgf/mm2."
     )
 
 
@@ -195,11 +201,13 @@ def loads_irdin_project(
     text: str,
     *,
     source_name: str = "legacy.irdin",
-    ump_source_unit: str = "N/m2",
+    ump_source_unit: str = "legacy_unknown",
+    ump_formulation: UmpFormulation | str = UmpFormulation.ROTORDIN_LEGACY_COMPAT,
 ) -> RotorProject:
     document = _parse_document(text)
     header = document.get("irdin", {})
     data = document["dados"]
+    formulation = UmpFormulation(ump_formulation)
     material = MaterialSpec(
         name="Legacy Steel",
         density_kg_m3=_number(data.get("s_masesp"), 7850.0),
@@ -234,9 +242,9 @@ def loads_irdin_project(
     ump_regions: list[UMPRegionSpec] = []
     mass_audit: list[dict[str, float | bool]] = []
     warnings: list[str] = []
-    ump_audit: list[dict[str, float | str]] = []
+    ump_audit: list[dict[str, float | str | bool]] = []
     global_ump = _number(data.get("ump_crg"), 0.0)
-    ump_si, resolved_ump_unit, ump_factor = _convert_legacy_ump(global_ump, ump_source_unit)
+    ump_si, resolved_ump_unit, ump_factor = _resolve_ump_source(global_ump, ump_source_unit, formulation)
     for idx, row in enumerate(_grid_rows(document.get("massas")), start=1):
         xi = _number(_cell(row, 0))
         length = _number(_cell(row, 1))
@@ -255,10 +263,13 @@ def loads_irdin_project(
             region = UMPRegionSpec(
                 start_mm=xi,
                 end_mm=xi + length,
-                stiffness_per_length_n_m2=ump_si,
+                kxx_prime_n_m2=ump_si,
+                kyy_prime_n_m2=ump_si,
+                formulation=formulation,
                 tag=f"UMP active span {idx}",
                 source_value=global_ump,
                 source_unit=resolved_ump_unit,
+                solver_interpretation="N/m²",
             )
             ump_regions.append(region)
             ump_audit.append(
@@ -269,23 +280,40 @@ def loads_irdin_project(
                     "source_value": global_ump,
                     "source_unit": resolved_ump_unit,
                     "conversion_factor_to_n_m2": ump_factor,
-                    "stiffness_per_length_n_m2": ump_si,
-                    "integrated_stiffness_n_m": region.integrated_stiffness_n_m,
-                    "solver_unit_contract": "N/m²",
+                    "solver_interpretation": "N/m²",
+                    "formulation": formulation.value,
+                    "legacy_threshold_n_m2": ROTORDIN_LEGACY_THRESHOLD_N_M2,
+                    "legacy_rotary_term_enabled": formulation == UmpFormulation.ROTORDIN_LEGACY_COMPAT,
+                    "undefined_region_pointer_bug_emulated": False,
+                    "mkb_contamination_bug_emulated": False,
                 }
             )
         mass_audit.append(
-            {"xi_mm": xi, "length_mm": length, "mass_kg": mass, "od_mm": od, "id_mm": inner, "package": package, "ump": ump}
+            {
+                "xi_mm": xi,
+                "length_mm": length,
+                "mass_kg": mass,
+                "od_mm": od,
+                "id_mm": inner,
+                "package": package,
+                "ump": ump,
+            }
         )
 
-    if ump_regions and resolved_ump_unit == "N/m²":
+    if formulation == UmpFormulation.ROTORDIN_LEGACY_COMPAT and len(ump_regions) > ROTORDIN_LEGACY_MAX_REGIONS:
+        raise LegacyImportError(
+            f"RotorDin legacy compatibility supports at most {ROTORDIN_LEGACY_MAX_REGIONS} UMP regions."
+        )
+
+    if ump_regions and resolved_ump_unit == "legacy_unknown":
         warnings.append(
-            "UMP imported with RotorDin solver compatibility semantics: the stored value is passed directly as N/m². "
-            "The legacy UI label 'kg' is inconsistent with the Fortran solver unit contract and is not used for automatic conversion."
+            "UMP source_unit=legacy_unknown: the historical UI does not establish a physical unit. The numeric legacy value "
+            "is preserved only under ROTORDIN_LEGACY_COMPAT and interpreted by the solver as N/m². "
+            "PHYSICAL_CORRECTED remains fail-closed until the physical source unit is explicitly confirmed."
         )
     elif ump_regions:
         warnings.append(
-            f"UMP source was explicitly declared as {resolved_ump_unit} and converted to the ROSS N/m² contract."
+            f"UMP source was explicitly declared as {resolved_ump_unit}; formulation={formulation.value}."
         )
 
     bearings = [_table_bearing(row, idx) for idx, row in enumerate(_grid_rows(document.get("mancais")), start=1)]
@@ -396,13 +424,15 @@ def loads_irdin_project(
 def load_irdin_project(
     path: str | Path,
     *,
-    ump_source_unit: str = "N/m2",
+    ump_source_unit: str = "legacy_unknown",
+    ump_formulation: UmpFormulation | str = UmpFormulation.ROTORDIN_LEGACY_COMPAT,
 ) -> RotorProject:
     source = Path(path)
     return loads_irdin_project(
         _read_text(source),
         source_name=source.name,
         ump_source_unit=ump_source_unit,
+        ump_formulation=ump_formulation,
     )
 
 
