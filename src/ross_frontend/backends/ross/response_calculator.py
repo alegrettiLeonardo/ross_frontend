@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from math import atan2, cos, degrees, hypot, pi, sin
 from typing import Callable
 
-from ...domain import RotorProject
+from ...domain import ProbeSpec, RotorProject
 from ..coordinates import rpm_to_rad_s
 from .builder import RossModelBuilder
 
@@ -27,6 +27,26 @@ class FrequencyResponseRequest:
             raise ValueError("Frequency response requires at least two speed points.")
         if min(self.input_dof, self.output_dof) < 0:
             raise ValueError("FRF input/output DOF indices cannot be negative.")
+
+
+@dataclass(slots=True)
+class ProjectFrequencyResponseRequest:
+    input_probe_index: int = 0
+    output_probe_index: int = 0
+    start_rpm: float | None = None
+    final_rpm: float | None = None
+    step_rpm: float | None = None
+    modes: list[int] | None = None
+
+    def validate(self):
+        if min(self.input_probe_index, self.output_probe_index) < 0:
+            raise ValueError("FRF probe indices cannot be negative.")
+        if self.start_rpm is not None and self.start_rpm < 0:
+            raise ValueError("FRF initial speed cannot be negative.")
+        if self.final_rpm is not None and self.start_rpm is not None and self.final_rpm <= self.start_rpm:
+            raise ValueError("FRF final speed must exceed initial speed.")
+        if self.step_rpm is not None and self.step_rpm <= 0:
+            raise ValueError("FRF speed step must be positive.")
 
 
 @dataclass(slots=True)
@@ -160,22 +180,34 @@ class RossResponseCalculator:
         return number_dof
 
     @staticmethod
-    def _rotate_probe(x_values, y_values, orientation_deg: float, coordinate: int):
-        """Reproduce RotorDin vrotate + DISPL semantics on complex phasors.
+    def _probe_vector(probe: ProbeSpec) -> tuple[float, float]:
+        angle = probe.orientation_deg * pi / 180.0
+        if probe.coordinate == 1:
+            return cos(angle), sin(angle)
+        if probe.coordinate == 2:
+            return -sin(angle), cos(angle)
+        raise ValueError("Probe coordinate must be 1 or 2.")
 
-        Historical RotorDin first rotates the lateral x/z complex pair by ORIENT
-        and only then selects DISPL=1 (rotated horizontal) or DISPL=2 (rotated
-        vertical). ROSS lateral axes are x/y, so y is used in place of RotorDin z.
-        """
-        angle = orientation_deg * pi / 180.0
-        ca, sa = cos(angle), sin(angle)
+    @classmethod
+    def _rotate_probe(cls, x_values, y_values, orientation_deg: float, coordinate: int):
+        """Reproduce RotorDin vrotate + DISPL semantics on complex phasors."""
+        probe = ProbeSpec(0.0, coordinate, orientation_deg)
+        vx, vy = cls._probe_vector(probe)
         x_data = x_values.tolist() if hasattr(x_values, "tolist") else list(x_values)
         y_data = y_values.tolist() if hasattr(y_values, "tolist") else list(y_values)
-        if coordinate == 1:
-            return [complex(x) * ca + complex(y) * sa for x, y in zip(x_data, y_data)]
-        if coordinate == 2:
-            return [complex(y) * ca - complex(x) * sa for x, y in zip(x_data, y_data)]
-        raise ValueError("Probe coordinate must be 1 or 2.")
+        return [complex(x) * vx + complex(y) * vy for x, y in zip(x_data, y_data)]
+
+    @staticmethod
+    def _project_response_range(project: RotorProject, start, final, step):
+        cfg = project.metadata.get("response", {})
+        start_value = float(start if start is not None else cfg.get("initial_rpm", 0.0))
+        final_value = float(final if final is not None else cfg.get("final_rpm", 0.0))
+        step_value = float(step if step is not None else cfg.get("step_rpm", 0.0))
+        if final_value <= start_value:
+            raise ValueError("Project response speed range is not defined or is invalid.")
+        if step_value <= 0:
+            step_value = (final_value - start_value) / 100.0
+        return start_value, final_value, step_value
 
     def frequency_response(self, project: RotorProject, request: FrequencyResponseRequest, progress: ResponseProgress | None = None):
         request.validate()
@@ -194,6 +226,67 @@ class RossResponseCalculator:
             kind="frequency_response",
             curves=[ComplexResponseCurve(rpm, magnitude, phase, f"H[{request.output_dof},{request.input_dof}]", "m/N")],
             metadata={"input_dof": request.input_dof, "output_dof": request.output_dof},
+        )
+
+    def project_frequency_response(
+        self,
+        project: RotorProject,
+        request: ProjectFrequencyResponseRequest | None = None,
+        progress: ResponseProgress | None = None,
+    ) -> RotorResponseResult:
+        """Return a scalar FRF between physical oriented probes.
+
+        The input is a unit force along the selected input probe direction and the
+        output is displacement along the selected output probe direction. This hides
+        ROSS internal DOF numbering while preserving RotorDin probe orientation.
+        """
+        request = request or ProjectFrequencyResponseRequest()
+        request.validate()
+        project.validate()
+        if not project.probes:
+            raise ValueError("The project has no physical probes for FRF selection.")
+        if request.input_probe_index >= len(project.probes) or request.output_probe_index >= len(project.probes):
+            raise ValueError("FRF probe selection is outside the project probe list.")
+
+        start, final, step = self._project_response_range(project, request.start_rpm, request.final_rpm, request.step_rpm)
+        self._emit(progress, "Building ROSS rotor for physical-probe FRF...")
+        build = self.builder.build(project)
+        rotor = build.rotor
+        number_dof = int(rotor.number_dof)
+        input_probe = project.probes[request.input_probe_index]
+        output_probe = project.probes[request.output_probe_index]
+        input_node = build.node_by_position_mm[self.builder._p(input_probe.position_mm)]
+        output_node = build.node_by_position_mm[self.builder._p(output_probe.position_mm)]
+        in_vec = self._probe_vector(input_probe)
+        out_vec = self._probe_vector(output_probe)
+        rpm, speed = self._stepped_speed_grid(start, final, step)
+
+        self._emit(progress, f"Running physical FRF at {len(rpm)} frequency points...")
+        native = rotor.run_freq_response(speed_range=speed, modes=request.modes)
+        ix, iy = input_node * number_dof, input_node * number_dof + 1
+        ox, oy = output_node * number_dof, output_node * number_dof + 1
+        hxx = native.freq_resp[ox, ix, :]
+        hxy = native.freq_resp[ox, iy, :]
+        hyx = native.freq_resp[oy, ix, :]
+        hyy = native.freq_resp[oy, iy, :]
+        arrays = [v.tolist() if hasattr(v, "tolist") else list(v) for v in (hxx, hxy, hyx, hyy)]
+        values = []
+        for a, b, c, d in zip(*arrays):
+            hx = complex(a) * in_vec[0] + complex(b) * in_vec[1]
+            hy = complex(c) * in_vec[0] + complex(d) * in_vec[1]
+            values.append(out_vec[0] * hx + out_vec[1] * hy)
+        magnitude, phase = self._complex_series(values)
+        label = f"{output_probe.tag or 'Output'} / {input_probe.tag or 'Input'}"
+        self._emit(progress, "Physical-probe frequency response completed.")
+        return RotorResponseResult(
+            kind="project_frequency_response",
+            curves=[ComplexResponseCurve(rpm, magnitude, phase, label, "m/N")],
+            metadata={
+                "input_probe_index": request.input_probe_index,
+                "output_probe_index": request.output_probe_index,
+                "input_node": input_node,
+                "output_node": output_node,
+            },
         )
 
     def unbalance_response(self, project: RotorProject, request: UnbalanceResponseRequest, progress: ResponseProgress | None = None):
@@ -242,12 +335,6 @@ class RossResponseCalculator:
         request: ProjectUnbalanceResponseRequest | None = None,
         progress: ResponseProgress | None = None,
     ) -> RotorResponseResult:
-        """Solve all imported unbalance planes and return each physical probe.
-
-        This is the engineering-facing path used by ROSS Studio. It consumes
-        physical positions from ``RotorProject`` instead of exposing ROSS node/DOF
-        indices to the user.
-        """
         request = request or ProjectUnbalanceResponseRequest()
         request.validate()
         project.validate()
@@ -256,15 +343,7 @@ class RossResponseCalculator:
         if not project.probes:
             raise ValueError("The project has no response probes.")
 
-        cfg = project.metadata.get("response", {})
-        start = float(request.start_rpm if request.start_rpm is not None else cfg.get("initial_rpm", 0.0))
-        final = float(request.final_rpm if request.final_rpm is not None else cfg.get("final_rpm", 0.0))
-        step = float(request.step_rpm if request.step_rpm is not None else cfg.get("step_rpm", 0.0))
-        if final <= start:
-            raise ValueError("Project response speed range is not defined or is invalid.")
-        if step <= 0:
-            step = (final - start) / 100.0
-
+        start, final, step = self._project_response_range(project, request.start_rpm, request.final_rpm, request.step_rpm)
         self._emit(progress, "Building ROSS rotor with imported TABLE bearings and flexible supports...")
         build = self.builder.build(project)
         rotor = build.rotor
