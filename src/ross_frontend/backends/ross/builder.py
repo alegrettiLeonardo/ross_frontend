@@ -14,6 +14,7 @@ from ...domain import (
     ShaftSectionSpec,
     TiltingPadBearingSpec,
 )
+from ...ross_ext.flexible_support import make_flexible_support_element_class
 from ...ross_ext.ump import UMPElementContribution, UMPElementSpan
 from ...ross_ext.ump_rotor import make_ump_rotor_class
 from ..coordinates import rpm_to_rad_s, rotordin_xz_to_ross_xy
@@ -63,10 +64,16 @@ class RossBuild:
 class RossModelBuilder:
     """Translate the frontend domain model into native ROSS objects.
 
-    Shaft, disk, bearing and support elements remain native ROSS objects. Linear
-    UMP is assembled only after the native rotor topology exists and is applied by
-    ``UmpRotor.K()`` as ``K_effective = K_ROSS - K_UMP``. No ShaftElement
-    subclass and no RHS realization are used.
+    Shaft, disk and rotor-bearing elements remain native ROSS objects. RotorDin
+    flexible supports are represented by a small ROSS extension whose ``n`` is
+    the physical bearing station and whose ``n_link`` is the housing node. Its
+    matrices act only on the housing block, producing the topology
+    ``rotor -- bearing -- housing(M) -- support(K/C) -- ground`` without adding
+    dummy shaft elements or modifying vendored ROSS.
+
+    Linear UMP is assembled only after the native rotor topology exists and is
+    applied by ``UmpRotor.K()`` as ``K_effective = K_ROSS - K_UMP``. No
+    ShaftElement subclass and no UMP RHS realization are used.
     """
 
     _POS_DIGITS = 9
@@ -121,11 +128,17 @@ class RossModelBuilder:
 
     @staticmethod
     def _rotor_kwargs(shaft_elements, disk_elements, bearing_elements, point_mass_elements):
+        # ROSS 2.3.0's Rotor summary code positions PointMass objects through a
+        # bearing lookup and fails for a legitimate point mass at a shaft-only
+        # station. A zero-inertia DiskElement has exactly the same translational
+        # mass matrix and zero gyroscopic/inertial rotation terms, so point-mass
+        # carriers are supplied to ROSS as disks while remaining separately
+        # tracked in RossBuild for engineering audit/reporting.
         return dict(
             shaft_elements=shaft_elements,
-            disk_elements=disk_elements,
+            disk_elements=[*disk_elements, *point_mass_elements],
             bearing_elements=bearing_elements,
-            point_mass_elements=point_mass_elements,
+            point_mass_elements=[],
         )
 
     def build(self, project: RotorProject) -> RossBuild:
@@ -186,10 +199,12 @@ class RossModelBuilder:
             for d in project.disks
         ]
         point_mass_elements = [
-            rs.PointMass(
+            rs.DiskElement(
                 n=node_by_position[self._p(m.position_mm)],
                 m=m.mass_kg,
-                tag=m.tag or None,
+                Id=0.0,
+                Ip=0.0,
+                tag=m.tag or f"Point mass @ {m.position_mm:g} mm",
             )
             for m in project.point_masses
         ]
@@ -197,6 +212,7 @@ class RossModelBuilder:
         support_by_bearing = {support.bearing_index: support for support in project.supports}
         support_link_node_by_bearing: dict[int, int] = {}
         bearing_elements: list[Any] = []
+        support_element_cls = make_flexible_support_element_class(rs.BearingElement)
         next_link_node = len(points)
         for index, bearing in enumerate(project.bearings):
             support = support_by_bearing.get(index)
@@ -209,8 +225,15 @@ class RossModelBuilder:
                 )
             link_node = next_link_node
             next_link_node += 1
+            shaft_node = node_by_position[self._p(bearing.position_mm)]
             support_link_node_by_bearing[index] = link_node
+
+            # Rotor bearing: native ROSS relative K/C between rotor and housing.
             bearing_elements.append(self._build_bearing(bearing, node_by_position, n_link_override=link_node))
+
+            # Housing/support: matrices act only on the n_link block. Keeping n
+            # at the physical bearing station satisfies ROSS 2.3.0's topology
+            # validation while retaining the independent housing DOFs.
             support_coeff = rotordin_xz_to_ross_xy(
                 kxx=support.kxx,
                 kzz=support.kzz,
@@ -221,16 +244,10 @@ class RossModelBuilder:
                 cxz=support.cxz,
                 czx=support.czx,
             )
-            # A ROSS PointMass located directly on a link-only node is not a
-            # supported topology in Rotor.__init__ (the plotting/summary setup
-            # expects point masses to coincide with a shaft/bearing position).
-            # BearingElement already supports translational mass coefficients,
-            # so the pedestal/housing mass is placed on the support-to-ground
-            # element itself. This preserves the independent housing x/y DOFs
-            # and avoids introducing a spurious axial housing mass.
             bearing_elements.append(
-                rs.BearingElement(
-                    n=link_node,
+                support_element_cls(
+                    n=shaft_node,
+                    n_link=link_node,
                     kxx=support_coeff.kxx,
                     kyy=support_coeff.kyy,
                     kxy=support_coeff.kxy,
@@ -239,8 +256,7 @@ class RossModelBuilder:
                     cyy=support_coeff.cyy,
                     cxy=support_coeff.cxy,
                     cyx=support_coeff.cyx,
-                    mxx=support.mass_kg,
-                    myy=support.mass_kg,
+                    housing_mass_kg=support.mass_kg,
                     tag=support.tag or f"Support {index + 1}",
                 )
             )
