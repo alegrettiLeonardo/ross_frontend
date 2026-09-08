@@ -25,7 +25,7 @@ class FakeBuilder:
             cxx=[1e5], cxy=[-2e4], cyx=[3e4], cyy=[1.1e5],
             outputs=[{
                 "eccentricity": [0.42], "attitude": [1.0], "power_loss": [1800.0],
-                "y_max_p": [8e6], "differential_flow_rate": [5e-4],
+                "max_pressure": [8e6], "differential_flow_rate": [5e-4],
                 "xj_cb": [0.2], "yj_cb": [-0.37], "non_convergence": [""],
             }],
             pressure_fields=[[[[1e6, 2e6], [3e6, 4e6]]]],
@@ -69,6 +69,7 @@ def test_fluid_film_results_are_converted_to_engineering_units():
     point = result.operating_points[0]
     assert point.eccentricity_ratio == pytest.approx(0.42)
     assert point.min_film_thickness_mm == pytest.approx(0.05)
+    assert point.max_pressure_pa == pytest.approx(8e6)
     assert point.max_temperature_c == pytest.approx(70.0)
     assert point.power_loss_kw == pytest.approx(1.8)
     assert point.flow_l_min == pytest.approx(30.0)
