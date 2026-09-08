@@ -27,19 +27,21 @@ def test_w60_case_imports_without_losing_legacy_physics():
     assert project.disks[1].diametral_inertia_kg_m2 == pytest.approx(43.39742658333333)
     assert project.disks[1].polar_inertia_kg_m2 == pytest.approx(25.176051875)
 
-    # The main active rotor span has UMP enabled.  The legacy INI does not carry
-    # a unit token, so migration records the explicit kgf/mm² -> N/m² assumption.
+    # RotorDin Fortran documents UMP as N/m/m and the current input writer sends
+    # the stored value directly.  Preserve that contract by default even though
+    # the legacy UI label still says "kg".
     assert len(project.ump_regions) == 1
     ump = project.ump_regions[0]
     assert ump.start_mm == pytest.approx(918.0)
     assert ump.end_mm == pytest.approx(1633.0)
     assert ump.source_value == pytest.approx(1.002)
-    assert ump.source_unit == "kgf/mm²"
-    assert ump.stiffness_per_length_n_m2 == pytest.approx(9_826_263.3)
-    assert ump.integrated_stiffness_n_m == pytest.approx(7_025_778.2595)
+    assert ump.source_unit == "N/m²"
+    assert ump.stiffness_per_length_n_m2 == pytest.approx(1.002)
+    assert ump.integrated_stiffness_n_m == pytest.approx(0.71643)
     audit = project.metadata["legacy_import"]["ump_audit"][0]
     assert audit["mass_row"] == 2
-    assert audit["conversion_factor_to_n_m2"] == pytest.approx(9.80665e6)
+    assert audit["conversion_factor_to_n_m2"] == pytest.approx(1.0)
+    assert audit["solver_unit_contract"] == "N/m²"
 
     assert len(project.bearings) == 2
     front, rear = project.bearings
@@ -67,7 +69,7 @@ def test_w60_case_imports_without_losing_legacy_physics():
     assert project.supports[0].kzz == pytest.approx(90.34e7)
 
     warnings = project.metadata["legacy_import"]["warnings"]
-    assert any("UMP" in warning for warning in warnings)
+    assert any("UMP" in warning and "N/m²" in warning for warning in warnings)
 
 
 def test_w60_supports_and_ump_build_into_ross_extensions():
@@ -89,23 +91,23 @@ def test_w60_supports_and_ump_build_into_ross_extensions():
     assert rotor_rear["n_link"] == rear_link
     assert support_front["n"] == front_link
     assert support_rear["n"] == rear_link
-    # RotorDin lateral x/z support stiffness is explicitly mapped to ROSS x/y.
     assert support_front["kxx"] == pytest.approx(43.68e7)
     assert support_front["kyy"] == pytest.approx(90.34e7)
     assert "kzz" not in support_front
 
-    # UMP boundaries become mesh breakpoints and all elements inside the active
-    # 918..1633 mm span carry the same distributed electromagnetic stiffness.
     assert 918.0 in build.node_by_position_mm
     assert 1633.0 in build.node_by_position_mm
     assert build.ump_shaft_elements
+    assert build.ump_contributions
     assert all(
-        element.ump_stiffness_per_length_n_m2 == pytest.approx(9_826_263.3)
+        element.ump_stiffness_per_length_n_m2 == pytest.approx(1.002)
         for element in build.ump_shaft_elements
     )
+    assert len({element.kwargs["tag"] for element in build.shaft_elements}) == len(build.shaft_elements)
 
 
-def test_w60_ump_unit_can_be_explicitly_overridden_for_si_legacy_assets():
-    project = load_irdin_project(CASE, ump_source_unit="N/m2")
-    assert project.ump_regions[0].stiffness_per_length_n_m2 == pytest.approx(1.002)
-    assert project.ump_regions[0].source_unit == "N/m²"
+def test_w60_ump_alternate_kgf_unit_requires_explicit_opt_in():
+    project = load_irdin_project(CASE, ump_source_unit="kgf/mm2")
+    assert project.ump_regions[0].stiffness_per_length_n_m2 == pytest.approx(9_826_263.3)
+    assert project.ump_regions[0].source_unit == "kgf/mm²"
+    assert project.ump_regions[0].integrated_stiffness_n_m == pytest.approx(7_025_778.2595)
