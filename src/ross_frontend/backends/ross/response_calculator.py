@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import atan2, degrees, hypot, pi
+from math import atan2, cos, degrees, hypot, pi, sin
 from typing import Callable
 
 from ...domain import RotorProject
@@ -47,6 +47,22 @@ class UnbalanceResponseRequest:
             raise ValueError("Unbalance magnitude cannot be negative.")
         if self.start_rpm < 0 or self.final_rpm <= self.start_rpm or self.points < 2:
             raise ValueError("Unbalance-response speed range is invalid.")
+
+
+@dataclass(slots=True)
+class ProjectUnbalanceResponseRequest:
+    start_rpm: float | None = None
+    final_rpm: float | None = None
+    step_rpm: float | None = None
+    modes: list[int] | None = None
+
+    def validate(self):
+        if self.start_rpm is not None and self.start_rpm < 0:
+            raise ValueError("Unbalance-response initial speed cannot be negative.")
+        if self.final_rpm is not None and self.start_rpm is not None and self.final_rpm <= self.start_rpm:
+            raise ValueError("Unbalance-response final speed must exceed initial speed.")
+        if self.step_rpm is not None and self.step_rpm <= 0:
+            raise ValueError("Unbalance-response speed step must be positive.")
 
 
 @dataclass(slots=True)
@@ -114,6 +130,14 @@ class RossResponseCalculator:
         return rpm, rpm_to_rad_s(rpm)
 
     @staticmethod
+    def _stepped_speed_grid(start_rpm: float, final_rpm: float, step_rpm: float):
+        count = int((final_rpm - start_rpm) // step_rpm)
+        rpm = [start_rpm + i * step_rpm for i in range(count + 1)]
+        if not rpm or rpm[-1] < final_rpm - 1e-9:
+            rpm.append(final_rpm)
+        return rpm, rpm_to_rad_s(rpm)
+
+    @staticmethod
     def _complex_series(values):
         data = values.tolist() if hasattr(values, "tolist") else list(values)
         magnitude = [abs(complex(v)) for v in data]
@@ -134,6 +158,24 @@ class RossResponseCalculator:
         if not 0 <= node < nodes:
             raise ValueError(f"Node {node} is outside the rotor range [0, {max(nodes - 1, 0)}].")
         return number_dof
+
+    @staticmethod
+    def _rotate_probe(x_values, y_values, orientation_deg: float, coordinate: int):
+        """Reproduce RotorDin vrotate + DISPL semantics on complex phasors.
+
+        Historical RotorDin first rotates the lateral x/z complex pair by ORIENT
+        and only then selects DISPL=1 (rotated horizontal) or DISPL=2 (rotated
+        vertical). ROSS lateral axes are x/y, so y is used in place of RotorDin z.
+        """
+        angle = orientation_deg * pi / 180.0
+        ca, sa = cos(angle), sin(angle)
+        x_data = x_values.tolist() if hasattr(x_values, "tolist") else list(x_values)
+        y_data = y_values.tolist() if hasattr(y_values, "tolist") else list(y_values)
+        if coordinate == 1:
+            return [complex(x) * ca + complex(y) * sa for x, y in zip(x_data, y_data)]
+        if coordinate == 2:
+            return [complex(y) * ca - complex(x) * sa for x, y in zip(x_data, y_data)]
+        raise ValueError("Probe coordinate must be 1 or 2.")
 
     def frequency_response(self, project: RotorProject, request: FrequencyResponseRequest, progress: ResponseProgress | None = None):
         request.validate()
@@ -191,6 +233,97 @@ class RossResponseCalculator:
                 "probe_node": probe_node,
                 "unbalance_magnitude_g_mm": request.magnitude_g_mm,
                 "phase_deg": request.phase_deg,
+            },
+        )
+
+    def project_unbalance_response(
+        self,
+        project: RotorProject,
+        request: ProjectUnbalanceResponseRequest | None = None,
+        progress: ResponseProgress | None = None,
+    ) -> RotorResponseResult:
+        """Solve all imported unbalance planes and return each physical probe.
+
+        This is the engineering-facing path used by ROSS Studio. It consumes
+        physical positions from ``RotorProject`` instead of exposing ROSS node/DOF
+        indices to the user.
+        """
+        request = request or ProjectUnbalanceResponseRequest()
+        request.validate()
+        project.validate()
+        if not project.unbalances:
+            raise ValueError("The project has no unbalance planes.")
+        if not project.probes:
+            raise ValueError("The project has no response probes.")
+
+        cfg = project.metadata.get("response", {})
+        start = float(request.start_rpm if request.start_rpm is not None else cfg.get("initial_rpm", 0.0))
+        final = float(request.final_rpm if request.final_rpm is not None else cfg.get("final_rpm", 0.0))
+        step = float(request.step_rpm if request.step_rpm is not None else cfg.get("step_rpm", 0.0))
+        if final <= start:
+            raise ValueError("Project response speed range is not defined or is invalid.")
+        if step <= 0:
+            step = (final - start) / 100.0
+
+        self._emit(progress, "Building ROSS rotor with imported TABLE bearings and flexible supports...")
+        build = self.builder.build(project)
+        rotor = build.rotor
+        number_dof = int(rotor.number_dof)
+        rpm, speed = self._stepped_speed_grid(start, final, step)
+
+        nodes = [build.node_by_position_mm[self.builder._p(item.position_mm)] for item in project.unbalances]
+        magnitude = [item.magnitude_g_mm * 1e-6 for item in project.unbalances]
+        phase = [item.phase_deg * pi / 180.0 for item in project.unbalances]
+        self._emit(
+            progress,
+            f"Running ROSS unbalance response: {len(nodes)} plane(s), {len(project.probes)} probe(s), {len(rpm)} speed points...",
+        )
+        native = rotor.run_unbalance_response(
+            node=nodes,
+            unbalance_magnitude=magnitude,
+            unbalance_phase=phase,
+            frequency=speed,
+            modes=request.modes,
+        )
+
+        curves: list[ComplexResponseCurve] = []
+        probe_metadata = []
+        for probe in project.probes:
+            node = build.node_by_position_mm[self.builder._p(probe.position_mm)]
+            x_values = native.forced_resp[node * number_dof + 0, :]
+            y_values = native.forced_resp[node * number_dof + 1, :]
+            projected = self._rotate_probe(x_values, y_values, probe.orientation_deg, probe.coordinate)
+            magnitude_values, phase_values = self._complex_series(projected)
+            label = probe.tag or f"x={probe.position_mm:g} mm / coord {probe.coordinate}"
+            curves.append(ComplexResponseCurve(rpm, magnitude_values, phase_values, label, "m"))
+            probe_metadata.append(
+                {
+                    "tag": label,
+                    "position_mm": probe.position_mm,
+                    "coordinate": probe.coordinate,
+                    "orientation_deg": probe.orientation_deg,
+                    "ross_node": node,
+                }
+            )
+
+        self._emit(progress, "Imported-project unbalance response completed.")
+        return RotorResponseResult(
+            kind="project_unbalance_response",
+            curves=curves,
+            metadata={
+                "unbalances": [
+                    {
+                        "position_mm": item.position_mm,
+                        "magnitude_g_mm": item.magnitude_g_mm,
+                        "phase_deg": item.phase_deg,
+                        "ross_node": node,
+                    }
+                    for item, node in zip(project.unbalances, nodes)
+                ],
+                "probes": probe_metadata,
+                "speed_start_rpm": start,
+                "speed_final_rpm": final,
+                "speed_step_rpm": step,
             },
         )
 
