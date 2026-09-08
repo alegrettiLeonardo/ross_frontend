@@ -214,6 +214,7 @@ class PlainJournalBearingSpec:
     oil_supply_pressure_pa: float = 0.0
     oil_flow_l_min: float | None = None
     thermal_type: str | None = None
+    equilibrium_type: str = "match_load"
     film_elements_circumferential: int = 20
     film_elements_axial: int = 10
     tag: str = ""
@@ -228,6 +229,10 @@ class PlainJournalBearingSpec:
             raise DomainError("Plain journal calculations require positive operating speeds.")
         if self.oil_flow_l_min is not None and self.oil_flow_l_min <= 0:
             raise DomainError("Oil flow must be positive when specified.")
+        if self.oil_supply_pressure_pa < 0:
+            raise DomainError("Oil supply pressure cannot be negative.")
+        if self.equilibrium_type not in {"match_load", "match_eccentricity"}:
+            raise DomainError("Unsupported fluid-film equilibrium type.")
 
 
 @dataclass(slots=True)
@@ -246,8 +251,10 @@ class TiltingPadBearingSpec:
     offset: float = 0.5
     load_x_n: float = 0.0
     load_y_n: float = 0.0
+    oil_supply_pressure_pa: float = 0.0
     oil_flow_l_min: float | None = None
     thermal_type: str | None = "full"
+    equilibrium_type: str = "match_load"
     film_elements_circumferential: int = 30
     film_elements_axial: int = 30
     pad_elements_radial: int = 16
@@ -268,6 +275,10 @@ class TiltingPadBearingSpec:
             raise DomainError("Tilting-pad calculations require positive operating speeds.")
         if self.oil_flow_l_min is not None and self.oil_flow_l_min <= 0:
             raise DomainError("Oil flow must be positive when specified.")
+        if self.oil_supply_pressure_pa < 0:
+            raise DomainError("Oil supply pressure cannot be negative.")
+        if self.equilibrium_type not in {"match_load", "match_eccentricity"}:
+            raise DomainError("Unsupported fluid-film equilibrium type.")
 
 
 BearingSpec: TypeAlias = (
