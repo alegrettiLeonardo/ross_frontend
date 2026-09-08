@@ -116,9 +116,7 @@ def test_real_w60_legacy_ump_supports_and_point_mass_are_matrix_equivalent():
     )
     assert all(item.legacy_rotary_term for item in build.ump_contributions)
 
-    # The historical 34 kg [Concent] item is carried by a zero-inertia native
-    # DiskElement because ROSS 2.3.0 cannot position PointMass at shaft-only
-    # stations. Its local mass matrix is exactly the intended translational mass.
+    # Historical [Concent] mass: zero-inertia disk carrier at the same shaft node.
     assert len(build.point_mass_elements) == 1
     carrier = build.point_mass_elements[0]
     assert type(carrier).__name__ == "DiskElement"
@@ -127,40 +125,54 @@ def test_real_w60_legacy_ump_supports_and_point_mass_are_matrix_equivalent():
     assert np.diag(carrier_m)[3:] == pytest.approx([0.0, 0.0, 0.0])
     assert np.allclose(carrier.G(), np.zeros((6, 6)), atol=1e-12)
 
+    # Canonical native ROSS support topology.
+    front_link = build.support_link_node_by_bearing[0]
+    rear_link = build.support_link_node_by_bearing[1]
+    front_rotor_bearing = build.bearing_elements[0]
     front_support = build.bearing_elements[1]
+    rear_rotor_bearing = build.bearing_elements[2]
     rear_support = build.bearing_elements[3]
-    assert type(front_support).__name__ == "RossFlexibleSupportElement"
-    assert type(rear_support).__name__ == "RossFlexibleSupportElement"
-    assert front_support.n == build.node_by_position_mm[467.8]
-    assert rear_support.n == build.node_by_position_mm[2202.2]
-    assert front_support.n_link == build.support_link_node_by_bearing[0]
-    assert rear_support.n_link == build.support_link_node_by_bearing[1]
 
-    # Support-to-ground matrices must act only on housing/link DOFs. The upper
-    # rotor block and cross blocks are identically zero.
-    front_m = np.asarray(front_support.M(0.0), dtype=float)
+    assert front_rotor_bearing.n == build.node_by_position_mm[467.8]
+    assert front_rotor_bearing.n_link == front_link
+    assert rear_rotor_bearing.n == build.node_by_position_mm[2202.2]
+    assert rear_rotor_bearing.n_link == rear_link
+    assert front_support.n == front_link
+    assert front_support.n_link is None
+    assert rear_support.n == rear_link
+    assert rear_support.n_link is None
+
     front_k = np.asarray(front_support.K(0.0), dtype=float)
-    front_c = np.asarray(front_support.C(0.0), dtype=float)
-    for matrix in (front_m, front_k, front_c):
-        assert matrix.shape == (6, 6)
-        assert np.allclose(matrix[:3, :], 0.0, atol=1e-12)
-        assert np.allclose(matrix[:, :3], 0.0, atol=1e-12)
+    rear_k = np.asarray(rear_support.K(0.0), dtype=float)
+    assert front_k.shape == rear_k.shape == (3, 3)
+    assert front_k[0, 0] == pytest.approx(project.supports[0].kxx)
+    assert front_k[1, 1] == pytest.approx(project.supports[0].kzz)
+    assert rear_k[0, 0] == pytest.approx(project.supports[1].kxx)
+    assert rear_k[1, 1] == pytest.approx(project.supports[1].kzz)
 
-    assert np.diag(front_m)[3:] == pytest.approx([175.0, 175.0, 0.0])
-    assert front_k[3, 3] == pytest.approx(project.supports[0].kxx)
-    assert front_k[4, 4] == pytest.approx(project.supports[0].kzz)
-    assert front_c[3, 3] == pytest.approx(project.supports[0].cxx)
-    assert front_c[4, 4] == pytest.approx(project.supports[0].czz)
+    assert len(build.support_mass_elements) == 2
+    front_mass = build.support_mass_elements[0]
+    rear_mass = build.support_mass_elements[1]
+    assert front_mass.n == front_link
+    assert rear_mass.n == rear_link
+    assert np.diag(front_mass.M()) == pytest.approx([175.0, 175.0, 0.0])
+    assert np.diag(rear_mass.M()) == pytest.approx([175.0, 175.0, 0.0])
 
+    # ROSS must allocate the two three-DOF housing nodes in its global matrices.
+    assert build.rotor.ndof == build.base_rotor.ndof
     global_mass = np.asarray(build.rotor.M(0.0), dtype=float)
-    front_dofs = list(front_support.dof_global_index.values())
-    rear_dofs = list(rear_support.dof_global_index.values())
-    assert len(front_dofs) == 6
-    assert len(rear_dofs) == 6
-    assert global_mass[front_dofs[3], front_dofs[3]] == pytest.approx(175.0)
-    assert global_mass[front_dofs[4], front_dofs[4]] == pytest.approx(175.0)
-    assert global_mass[rear_dofs[3], rear_dofs[3]] == pytest.approx(175.0)
-    assert global_mass[rear_dofs[4], rear_dofs[4]] == pytest.approx(175.0)
+    global_k = np.asarray(build.rotor.K_without_ump(0.0), dtype=float)
+    front_mass_dofs = list(front_mass.dof_global_index.values())
+    rear_mass_dofs = list(rear_mass.dof_global_index.values())
+    assert len(front_mass_dofs) == len(rear_mass_dofs) == 3
+    assert max(front_mass_dofs + rear_mass_dofs) < build.rotor.ndof
+    assert global_mass[front_mass_dofs[0], front_mass_dofs[0]] == pytest.approx(175.0)
+    assert global_mass[front_mass_dofs[1], front_mass_dofs[1]] == pytest.approx(175.0)
+    assert global_mass[front_mass_dofs[2], front_mass_dofs[2]] == pytest.approx(0.0)
+    assert global_mass[rear_mass_dofs[0], rear_mass_dofs[0]] == pytest.approx(175.0)
+    assert global_mass[rear_mass_dofs[1], rear_mass_dofs[1]] == pytest.approx(175.0)
+    assert global_mass[rear_mass_dofs[2], rear_mass_dofs[2]] == pytest.approx(0.0)
+    assert global_k[front_mass_dofs[0], front_mass_dofs[0]] == pytest.approx(project.supports[0].kxx + front_rotor_bearing.K(0.0)[3, 3])
 
     k_without = np.asarray(build.rotor.K_without_ump(0.0), dtype=float)
     k_ump = np.asarray(build.K_ump, dtype=float)
