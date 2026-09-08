@@ -63,7 +63,7 @@ jobs:
       - name: Install pinned ROSS and tests
         run: |
           python -m pip install pytest
-          python -m pip install -e ./vendor/ross
+          python -m pip install "plotly==5.24.1" -e ./vendor/ross
       - name: Run real ROSS smoke and industrial case tests
         env:
           PYTHONPATH: src
