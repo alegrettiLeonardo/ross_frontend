@@ -5,6 +5,11 @@ This is intentionally an observational gate first. It fails only when the ROSS
 calculation cannot be compared consistently (missing/non-finite data, mismatched
 speed/probe counts). Numerical similarity thresholds must be justified from the
 correlation evidence before they become release gates.
+
+RotorDin and ROSS use equivalent synchronous unbalance force vectors with a
+constant complex phase factor. The legacy RotorDin formulation is proportional
+to ``[i, 1]`` while ROSS uses ``[1, -i]``; therefore ROSS is globally -90 deg
+relative to RotorDin. Both raw and convention-aligned phase errors are reported.
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CASE_DIR = ROOT / "cases" / "OP-W60-500-60Hz-IC611-P3"
 INPUT = CASE_DIR / "irdin_input.txt"
 REFERENCE = CASE_DIR / "rotordin_unbalance_keypoints.csv"
+PHASE_CONVENTION_ADJUSTMENT_DEG = 90.0
 
 
 def load_reference(path: Path) -> tuple[list[float], list[list[float]], list[list[float]]]:
@@ -56,7 +62,10 @@ def percentile(values: list[float], q: float) -> float:
 
 def projected_responses(rotor, build, project, rpm: list[float]):
     speed = rpm_to_rad_s(rpm)
-    nodes = [build.node_by_position_mm[build_builder._p(item.position_mm)] for item in project.unbalances]
+    nodes = [
+        build.node_by_position_mm[RossModelBuilder._p(item.position_mm)]
+        for item in project.unbalances
+    ]
     magnitude = [item.magnitude_g_mm * 1e-6 for item in project.unbalances]
     phase = [item.phase_deg * pi / 180.0 for item in project.unbalances]
     native = rotor.run_unbalance_response(
@@ -69,7 +78,7 @@ def projected_responses(rotor, build, project, rpm: list[float]):
     number_dof = int(rotor.number_dof)
     out = []
     for probe in project.probes:
-        node = build.node_by_position_mm[build_builder._p(probe.position_mm)]
+        node = build.node_by_position_mm[RossModelBuilder._p(probe.position_mm)]
         x_values = native.forced_resp[node * number_dof + 0, :]
         y_values = native.forced_resp[node * number_dof + 1, :]
         projected = RossResponseCalculator._rotate_probe(
@@ -97,7 +106,13 @@ def summarize(label: str, rpm, reference_amp, reference_phase, responses):
 
         ratios = [a / r for a, r in zip(amplitude, ref_amp)]
         relative = [abs(a - r) / abs(r) for a, r in zip(amplitude, ref_amp)]
-        phase_error = [abs(circular_delta_deg(a, r)) for a, r in zip(phase_deg, ref_phase)]
+        phase_error_raw = [
+            abs(circular_delta_deg(a, r)) for a, r in zip(phase_deg, ref_phase)
+        ]
+        phase_error_aligned = [
+            abs(circular_delta_deg(a + PHASE_CONVENTION_ADJUSTMENT_DEG, r))
+            for a, r in zip(phase_deg, ref_phase)
+        ]
         ref_peak_i = max(range(len(rpm)), key=lambda i: ref_amp[i])
         ross_peak_i = max(range(len(rpm)), key=lambda i: amplitude[i])
         item = {
@@ -106,9 +121,12 @@ def summarize(label: str, rpm, reference_amp, reference_phase, responses):
             "median_abs_relative_amplitude_error": statistics.median(relative),
             "p95_abs_relative_amplitude_error": percentile(relative, 95.0),
             "max_abs_relative_amplitude_error": max(relative),
-            "median_abs_phase_error_deg": statistics.median(phase_error),
-            "p95_abs_phase_error_deg": percentile(phase_error, 95.0),
-            "max_abs_phase_error_deg": max(phase_error),
+            "median_abs_phase_error_raw_deg": statistics.median(phase_error_raw),
+            "p95_abs_phase_error_raw_deg": percentile(phase_error_raw, 95.0),
+            "max_abs_phase_error_raw_deg": max(phase_error_raw),
+            "median_abs_phase_error_aligned_deg": statistics.median(phase_error_aligned),
+            "p95_abs_phase_error_aligned_deg": percentile(phase_error_aligned, 95.0),
+            "max_abs_phase_error_aligned_deg": max(phase_error_aligned),
             "reference_peak_keypoint": {
                 "rpm": rpm[ref_peak_i],
                 "amplitude_m": ref_amp[ref_peak_i],
@@ -123,8 +141,12 @@ def summarize(label: str, rpm, reference_amp, reference_phase, responses):
             f"{label} P{idx}: amp ratio median={item['median_amplitude_ratio']:.6g}; "
             f"amp |rel err| median/p95/max={item['median_abs_relative_amplitude_error']:.3%}/"
             f"{item['p95_abs_relative_amplitude_error']:.3%}/{item['max_abs_relative_amplitude_error']:.3%}; "
-            f"phase |err| median/p95/max={item['median_abs_phase_error_deg']:.3f}/"
-            f"{item['p95_abs_phase_error_deg']:.3f}/{item['max_abs_phase_error_deg']:.3f} deg; "
+            f"phase raw |err| median/p95/max={item['median_abs_phase_error_raw_deg']:.3f}/"
+            f"{item['p95_abs_phase_error_raw_deg']:.3f}/{item['max_abs_phase_error_raw_deg']:.3f} deg; "
+            f"phase +{PHASE_CONVENTION_ADJUSTMENT_DEG:g}deg |err| median/p95/max="
+            f"{item['median_abs_phase_error_aligned_deg']:.3f}/"
+            f"{item['p95_abs_phase_error_aligned_deg']:.3f}/"
+            f"{item['max_abs_phase_error_aligned_deg']:.3f} deg; "
             f"peak ref={rpm[ref_peak_i]:.3f} rpm, ROSS={rpm[ross_peak_i]:.3f} rpm"
         )
     return probes
@@ -138,11 +160,14 @@ if __name__ == "__main__":
     if len(project.unbalances) != 2:
         raise RuntimeError(f"Expected two W60 unbalance planes, got {len(project.unbalances)}")
 
-    build_builder = RossModelBuilder()
-    build = build_builder.build(project)
+    build = RossModelBuilder().build(project)
 
     print("W60 RotorDin -> ROSS unbalance correlation")
     print(f"Reference points: {len(rpm)}; rpm: {rpm[0]:.6f} .. {rpm[-1]:.6f}")
+    print(
+        "Phase convention: ROSS force vector is -90 deg relative to RotorDin; "
+        f"aligned comparison adds +{PHASE_CONVENTION_ADJUSTMENT_DEG:g} deg to ROSS phase."
+    )
     print("Unbalance planes: " + ", ".join(
         f"x={item.position_mm:g} mm, U={item.magnitude_g_mm:g} g.mm, phase={item.phase_deg:g} deg"
         for item in project.unbalances
@@ -163,6 +188,8 @@ if __name__ == "__main__":
         "reference_points": len(rpm),
         "rpm_start": rpm[0],
         "rpm_final": rpm[-1],
+        "phase_convention_adjustment_deg": PHASE_CONVENTION_ADJUSTMENT_DEG,
+        "phase_convention_basis": "RotorDin [i,1] versus ROSS [1,-i] = global -i factor",
         "production_path": type(build.rotor).__name__,
         "production": production_metrics,
         "without_ump_diagnostic": base_metrics,
