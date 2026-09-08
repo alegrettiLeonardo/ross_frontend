@@ -7,8 +7,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
 from ..domain import RotorProject
+from ..legacy_import import load_irdin_project
 from .enhanced_bearing_page import EnhancedBearingPage
-from .model_page import ModelPage
+from .industrial_model_page import IndustrialModelPage
 from .results_page import ResultsPage
 from .sample_project import sample_project
 from .solver_console import SolverConsoleDialog
@@ -27,7 +28,7 @@ class RossStudioWindow(QMainWindow):
         main=QWidget(); main.setObjectName("ContentHost"); ml=QVBoxLayout(main); ml.setContentsMargins(0,0,0,0); ml.setSpacing(0); content.addWidget(main,1)
         self.toolbar=TopToolbar(); self.toolbar.actionTriggered.connect(self.toolbar_action); ml.addWidget(self.toolbar)
         self.stack=QStackedWidget(); ml.addWidget(self.stack,1)
-        self.model_page=ModelPage(self.project); self.bearing_page=EnhancedBearingPage(self.project); self.results_page=ResultsPage(self.project)
+        self.model_page=IndustrialModelPage(self.project); self.bearing_page=EnhancedBearingPage(self.project); self.results_page=ResultsPage(self.project)
         self.stack.addWidget(self.model_page); self.stack.addWidget(self.bearing_page); self.stack.addWidget(self.results_page)
         self.status=StatusStrip(); ml.addWidget(self.status)
         self.model_page.runRequested.connect(self.run_analysis); self.model_page.validateRequested.connect(self.validate_model); self.model_page.projectChanged.connect(self.on_project_changed)
@@ -41,12 +42,20 @@ class RossStudioWindow(QMainWindow):
             elif key=="disks": self.model_page.tabs.setCurrentIndex(1)
             elif key=="supports": self.model_page.tabs.setCurrentIndex(3)
             elif key=="couplings": self.model_page.tabs.setCurrentIndex(4)
+            elif key=="loads": self.model_page.tabs.setCurrentIndex(5)
         elif key=="bearings":
             self.stack.setCurrentWidget(self.bearing_page); self.sidebar.set_active("bearings")
         elif key in {"rotor_dynamics","response","stability","transient","faults","stochastic","results"}:
             self.stack.setCurrentWidget(self.results_page); self.sidebar.set_active(key)
         else:
             self.status.set_state("Module selected",key.replace("_"," ").title(),True)
+
+    def _set_project(self, project: RotorProject):
+        self.project=project
+        self.model_page.set_project(project)
+        self.bearing_page.project=project
+        self.results_page.project=project
+        self.on_project_changed(project)
 
     def on_project_changed(self, project: RotorProject):
         self.project=project; self.titlebar.project_label.setText(project.reference or "Untitled"); self.status.project.setText(project.reference or "Untitled"); self.results_page.project=project
@@ -71,8 +80,31 @@ class RossStudioWindow(QMainWindow):
     def toolbar_action(self, action: str):
         if action=="save": self.save_project()
         elif action=="new": self.reset_project()
-        elif action=="open": self.status.set_state("Open project","Project migration loader is the next persistence step",True)
+        elif action=="open": self.open_project()
         elif action in {"fit","zoom_in","zoom_out"}: self.status.set_state("Rotor view",action.replace("_"," ").title(),True)
+
+    def open_project(self):
+        path,_=QFileDialog.getOpenFileName(
+            self,
+            "Open RotorDin / ROSS Studio project",
+            "",
+            "RotorDin legacy (*.txt *.irdin *.ini);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            project=load_irdin_project(path)
+        except Exception as exc:
+            self.status.set_state("Import failed",str(exc),False)
+            QMessageBox.warning(self,"Cannot import project",str(exc))
+            return
+        self._set_project(project)
+        warnings=project.metadata.get("legacy_import",{}).get("warnings",[])
+        detail=f"{len(project.shaft)} shaft sections, {len(project.disks)} disks, {len(project.bearings)} bearings"
+        if warnings:
+            detail += f" | {len(warnings)} migration warning(s)"
+        self.status.set_state("RotorDin project imported",detail,True)
+        self.navigate("rotor")
 
     def save_project(self):
         default=f"{self.project.reference or 'project'}.json"; path,_=QFileDialog.getSaveFileName(self,"Save ROSS Studio project",default,"ROSS project (*.json)")
@@ -82,4 +114,4 @@ class RossStudioWindow(QMainWindow):
     def reset_project(self):
         answer=QMessageBox.question(self,"New project","Replace the current project with the approved WGM20 starter model?")
         if answer!=QMessageBox.StandardButton.Yes: return
-        self.project=sample_project(); self.model_page.set_project(self.project); self.bearing_page.project=self.project; self.results_page.project=self.project; self.on_project_changed(self.project); self.navigate("rotor"); self.status.set_state("New project","WGM20 starter model loaded",True)
+        self._set_project(sample_project()); self.navigate("rotor"); self.status.set_state("New project","WGM20 starter model loaded",True)
