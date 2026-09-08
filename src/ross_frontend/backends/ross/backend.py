@@ -56,6 +56,43 @@ class RossBackend:
         target = min(target, limit)
         return target if target % 2 == 0 else target - 1
 
+    @staticmethod
+    def _realization_audit(project: RotorProject, build) -> dict[str, Any]:
+        """Describe adapter choices that are mathematically equivalent but not 1:1 classes."""
+
+        return {
+            "flexible_supports": {
+                "domain_count": len(project.supports),
+                "ross_topology": (
+                    "BearingElement(rotor_n, n_link=housing) + "
+                    "PointMass(housing, mx=my=mass, mz=0) + "
+                    "BearingElement(housing)->ground"
+                ),
+                "housing_link_nodes": {
+                    str(index): node for index, node in build.support_link_node_by_bearing.items()
+                },
+                "housing_mass_elements": len(build.support_mass_elements),
+                "axial_housing_mass": 0.0,
+                "reason": "Canonical ROSS 2.3.0 linked-bearing/support topology; preserves lateral pedestal DOFs.",
+            },
+            "concentrated_masses": {
+                "domain_count": len(project.point_masses),
+                "ross_carrier_count": len(build.point_mass_elements),
+                "ross_realization": "DiskElement(m=mass, Id=0, Ip=0)",
+                "reason": (
+                    "ROSS 2.3.0 PointMass positioning assumes a bearing at the same station; "
+                    "the zero-inertia disk carrier preserves translational mass with zero rotary inertia/gyroscopic moment."
+                ),
+            },
+            "ump": {
+                "dynamic_rotor": "UmpRotor" if project.ump_regions else "native Rotor",
+                "static_rotor": "base_rotor without UMP",
+                "matrix_identity": "K_effective = K_ROSS - K_UMP" if project.ump_regions else "K_effective = K_ROSS",
+                "shaft_elements_modified": False,
+                "rhs_force_used": False,
+            },
+        }
+
     def _write_ump_audit(self, run_dir: Path, project: RotorProject, build, audit_frequency_rpm: float) -> dict[str, Any]:
         import numpy as np
 
@@ -114,7 +151,8 @@ class RossBackend:
             progress,
             log,
             f"Model built: {len(build.shaft_elements)} shaft elements, {len(build.bearing_elements)} bearings, "
-            f"{len(build.disk_elements)} disks, {getattr(rotor, 'ndof', '?')} DOF.",
+            f"{len(build.disk_elements)} disks, {len(build.point_mass_elements)} concentrated mass(es), "
+            f"{len(build.support_mass_elements)} housing mass(es), {getattr(rotor, 'ndof', '?')} DOF.",
         )
         if project.ump_regions:
             self._emit(
@@ -132,12 +170,16 @@ class RossBackend:
             "counts": {
                 "shaft_elements": len(build.shaft_elements),
                 "bearings": len(build.bearing_elements),
-                "disks": len(build.disk_elements),
-                "point_masses": len(build.point_mass_elements),
+                "domain_disks": len(build.disk_elements),
+                "domain_point_masses": len(build.point_mass_elements),
+                "support_housing_masses": len(build.support_mass_elements),
+                "ross_disk_elements": len(build.disk_elements) + len(build.point_mass_elements),
+                "ross_point_mass_elements": len(build.support_mass_elements),
                 "ndof": getattr(rotor, "ndof", None),
                 "ump_regions": len(project.ump_regions),
                 "ump_element_contributions": len(build.ump_contributions),
             },
+            "realizations": self._realization_audit(project, build),
             "ump": build.ump_audit,
         }
         (run_dir / "model.json").write_text(
