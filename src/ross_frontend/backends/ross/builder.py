@@ -174,6 +174,8 @@ class RossModelBuilder:
                 )
             use_embedded_ump = ump_realization == "negative_stiffness" and ump_k > 0.0
             shaft_cls = ump_shaft_cls if use_embedded_ump else rs.ShaftElement
+            source_tag = section.tag.strip() if section.tag else "shaft"
+            unique_tag = f"{source_tag}:{n} [{xa:g}-{xb:g} mm]"
             kwargs = dict(
                 L=(xb - xa) / 1000.0,
                 idl=idl / 1000.0,
@@ -185,7 +187,7 @@ class RossModelBuilder:
                 shear_effects=section.shear_effects,
                 rotary_inertia=section.rotary_inertia,
                 gyroscopic=section.gyroscopic,
-                tag=section.tag or None,
+                tag=unique_tag,
             )
             if use_embedded_ump:
                 kwargs["ump_stiffness_per_length_n_m2"] = ump_k
