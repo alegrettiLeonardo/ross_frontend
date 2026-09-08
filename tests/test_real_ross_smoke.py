@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 pytest.importorskip("ross")
@@ -13,6 +14,7 @@ from ross_frontend.domain import (
     MaterialSpec,
     RotorProject,
     ShaftSectionSpec,
+    UMPRegionSpec,
 )
 
 
@@ -48,6 +50,37 @@ def test_real_ross_build_modal_and_frequency_response():
     assert response.kind == "frequency_response"
     assert len(response.curves[0].x) == 5
     assert len(response.curves[0].magnitude) == 5
+
+
+@pytest.mark.ross
+def test_real_ross_linearized_ump_reduces_global_radial_stiffness():
+    baseline = real_project()
+    with_ump = real_project()
+    with_ump.ump_regions = [
+        UMPRegionSpec(
+            start_mm=0.0,
+            end_mm=500.0,
+            stiffness_per_length_n_m2=2.0e6,
+            tag="test UMP",
+        )
+    ]
+
+    base_build = RossModelBuilder().build(baseline)
+    ump_build = RossModelBuilder().build(with_ump)
+    k0 = np.asarray(base_build.rotor.K(0.0), dtype=float)
+    k1 = np.asarray(ump_build.rotor.K(0.0), dtype=float)
+    delta = k0 - k1
+
+    assert ump_build.ump_shaft_elements
+    assert k0.shape == k1.shape
+    assert np.linalg.norm(delta) > 0.0
+    assert np.allclose(delta, delta.T, rtol=1e-10, atol=1e-8)
+    # UMP is destabilizing: it removes positive radial stiffness.
+    assert delta[0, 0] > 0.0
+    assert delta[1, 1] > 0.0
+    # It must not create axial/torsional electromagnetic stiffness.
+    assert delta[2, 2] == pytest.approx(0.0, abs=1e-8)
+    assert delta[5, 5] == pytest.approx(0.0, abs=1e-8)
 
 
 @pytest.mark.ross
