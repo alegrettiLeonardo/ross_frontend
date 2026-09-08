@@ -47,3 +47,25 @@ jobs:
           PYTHONPATH: src
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q tests/test_ui_contract.py tests/test_ui_smoke.py tests/test_bearing_type_builders.py
+
+  test-vendored-ross:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify pinned ROSS commit
+        run: |
+          test "$(git -C vendor/ross rev-parse HEAD)" = "$(cat vendor/ross.PINNED_COMMIT)"
+      - name: Install pinned ROSS and tests
+        run: |
+          python -m pip install pytest
+          python -m pip install -e ./vendor/ross
+      - name: Run real ROSS smoke and industrial case tests
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m pytest -q tests/test_real_ross_smoke.py tests/test_legacy_irdin_case.py
