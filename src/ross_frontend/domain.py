@@ -19,6 +19,11 @@ class BearingKind(StrEnum):
     TILTING_PAD = "tilting_pad"
 
 
+class UmpFormulation(StrEnum):
+    PHYSICAL_CORRECTED = "physical_corrected"
+    ROTORDIN_LEGACY_COMPAT = "rotordin_legacy_compat"
+
+
 @dataclass(slots=True)
 class MaterialSpec:
     name: str = "Steel"
@@ -121,44 +126,119 @@ class ProbeSpec:
             raise DomainError("Probe orientation must be finite.")
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, init=False)
 class UMPRegionSpec:
-    """Linearized Unbalanced Magnetic Pull distributed over an active rotor span.
+    """Linearized Unbalanced Magnetic Pull over an axial rotor span.
 
-    ``stiffness_per_length_n_m2`` is the radial electromagnetic stiffness per
-    axial length.  For small perturbations the UMP force density is
-    ``f_ump = k'_ump * u`` and therefore acts as a negative structural
-    stiffness in the equation of motion.
+    The direct terms are positive magnitudes of the destabilizing electromagnetic
+    stiffness density. The negative sign is applied only by ``UmpRotor.K()``.
+    Cross-coupled terms are signed and reserved for validated electromagnetic
+    stiffness tensors.
+
+    ``stiffness_per_length_n_m2`` remains accepted as a backwards-compatible
+    isotropic constructor alias for schema-v4 projects.
     """
 
     start_mm: float
     end_mm: float
-    stiffness_per_length_n_m2: float
-    tag: str = ""
-    source_value: float | None = None
-    source_unit: str = "N/m^2"
-    model: str = "linearized_negative_stiffness"
+    kxx_prime_n_m2: float
+    kyy_prime_n_m2: float
+    kxy_prime_n_m2: float
+    kyx_prime_n_m2: float
+    formulation: UmpFormulation
+    tag: str
+    source_value: float | None
+    source_unit: str
+    solver_interpretation: str
+
+    def __init__(
+        self,
+        start_mm: float,
+        end_mm: float,
+        kxx_prime_n_m2: float | None = None,
+        kyy_prime_n_m2: float | None = None,
+        kxy_prime_n_m2: float = 0.0,
+        kyx_prime_n_m2: float = 0.0,
+        formulation: UmpFormulation | str = UmpFormulation.PHYSICAL_CORRECTED,
+        tag: str = "",
+        source_value: float | None = None,
+        source_unit: str = "N/m²",
+        solver_interpretation: str = "N/m²",
+        *,
+        stiffness_per_length_n_m2: float | None = None,
+    ) -> None:
+        if kxx_prime_n_m2 is None:
+            if stiffness_per_length_n_m2 is None:
+                raise TypeError("Define kxx_prime_n_m2 or stiffness_per_length_n_m2 for UMP.")
+            kxx_prime_n_m2 = stiffness_per_length_n_m2
+        elif stiffness_per_length_n_m2 is not None and abs(float(kxx_prime_n_m2) - float(stiffness_per_length_n_m2)) > 1e-12:
+            raise DomainError("Conflicting UMP direct stiffness values were supplied.")
+        if kyy_prime_n_m2 is None:
+            kyy_prime_n_m2 = kxx_prime_n_m2
+
+        self.start_mm = float(start_mm)
+        self.end_mm = float(end_mm)
+        self.kxx_prime_n_m2 = float(kxx_prime_n_m2)
+        self.kyy_prime_n_m2 = float(kyy_prime_n_m2)
+        self.kxy_prime_n_m2 = float(kxy_prime_n_m2)
+        self.kyx_prime_n_m2 = float(kyx_prime_n_m2)
+        self.formulation = UmpFormulation(formulation)
+        self.tag = str(tag)
+        self.source_value = None if source_value is None else float(source_value)
+        self.source_unit = str(source_unit)
+        self.solver_interpretation = str(solver_interpretation)
 
     @property
     def length_mm(self) -> float:
         return self.end_mm - self.start_mm
 
     @property
+    def stiffness_per_length_n_m2(self) -> float:
+        """Schema-v4 isotropic alias; returns the x direct term."""
+        return self.kxx_prime_n_m2
+
+    @property
     def integrated_stiffness_n_m(self) -> float:
-        return self.stiffness_per_length_n_m2 * self.length_mm / 1000.0
+        return self.kxx_prime_n_m2 * self.length_mm / 1000.0
+
+    @property
+    def stiffness_tensor_n_m2(self) -> tuple[tuple[float, float], tuple[float, float]]:
+        return (
+            (self.kxx_prime_n_m2, self.kxy_prime_n_m2),
+            (self.kyx_prime_n_m2, self.kyy_prime_n_m2),
+        )
+
+    @property
+    def is_isotropic(self) -> bool:
+        return (
+            abs(self.kxx_prime_n_m2 - self.kyy_prime_n_m2) <= 1e-12
+            and abs(self.kxy_prime_n_m2) <= 1e-12
+            and abs(self.kyx_prime_n_m2) <= 1e-12
+        )
 
     def validate(self, shaft_length_mm: float) -> None:
-        values = (self.start_mm, self.end_mm, self.stiffness_per_length_n_m2)
+        values = (
+            self.start_mm,
+            self.end_mm,
+            self.kxx_prime_n_m2,
+            self.kyy_prime_n_m2,
+            self.kxy_prime_n_m2,
+            self.kyx_prime_n_m2,
+        )
         if not all(isfinite(float(v)) for v in values):
             raise DomainError("UMP region values must be finite.")
         if self.start_mm < 0 or self.end_mm <= self.start_mm or self.end_mm > shaft_length_mm:
             raise DomainError(
                 f"UMP region [{self.start_mm:g}, {self.end_mm:g}] mm must lie inside shaft [0, {shaft_length_mm:g}] mm."
             )
-        if self.stiffness_per_length_n_m2 < 0:
-            raise DomainError("UMP linearized stiffness per length cannot be negative.")
-        if self.model != "linearized_negative_stiffness":
-            raise DomainError(f"Unsupported UMP model: {self.model}")
+        if self.kxx_prime_n_m2 < 0 or self.kyy_prime_n_m2 < 0:
+            raise DomainError("UMP direct stiffness magnitudes kxx' and kyy' cannot be negative.")
+        if self.formulation == UmpFormulation.PHYSICAL_CORRECTED and self.source_unit.strip().casefold() == "legacy_unknown":
+            raise DomainError(
+                "PHYSICAL_CORRECTED UMP requires an explicit physical source unit; legacy_unknown is fail-closed."
+            )
+        if self.formulation == UmpFormulation.ROTORDIN_LEGACY_COMPAT and not self.is_isotropic:
+            raise DomainError("RotorDin legacy UMP compatibility supports only the historical isotropic scalar coefficient.")
 
 
 @dataclass(slots=True)
@@ -421,7 +501,7 @@ class RotorProject:
     ump_regions: list[UMPRegionSpec] = field(default_factory=list)
     analyses: AnalysisRequest = field(default_factory=AnalysisRequest)
     metadata: dict[str, Any] = field(default_factory=dict)
-    schema_version: int = 4
+    schema_version: int = 5
 
     @property
     def shaft_length_mm(self) -> float:
