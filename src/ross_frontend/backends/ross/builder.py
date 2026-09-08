@@ -14,7 +14,7 @@ from ...domain import (
     ShaftSectionSpec,
     TiltingPadBearingSpec,
 )
-from ...ross_ext.ump import make_ump_shaft_element_class
+from ...ross_ext.ump import UMPElementContribution, make_ump_rhs_callback, make_ump_shaft_element_class
 from ..coordinates import rpm_to_rad_s, rotordin_xz_to_ross_xy
 
 
@@ -46,24 +46,32 @@ class RossBuild:
     point_mass_elements: list[Any]
     support_link_node_by_bearing: dict[int, int]
     ump_shaft_elements: list[Any]
+    ump_contributions: list[UMPElementContribution]
+    ump_realization: str
+
+    def ump_rhs_callback(self):
+        if self.ump_realization != "rhs_force":
+            raise RossBuildError(
+                "UMP RHS callback is available only for builds using ump_realization='rhs_force'; "
+                "using it together with negative stiffness would double-count UMP."
+            )
+        return make_ump_rhs_callback(
+            self.rotor.ndof,
+            self.ump_contributions,
+            number_dof=self.rotor.number_dof,
+        )
 
 
 class RossModelBuilder:
     """Translate the frontend domain model into native ROSS objects.
 
-    Components in ROSS are attached to nodes. The builder therefore creates a
-    breakpoint at every shaft boundary and component position. Conical geometry
-    is re-interpolated at those breakpoints. Flexible bearing supports are
-    realized as bearings in series using external ``n_link`` housing nodes:
-
-        shaft node -- bearing K/C -- housing mass -- support K/C -- ground
-
-    Linearized UMP regions are represented as distributed negative radial
-    stiffness.  UMP boundaries are inserted as shaft breakpoints so an element
-    is either completely inside or completely outside each active span.
+    UMP supports two mathematically equivalent, mutually exclusive realizations:
+    ``negative_stiffness`` (default) for linear frequency/eigenvalue analyses and
+    ``rhs_force`` for Newmark integration through ``add_to_RHS``.
     """
 
     _POS_DIGITS = 9
+    _UMP_REALIZATIONS = {"negative_stiffness", "rhs_force", "off"}
 
     def __init__(self, ross_module=None):
         self.rs = ross_module or load_ross()
@@ -121,8 +129,12 @@ class RossModelBuilder:
             points.add(self._p(region.end_mm))
         return sorted(points)
 
-    def build(self, project: RotorProject) -> RossBuild:
+    def build(self, project: RotorProject, *, ump_realization: str = "negative_stiffness") -> RossBuild:
         project.validate()
+        if ump_realization not in self._UMP_REALIZATIONS:
+            raise RossBuildError(
+                f"Unknown UMP realization {ump_realization!r}; expected one of {sorted(self._UMP_REALIZATIONS)}."
+            )
         rs = self.rs
 
         material_by_name: dict[str, Any] = {}
@@ -139,6 +151,7 @@ class RossModelBuilder:
         ranges = self._section_ranges(project)
         shaft_elements: list[Any] = []
         ump_shaft_elements: list[Any] = []
+        ump_contributions: list[UMPElementContribution] = []
         ump_shaft_cls = make_ump_shaft_element_class(rs.ShaftElement)
 
         for n, (xa, xb) in enumerate(zip(points, points[1:])):
@@ -150,8 +163,17 @@ class RossModelBuilder:
             right_ratio = (xb - section_x0) / section.length_mm
             odl, idl = self._interp(section, left_ratio)
             odr, idr = self._interp(section, right_ratio)
-            ump_k = self._ump_stiffness_at(project, x_mid)
-            shaft_cls = ump_shaft_cls if ump_k > 0.0 else rs.ShaftElement
+            ump_k = self._ump_stiffness_at(project, x_mid) if ump_realization != "off" else 0.0
+            if ump_k > 0.0:
+                ump_contributions.append(
+                    UMPElementContribution(
+                        node=n,
+                        length_m=(xb - xa) / 1000.0,
+                        stiffness_per_length_n_m2=ump_k,
+                    )
+                )
+            use_embedded_ump = ump_realization == "negative_stiffness" and ump_k > 0.0
+            shaft_cls = ump_shaft_cls if use_embedded_ump else rs.ShaftElement
             kwargs = dict(
                 L=(xb - xa) / 1000.0,
                 idl=idl / 1000.0,
@@ -165,11 +187,11 @@ class RossModelBuilder:
                 gyroscopic=section.gyroscopic,
                 tag=section.tag or None,
             )
-            if ump_k > 0.0:
+            if use_embedded_ump:
                 kwargs["ump_stiffness_per_length_n_m2"] = ump_k
             element = shaft_cls(**kwargs)
             shaft_elements.append(element)
-            if ump_k > 0.0:
+            if use_embedded_ump:
                 ump_shaft_elements.append(element)
 
         disk_elements = [
@@ -247,14 +269,16 @@ class RossModelBuilder:
             point_mass_elements=point_mass_elements,
         )
         return RossBuild(
-            rotor,
-            node_by_position,
-            shaft_elements,
-            disk_elements,
-            bearing_elements,
-            point_mass_elements,
-            support_link_node_by_bearing,
-            ump_shaft_elements,
+            rotor=rotor,
+            node_by_position_mm=node_by_position,
+            shaft_elements=shaft_elements,
+            disk_elements=disk_elements,
+            bearing_elements=bearing_elements,
+            point_mass_elements=point_mass_elements,
+            support_link_node_by_bearing=support_link_node_by_bearing,
+            ump_shaft_elements=ump_shaft_elements,
+            ump_contributions=ump_contributions,
+            ump_realization=ump_realization,
         )
 
     def _build_bearing(self, spec, node_by_position, *, n_link_override: int | None = None):
