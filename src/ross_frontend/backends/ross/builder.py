@@ -69,9 +69,13 @@ class RossModelBuilder:
     ``rotor node -- TABLE bearing -- housing link node -- support K/C -- ground``
 
     A native ``PointMass`` located at each housing node allocates the extra link
-    DOFs and carries the lateral housing mass. The ground support is a native
-    ``BearingElement`` whose ``n`` is that same link node. This matches the ROSS
-    2.3.0 linked-bearing examples and requires no upstream modification.
+    DOFs and carries the housing mass. ROSS allocates three translational DOFs to
+    every link node even though the historical RotorDin support model is lateral
+    only. The axial link DOF is exactly decoupled from the lateral x/y subsystem;
+    it therefore receives the same positive lumped housing mass as a numerical
+    completion of the native ROSS topology. This avoids a singular global mass
+    matrix without changing lateral M/C/K or response physics. The ground support
+    is a native ``BearingElement`` whose ``n`` is that same link node.
 
     A RotorDin concentrated mass at a shaft-only station is represented by a
     zero-inertia ``DiskElement`` carrier because ROSS 2.3.0's ``PointMass``
@@ -245,10 +249,13 @@ class RossModelBuilder:
             # their complete speed dependency and x/z -> x/y coordinate map.
             bearing_elements.append(self._build_bearing(bearing, node_by_position, n_link_override=link_node))
 
-            # Native housing-to-ground support. A PointMass on the same link node
-            # is the ROSS mechanism that allocates the housing DOFs. Only lateral
-            # housing mass is populated; mz=0 avoids adding an axial pedestal mass
-            # that does not exist in the historical RotorDin lateral model.
+            # Native housing-to-ground support. PointMass on the link node is the
+            # ROSS mechanism that allocates the housing DOFs. ROSS always creates
+            # x/y/z translations at that node. RotorDin supplies one lumped housing
+            # mass for a lateral x/z model, so x/y retain the physical 175 kg and z
+            # receives the same positive value solely to keep ROSS M nonsingular.
+            # BearingElement has no x-z/y-z coupling, so this axial completion is
+            # mathematically decoupled from the lateral subsystem being correlated.
             support_coeff = rotordin_xz_to_ross_xy(
                 kxx=support.kxx,
                 kzz=support.kzz,
@@ -278,7 +285,7 @@ class RossModelBuilder:
                     n=link_node,
                     mx=support.mass_kg,
                     my=support.mass_kg,
-                    mz=0.0,
+                    mz=support.mass_kg,
                     tag=f"{support.tag or f'Support {index + 1}'} housing mass",
                 )
             )
