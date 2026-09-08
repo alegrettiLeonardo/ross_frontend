@@ -9,8 +9,8 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QMainWindow, QMessageBox
 from ..domain import RotorProject
 from ..legacy_import import load_irdin_project
 from .enhanced_bearing_page import EnhancedBearingPage
+from .enhanced_results_page import EnhancedResultsPage
 from .industrial_model_page import IndustrialModelPage
-from .results_page import ResultsPage
 from .sample_project import sample_project
 from .solver_console import SolverConsoleDialog
 from .theme import application_stylesheet
@@ -28,11 +28,12 @@ class RossStudioWindow(QMainWindow):
         main=QWidget(); main.setObjectName("ContentHost"); ml=QVBoxLayout(main); ml.setContentsMargins(0,0,0,0); ml.setSpacing(0); content.addWidget(main,1)
         self.toolbar=TopToolbar(); self.toolbar.actionTriggered.connect(self.toolbar_action); ml.addWidget(self.toolbar)
         self.stack=QStackedWidget(); ml.addWidget(self.stack,1)
-        self.model_page=IndustrialModelPage(self.project); self.bearing_page=EnhancedBearingPage(self.project); self.results_page=ResultsPage(self.project)
+        self.model_page=IndustrialModelPage(self.project); self.bearing_page=EnhancedBearingPage(self.project); self.results_page=EnhancedResultsPage(self.project)
         self.stack.addWidget(self.model_page); self.stack.addWidget(self.bearing_page); self.stack.addWidget(self.results_page)
         self.status=StatusStrip(); ml.addWidget(self.status)
         self.model_page.runRequested.connect(self.run_analysis); self.model_page.validateRequested.connect(self.validate_model); self.model_page.projectChanged.connect(self.on_project_changed)
         self.bearing_page.projectChanged.connect(self.on_project_changed); self.bearing_page.statusMessage.connect(self.status.set_state)
+        self.results_page.statusMessage.connect(self.status.set_state)
         self.setStyleSheet(application_stylesheet()); self.navigate("rotor")
 
     def navigate(self, key: str):
