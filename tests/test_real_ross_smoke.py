@@ -1,7 +1,8 @@
-import numpy as np
 import pytest
 
 pytest.importorskip("ross")
+
+import numpy as np
 
 from ross_frontend.backends.coordinates import rpm_to_rad_s
 from ross_frontend.backends.ross.bearing_calculator import RossBearingCalculator
