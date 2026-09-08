@@ -5,7 +5,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton, QWidget
 
 from ross_frontend.backends.ross.response_calculator import ComplexResponseCurve, RotorResponseResult
 from ross_frontend.ui.main_window import RossStudioWindow
@@ -58,11 +58,8 @@ def test_response_result_reuses_approved_results_workspace(app):
 def test_time_response_tab_is_fail_closed_without_transient_load_definition(app):
     window = RossStudioWindow()
     page = window.results_page
-    selector_buttons = [b for b in page.findChildren(type(page.k1).mro()[1]) if False]
     # Call the same selection handler used by the approved button while avoiding
     # a real solver thread in this UI-only smoke test.
-    from PySide6.QtWidgets import QPushButton, QWidget
-
     host = QWidget()
     button = QPushButton("Time Response", host)
     button.setCheckable(True)
