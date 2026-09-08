@@ -56,6 +56,48 @@ class RossBackend:
         target = min(target, limit)
         return target if target % 2 == 0 else target - 1
 
+    def _write_ump_audit(self, run_dir: Path, project: RotorProject, build, audit_frequency_rpm: float) -> dict[str, Any]:
+        import numpy as np
+
+        rotor = build.rotor
+        frequency = rpm_to_rad_s(audit_frequency_rpm)
+        k_without = np.asarray(rotor.K_without_ump(frequency), dtype=float)
+        k_ump = np.asarray(build.K_ump, dtype=float)
+        k_effective = np.asarray(rotor.K(frequency), dtype=float)
+        residual = k_effective - (k_without - k_ump)
+        identity_error = float(np.max(np.abs(residual))) if residual.size else 0.0
+
+        payload = dict(build.ump_audit)
+        payload.update(
+            {
+                "audit_frequency_rpm": float(audit_frequency_rpm),
+                "audit_frequency_rad_s": float(frequency),
+                "regions": [asdict(region) for region in project.ump_regions],
+                "matrix_identity": "K_effective = K_without_ump - K_ump",
+                "matrix_identity_max_abs_error": identity_error,
+                "K_ump_frobenius_norm": float(np.linalg.norm(k_ump)),
+                "static_and_stiffness_map_rotor": "base_rotor_without_ump",
+            }
+        )
+        (run_dir / "ump_audit.json").write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+        np.savez_compressed(
+            run_dir / "K_without_ump.npz",
+            matrix=k_without,
+            frequency_rpm=float(audit_frequency_rpm),
+            frequency_rad_s=float(frequency),
+        )
+        np.savez_compressed(run_dir / "K_ump.npz", matrix=k_ump)
+        np.savez_compressed(
+            run_dir / "K_effective.npz",
+            matrix=k_effective,
+            frequency_rpm=float(audit_frequency_rpm),
+            frequency_rad_s=float(frequency),
+        )
+        return payload
+
     def run(self, project: RotorProject, progress: ProgressCallback | None = None) -> AnalysisResult:
         project.validate()
         self.run_root.mkdir(parents=True, exist_ok=True)
@@ -74,6 +116,13 @@ class RossBackend:
             f"Model built: {len(build.shaft_elements)} shaft elements, {len(build.bearing_elements)} bearings, "
             f"{len(build.disk_elements)} disks, {getattr(rotor, 'ndof', '?')} DOF.",
         )
+        if project.ump_regions:
+            self._emit(
+                progress,
+                log,
+                f"UMP active: {len(project.ump_regions)} region(s), {len(build.ump_contributions)} element contribution(s); "
+                "dynamic K = K_ROSS - K_UMP.",
+            )
 
         audit = {
             "reference": project.reference,
@@ -86,19 +135,33 @@ class RossBackend:
                 "disks": len(build.disk_elements),
                 "point_masses": len(build.point_mass_elements),
                 "ndof": getattr(rotor, "ndof", None),
+                "ump_regions": len(project.ump_regions),
+                "ump_element_contributions": len(build.ump_contributions),
             },
+            "ump": build.ump_audit,
         }
-        (run_dir / "model.json").write_text(json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8")
+        (run_dir / "model.json").write_text(
+            json.dumps(audit, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
+        )
         (run_dir / "project.json").write_text(self.render_input(project), encoding="utf-8")
 
-        sections: dict[str, str] = {"ross_model.json": json.dumps(audit, indent=2, ensure_ascii=False) + "\n"}
+        sections: dict[str, str] = {
+            "ross_model.json": json.dumps(audit, indent=2, ensure_ascii=False, default=str) + "\n"
+        }
         data: dict[str, Any] = {"model": audit}
+        if project.ump_regions:
+            ump_audit = self._write_ump_audit(run_dir, project, build, project.analyses.modal_speed_rpm)
+            data["ump"] = ump_audit
+            sections["ump_audit.json"] = json.dumps(
+                ump_audit, indent=2, ensure_ascii=False, default=str
+            ) + "\n"
+
         critical_points = []
         num_modes = self._num_modes(rotor, project.analyses.modes)
 
         if project.analyses.static:
-            self._emit(progress, log, "Running ROSS static analysis...")
-            result = rotor.run_static()
+            self._emit(progress, log, "Running ROSS static analysis without UMP, matching RotorDin mkb intent...")
+            result = build.base_rotor.run_static()
             summary = static_summary(result)
             data["static"] = summary
             sections["static.json"] = json.dumps(summary, indent=2, ensure_ascii=False) + "\n"
@@ -144,7 +207,7 @@ class RossBackend:
             "data": data,
         }
         (run_dir / "results.json").write_text(
-            json.dumps(result_payload, indent=2, ensure_ascii=False), encoding="utf-8"
+            json.dumps(result_payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
         )
         return AnalysisResult(
             backend=self.name,
