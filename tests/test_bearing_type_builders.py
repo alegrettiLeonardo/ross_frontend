@@ -59,7 +59,6 @@ def test_approved_bearing_selector_builds_all_six_domain_types(app):
     page._type_changed("tilting")
     tilting = page._build_spec()
     assert tilting.kind == BearingKind.TILTING_PAD
-    assert tilting.n_pads if hasattr(tilting, "n_pads") else len(tilting.pivot_angle_deg) == 5
     assert len(tilting.pivot_angle_deg) == 5
     assert tilting.pivot_angle_deg[0] == pytest.approx(18.0)
     assert tilting.equilibrium_type == "match_load"
