@@ -221,6 +221,13 @@ class RossModelBuilder:
                 cxz=support.cxz,
                 czx=support.czx,
             )
+            # A ROSS PointMass located directly on a link-only node is not a
+            # supported topology in Rotor.__init__ (the plotting/summary setup
+            # expects point masses to coincide with a shaft/bearing position).
+            # BearingElement already supports translational mass coefficients,
+            # so the pedestal/housing mass is placed on the support-to-ground
+            # element itself. This preserves the independent housing x/y DOFs
+            # and avoids introducing a spurious axial housing mass.
             bearing_elements.append(
                 rs.BearingElement(
                     n=link_node,
@@ -232,14 +239,9 @@ class RossModelBuilder:
                     cyy=support_coeff.cyy,
                     cxy=support_coeff.cxy,
                     cyx=support_coeff.cyx,
+                    mxx=support.mass_kg,
+                    myy=support.mass_kg,
                     tag=support.tag or f"Support {index + 1}",
-                )
-            )
-            point_mass_elements.append(
-                rs.PointMass(
-                    n=link_node,
-                    m=support.mass_kg,
-                    tag=f"{support.tag or f'Support {index + 1}'} housing mass",
                 )
             )
 
