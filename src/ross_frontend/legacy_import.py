@@ -126,13 +126,21 @@ def _rotordin_disk_inertias(mass_kg: float, length_mm: float, od_mm: float, id_m
 
 
 def _convert_legacy_ump(value: float, source_unit: str) -> tuple[float, str, float]:
+    """Resolve an explicit UMP source-unit choice to the ROSS SI contract.
+
+    RotorDin's Fortran assembly documents the distributed UMP coefficient as
+    N/m/m (N/m²) and the current frontend writes the stored value directly to
+    that field.  N/m² is therefore the compatibility default.  kgf/mm² remains
+    available only as an explicit opt-in conversion for separately documented
+    external data sets.
+    """
     unit = source_unit.strip().casefold().replace(" ", "")
-    if unit in {"kgf/mm2", "kgf/mm^2", "kgf/mm²"}:
-        return legacy_ump_to_si(value), "kgf/mm²", LEGACY_KGF_MM2_TO_N_M2
     if unit in {"n/m2", "n/m^2", "n/m²"}:
         return float(value), "N/m²", 1.0
+    if unit in {"kgf/mm2", "kgf/mm^2", "kgf/mm²"}:
+        return legacy_ump_to_si(value), "kgf/mm²", LEGACY_KGF_MM2_TO_N_M2
     raise LegacyImportError(
-        f"Unsupported legacy UMP source unit {source_unit!r}; use 'kgf/mm2' or 'N/m2'."
+        f"Unsupported legacy UMP source unit {source_unit!r}; use 'N/m2' or explicitly 'kgf/mm2'."
     )
 
 
@@ -187,7 +195,7 @@ def loads_irdin_project(
     text: str,
     *,
     source_name: str = "legacy.irdin",
-    ump_source_unit: str = "kgf/mm2",
+    ump_source_unit: str = "N/m2",
 ) -> RotorProject:
     document = _parse_document(text)
     header = document.get("irdin", {})
@@ -263,16 +271,21 @@ def loads_irdin_project(
                     "conversion_factor_to_n_m2": ump_factor,
                     "stiffness_per_length_n_m2": ump_si,
                     "integrated_stiffness_n_m": region.integrated_stiffness_n_m,
+                    "solver_unit_contract": "N/m²",
                 }
             )
         mass_audit.append(
             {"xi_mm": xi, "length_mm": length, "mass_kg": mass, "od_mm": od, "id_mm": inner, "package": package, "ump": ump}
         )
 
-    if ump_regions and resolved_ump_unit == "kgf/mm²":
+    if ump_regions and resolved_ump_unit == "N/m²":
         warnings.append(
-            "Legacy INI has no explicit UMP unit token; ump_crg was interpreted as kgf/mm² and converted to N/m². "
-            "Use ump_source_unit='N/m2' only for projects known to already store SI values."
+            "UMP imported with RotorDin solver compatibility semantics: the stored value is passed directly as N/m². "
+            "The legacy UI label 'kg' is inconsistent with the Fortran solver unit contract and is not used for automatic conversion."
+        )
+    elif ump_regions:
+        warnings.append(
+            f"UMP source was explicitly declared as {resolved_ump_unit} and converted to the ROSS N/m² contract."
         )
 
     bearings = [_table_bearing(row, idx) for idx, row in enumerate(_grid_rows(document.get("mancais")), start=1)]
@@ -383,7 +396,7 @@ def loads_irdin_project(
 def load_irdin_project(
     path: str | Path,
     *,
-    ump_source_unit: str = "kgf/mm2",
+    ump_source_unit: str = "N/m2",
 ) -> RotorProject:
     source = Path(path)
     return loads_irdin_project(
