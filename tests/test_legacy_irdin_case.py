@@ -78,7 +78,9 @@ def test_w60_supports_and_ump_build_as_global_rotor_stiffness_extension():
 
     assert set(build.support_link_node_by_bearing) == {0, 1}
     assert len(build.bearing_elements) == 4
-    assert len(build.point_mass_elements) == 3
+    # Only the physical [Concent] mass remains a PointMass. Housing masses are
+    # represented by native BearingElement mxx/myy at the support link DOFs.
+    assert len(build.point_mass_elements) == 1
 
     front_link = build.support_link_node_by_bearing[0]
     rear_link = build.support_link_node_by_bearing[1]
@@ -93,6 +95,11 @@ def test_w60_supports_and_ump_build_as_global_rotor_stiffness_extension():
     assert support_rear["n"] == rear_link
     assert support_front["kxx"] == pytest.approx(43.68e7)
     assert support_front["kyy"] == pytest.approx(90.34e7)
+    assert support_front["mxx"] == pytest.approx(175.0)
+    assert support_front["myy"] == pytest.approx(175.0)
+    assert support_rear["mxx"] == pytest.approx(175.0)
+    assert support_rear["myy"] == pytest.approx(175.0)
+    assert "mzz" not in support_front
     assert "kzz" not in support_front
 
     assert 918.0 in build.node_by_position_mm
