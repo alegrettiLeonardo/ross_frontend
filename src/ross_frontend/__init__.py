@@ -5,7 +5,7 @@ from .vendor_runtime import activate_vendored_ross
 # Prefer the solver source pinned in vendor/ross before any backend imports.
 activate_vendored_ross()
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from .domain import (
     AnalysisRequest,
@@ -16,10 +16,13 @@ from .domain import (
     MaterialSpec,
     PlainJournalBearingSpec,
     PointMassSpec,
+    ProbeSpec,
     RollerBearingSpec,
     RotorProject,
     ShaftSectionSpec,
+    SupportSpec,
     TiltingPadBearingSpec,
+    UnbalanceSpec,
 )
 
 __all__ = [
@@ -31,8 +34,11 @@ __all__ = [
     "MaterialSpec",
     "PlainJournalBearingSpec",
     "PointMassSpec",
+    "ProbeSpec",
     "RollerBearingSpec",
     "RotorProject",
     "ShaftSectionSpec",
+    "SupportSpec",
     "TiltingPadBearingSpec",
+    "UnbalanceSpec",
 ]
