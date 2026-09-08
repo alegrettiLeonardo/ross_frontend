@@ -1,160 +1,325 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from functools import lru_cache
-from math import isfinite
-from typing import Iterable
+from dataclasses import asdict, dataclass
+from math import isfinite, sqrt
+from typing import Iterable, Sequence
+
+from ..domain import UmpFormulation, UMPRegionSpec
 
 LEGACY_KGF_MM2_TO_N_M2 = 9.80665e6
+ROTORDIN_LEGACY_THRESHOLD_N_M2 = 0.1
+ROTORDIN_LEGACY_MAX_REGIONS = 5
+
+
+@dataclass(frozen=True, slots=True)
+class UMPElementSpan:
+    """One native ROSS shaft element span used for global UMP assembly."""
+
+    node: int
+    start_mm: float
+    end_mm: float
+
+    @property
+    def length_m(self) -> float:
+        return (self.end_mm - self.start_mm) / 1000.0
+
+    @property
+    def midpoint_mm(self) -> float:
+        return 0.5 * (self.start_mm + self.end_mm)
 
 
 @dataclass(frozen=True, slots=True)
 class UMPElementContribution:
-    """One active beam contribution used to assemble UMP force in global DOFs."""
+    """Audit record for one UMP region contribution to one shaft element."""
 
     node: int
-    length_m: float
-    stiffness_per_length_n_m2: float
+    start_mm: float
+    end_mm: float
+    region_tag: str
+    formulation: str
+    kxx_prime_n_m2: float
+    kyy_prime_n_m2: float
+    kxy_prime_n_m2: float
+    kyx_prime_n_m2: float
+    legacy_rotary_term: bool
+    matrix_frobenius_norm: float
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class UMPAssembly:
+    matrix: object
+    contributions: list[UMPElementContribution]
+
+    def audit_dict(self) -> dict:
+        formulations = sorted({item.formulation for item in self.contributions})
+        return {
+            "active": bool(self.contributions),
+            "formulations": formulations,
+            "element_contributions": [item.to_dict() for item in self.contributions],
+            "rotordin_legacy_contract": {
+                "threshold_n_m2": ROTORDIN_LEGACY_THRESHOLD_N_M2,
+                "max_regions": ROTORDIN_LEGACY_MAX_REGIONS,
+                "undefined_region_pointer_bug_emulated": False,
+                "mkb_contamination_bug_emulated": False,
+            },
+        }
 
 
 def legacy_ump_to_si(value: float) -> float:
-    """Convert a legacy UMP value interpreted as kgf/mm² to N/m²."""
+    """Explicitly convert kgf/mm² to N/m² for externally documented data.
+
+    RotorDin project import does *not* call this conversion unless the source unit
+    is explicitly declared as kgf/mm².  The historical UI label is not sufficient
+    evidence for an automatic conversion.
+    """
+
     value = float(value)
     if not isfinite(value) or value < 0:
         raise ValueError("Legacy UMP value must be a finite non-negative number.")
     return value * LEGACY_KGF_MM2_TO_N_M2
 
 
-def consistent_ump_matrix(stiffness_per_length_n_m2: float, length_m: float) -> list[list[float]]:
-    r"""Return the 12x12 consistent linearized UMP matrix for a ROSS shaft element.
+def _zero_matrix(size: int) -> list[list[float]]:
+    return [[0.0 for _ in range(size)] for _ in range(size)]
 
-    For small radial perturbations, ``f_UMP(z)=k'_UMP u(z)``.  Therefore the
-    structural equation can be written either with ``K-K_UMP`` on the left or
-    with ``F_UMP=K_UMP q`` on the right.  Only lateral bending DOFs are affected.
-    """
-    k = float(stiffness_per_length_n_m2)
+
+def _shape_matrix(length_m: float) -> list[list[float]]:
+    r"""Return \int N^T N dz for cubic Hermite interpolation."""
+
     length = float(length_m)
-    if not isfinite(k) or k < 0:
-        raise ValueError("UMP stiffness per length must be finite and non-negative.")
     if not isfinite(length) or length <= 0:
         raise ValueError("UMP element length must be finite and positive.")
-
     l2 = length * length
-    plane = [
+    raw = [
         [156.0, 22.0 * length, 54.0, -13.0 * length],
         [22.0 * length, 4.0 * l2, 13.0 * length, -3.0 * l2],
         [54.0, 13.0 * length, 156.0, -22.0 * length],
         [-13.0 * length, -3.0 * l2, -22.0 * length, 4.0 * l2],
     ]
-    scale = k * length / 420.0
-    matrix = [[0.0 for _ in range(12)] for _ in range(12)]
+    scale = length / 420.0
+    return [[scale * value for value in row] for row in raw]
 
+
+def _legacy_rotary_shape_matrix(length_m: float) -> list[list[float]]:
+    """Return RotorDin ``coemas`` ln2 block for one bending plane.
+
+    This is the historical rotary-inertia mass block that is inadvertently added
+    to the UMP matrix when ``coemas(..., ie(r), su)`` is called in ``matrizes.f``.
+    """
+
+    length = float(length_m)
+    if not isfinite(length) or length <= 0:
+        raise ValueError("UMP element length must be finite and positive.")
+    l2 = length * length
+    return [
+        [36.0, 3.0 * length, -36.0, 3.0 * length],
+        [3.0 * length, 4.0 * l2, -3.0 * length, -1.0 * l2],
+        [-36.0, -3.0 * length, 36.0, -3.0 * length],
+        [3.0 * length, -1.0 * l2, -3.0 * length, 4.0 * l2],
+    ]
+
+
+def _validate_tensor(kxx: float, kyy: float, kxy: float, kyx: float) -> None:
+    values = (kxx, kyy, kxy, kyx)
+    if not all(isfinite(float(value)) for value in values):
+        raise ValueError("UMP stiffness tensor values must be finite.")
+    if kxx < 0 or kyy < 0:
+        raise ValueError("UMP direct stiffness magnitudes kxx' and kyy' cannot be negative.")
+
+
+def consistent_ump_matrix(
+    kxx_prime_n_m2: float,
+    length_m: float,
+    kyy_prime_n_m2: float | None = None,
+    kxy_prime_n_m2: float = 0.0,
+    kyx_prime_n_m2: float = 0.0,
+) -> list[list[float]]:
+    r"""Return the 12x12 corrected consistent UMP matrix.
+
+    The lateral force density is ``f = K'_EM u``.  ROSS uses local DOFs
+    ``[x, y, z, alpha, beta, theta]`` at each node.  The y-plane Hermite slope
+    is ``-alpha``, hence the sign transform in the y blocks.
+    """
+
+    kxx = float(kxx_prime_n_m2)
+    kyy = kxx if kyy_prime_n_m2 is None else float(kyy_prime_n_m2)
+    kxy = float(kxy_prime_n_m2)
+    kyx = float(kyx_prime_n_m2)
+    _validate_tensor(kxx, kyy, kxy, kyx)
+
+    h = _shape_matrix(length_m)
+    out = _zero_matrix(12)
     x_dofs = (0, 4, 6, 10)
-    for i, gi in enumerate(x_dofs):
-        for j, gj in enumerate(x_dofs):
-            matrix[gi][gj] = scale * plane[i][j]
-
     y_dofs = (1, 3, 7, 9)
     signs = (1.0, -1.0, 1.0, -1.0)
-    for i, gi in enumerate(y_dofs):
-        for j, gj in enumerate(y_dofs):
-            matrix[gi][gj] = scale * signs[i] * plane[i][j] * signs[j]
-    return matrix
+
+    for i in range(4):
+        for j in range(4):
+            hij = h[i][j]
+            out[x_dofs[i]][x_dofs[j]] += kxx * hij
+            out[x_dofs[i]][y_dofs[j]] += kxy * hij * signs[j]
+            out[y_dofs[i]][x_dofs[j]] += kyx * signs[i] * hij
+            out[y_dofs[i]][y_dofs[j]] += kyy * signs[i] * hij * signs[j]
+    return out
 
 
-def _matvec(matrix: Iterable[Iterable[float]], vector: Iterable[float]) -> list[float]:
-    values = [float(v) for v in vector]
-    rows = [list(row) for row in matrix]
-    if any(len(row) != len(values) for row in rows):
-        raise ValueError("UMP matrix/vector dimensions are inconsistent.")
-    return [sum(float(a) * b for a, b in zip(row, values)) for row in rows]
+def rotordin_legacy_ump_matrix(
+    stiffness_per_length_n_m2: float,
+    length_m: float,
+    density_kg_m3: float,
+    second_moment_area_m4: float,
+) -> list[list[float]]:
+    r"""Return deterministic RotorDin legacy-compatible UMP matrix.
 
+    It reproduces the *defined* historical ``coemas`` behavior:
 
-def ump_force_from_displacement(stiffness_per_length_n_m2: float, length_m: float, displacement: Iterable[float]) -> list[float]:
-    """Return the explicit local linearized UMP force ``F=K_UMP q``."""
-    return _matvec(consistent_ump_matrix(stiffness_per_length_n_m2, length_m), displacement)
+    ``k'L/420 A(L) + rho*I/(30L) B(L)`` for ``k' > 0.1``.
 
-
-def make_ump_rhs_callback(ndof: int, contributions: Iterable[UMPElementContribution], *, number_dof: int = 6):
-    """Build a ROSS ``add_to_RHS`` callback for state-dependent UMP force.
-
-    Use this only with a rotor built with ``ump_realization='rhs_force'``.  The
-    callback receives the current ROSS displacement vector and assembles all
-    local ``K_UMP q`` contributions into global DOFs.
+    The undefined ``nup`` region-pointer behavior and ``mkb`` contamination are
+    intentionally not emulated.
     """
-    items = tuple(contributions)
-    if number_dof != 6:
-        raise ValueError("UMP RHS assembly is currently verified for the ROSS 6-DOF rotor formulation only.")
 
-    def rhs(step, *, disp_resp=None, **_state):
-        import numpy as np
+    k = float(stiffness_per_length_n_m2)
+    length = float(length_m)
+    rho = float(density_kg_m3)
+    inertia = float(second_moment_area_m4)
+    if not all(isfinite(value) for value in (k, length, rho, inertia)):
+        raise ValueError("RotorDin legacy UMP parameters must be finite.")
+    if k < 0 or length <= 0 or rho <= 0 or inertia < 0:
+        raise ValueError("RotorDin legacy UMP parameters are outside their physical ranges.")
+    if k <= ROTORDIN_LEGACY_THRESHOLD_N_M2:
+        return _zero_matrix(12)
 
-        force = np.zeros(int(ndof), dtype=float)
-        if disp_resp is None:
-            return force
-        q = np.asarray(disp_resp, dtype=float)
-        if q.shape != (int(ndof),):
-            raise ValueError(f"UMP RHS expected displacement vector with {ndof} DOFs, received {q.shape}.")
-        for item in items:
-            left = number_dof * item.node
-            right = number_dof * (item.node + 1)
-            dofs = [*range(left, left + number_dof), *range(right, right + number_dof)]
-            local_q = q[dofs]
-            local_f = ump_force_from_displacement(
-                item.stiffness_per_length_n_m2,
-                item.length_m,
-                local_q,
+    out = consistent_ump_matrix(k, length)
+    b = _legacy_rotary_shape_matrix(length)
+    scale = rho * inertia / (30.0 * length)
+    x_dofs = (0, 4, 6, 10)
+    y_dofs = (1, 3, 7, 9)
+    signs = (1.0, -1.0, 1.0, -1.0)
+    for i in range(4):
+        for j in range(4):
+            value = scale * b[i][j]
+            out[x_dofs[i]][x_dofs[j]] += value
+            out[y_dofs[i]][y_dofs[j]] += signs[i] * value * signs[j]
+    return out
+
+
+def _matrix_norm(matrix: Sequence[Sequence[float]]) -> float:
+    return sqrt(sum(float(value) ** 2 for row in matrix for value in row))
+
+
+def _active_regions(regions: Sequence[UMPRegionSpec], midpoint_mm: float) -> list[UMPRegionSpec]:
+    return [
+        region
+        for region in regions
+        if region.start_mm - 1e-9 <= midpoint_mm <= region.end_mm + 1e-9
+    ]
+
+
+def _local_matrix_for_region(region: UMPRegionSpec, shaft_element, length_m: float) -> tuple[list[list[float]], bool]:
+    if region.formulation == UmpFormulation.PHYSICAL_CORRECTED:
+        return (
+            consistent_ump_matrix(
+                region.kxx_prime_n_m2,
+                length_m,
+                region.kyy_prime_n_m2,
+                region.kxy_prime_n_m2,
+                region.kyx_prime_n_m2,
+            ),
+            False,
+        )
+
+    if region.formulation == UmpFormulation.ROTORDIN_LEGACY_COMPAT:
+        material = getattr(shaft_element, "material", None)
+        rho = getattr(material, "rho", None)
+        inertia = getattr(shaft_element, "Ie", None)
+        if rho is None or inertia is None:
+            raise ValueError("RotorDin legacy UMP assembly requires shaft material density and Ie from ROSS.")
+        return (
+            rotordin_legacy_ump_matrix(
+                region.kxx_prime_n_m2,
+                length_m,
+                rho,
+                inertia,
+            ),
+            region.kxx_prime_n_m2 > ROTORDIN_LEGACY_THRESHOLD_N_M2,
+        )
+
+    raise ValueError(f"Unsupported UMP formulation: {region.formulation}")
+
+
+def assemble_ump_global(
+    rotor,
+    regions: Sequence[UMPRegionSpec],
+    element_spans: Sequence[UMPElementSpan],
+) -> UMPAssembly:
+    """Assemble frequency-independent ``K_UMP`` in native ROSS global DOFs."""
+
+    import numpy as np
+
+    regions = tuple(regions)
+    legacy_regions = [region for region in regions if region.formulation == UmpFormulation.ROTORDIN_LEGACY_COMPAT]
+    if len(legacy_regions) > ROTORDIN_LEGACY_MAX_REGIONS:
+        raise ValueError(
+            f"RotorDin legacy compatibility accepts at most {ROTORDIN_LEGACY_MAX_REGIONS} UMP regions."
+        )
+
+    matrix = np.zeros((int(rotor.ndof), int(rotor.ndof)), dtype=float)
+    contributions: list[UMPElementContribution] = []
+    shaft_by_node = {int(element.n): element for element in rotor.shaft_elements}
+
+    for span in element_spans:
+        active = _active_regions(regions, span.midpoint_mm)
+        if not active:
+            continue
+        shaft = shaft_by_node.get(int(span.node))
+        if shaft is None:
+            raise ValueError(f"UMP span node {span.node} has no matching ROSS ShaftElement.")
+        dof_global_index = getattr(shaft, "dof_global_index", None)
+        if dof_global_index is None:
+            dofs = [6 * span.node + i for i in range(6)] + [6 * (span.node + 1) + i for i in range(6)]
+        else:
+            dofs = list(dof_global_index.values())
+        if len(dofs) != 12:
+            raise ValueError("UMP assembly is verified only for 12-DOF ROSS shaft elements.")
+
+        for region in active:
+            local, legacy_rotary = _local_matrix_for_region(region, shaft, span.length_m)
+            local_array = np.asarray(local, dtype=float)
+            matrix[np.ix_(dofs, dofs)] += local_array
+            if np.linalg.norm(local_array) <= 0.0:
+                continue
+            contributions.append(
+                UMPElementContribution(
+                    node=span.node,
+                    start_mm=span.start_mm,
+                    end_mm=span.end_mm,
+                    region_tag=region.tag,
+                    formulation=region.formulation.value,
+                    kxx_prime_n_m2=region.kxx_prime_n_m2,
+                    kyy_prime_n_m2=region.kyy_prime_n_m2,
+                    kxy_prime_n_m2=region.kxy_prime_n_m2,
+                    kyx_prime_n_m2=region.kyx_prime_n_m2,
+                    legacy_rotary_term=legacy_rotary,
+                    matrix_frobenius_norm=_matrix_norm(local),
+                )
             )
-            force[dofs] += np.asarray(local_f, dtype=float)
-        return force
 
-    return rhs
-
-
-@lru_cache(maxsize=None)
-def make_ump_shaft_element_class(base_cls):
-    """Create a ShaftElement subclass that subtracts linearized UMP stiffness."""
-    class UMPLinearizedShaftElement(base_cls):
-        def __init__(self, *args, ump_stiffness_per_length_n_m2: float = 0.0, **kwargs):
-            self.ump_stiffness_per_length_n_m2 = float(ump_stiffness_per_length_n_m2)
-            super().__init__(*args, **kwargs)
-
-        def K(self):
-            import numpy as np
-            base = super().K()
-            if self.ump_stiffness_per_length_n_m2 <= 0.0:
-                return base
-            return base - np.asarray(
-                consistent_ump_matrix(self.ump_stiffness_per_length_n_m2, self.L),
-                dtype=float,
-            )
-
-        def ump_K(self):
-            import numpy as np
-            return np.asarray(
-                consistent_ump_matrix(self.ump_stiffness_per_length_n_m2, self.L),
-                dtype=float,
-            )
-
-        def ump_force(self, displacement):
-            import numpy as np
-            q = np.asarray(displacement, dtype=float)
-            if q.shape != (12,):
-                raise ValueError("A shaft-element UMP displacement vector must contain 12 local DOFs.")
-            return self.ump_K() @ q
-
-    UMPLinearizedShaftElement.__name__ = f"UMP{base_cls.__name__}"
-    UMPLinearizedShaftElement.__qualname__ = UMPLinearizedShaftElement.__name__
-    UMPLinearizedShaftElement.__module__ = __name__
-    return UMPLinearizedShaftElement
+    return UMPAssembly(matrix=matrix, contributions=contributions)
 
 
 __all__ = [
     "LEGACY_KGF_MM2_TO_N_M2",
+    "ROTORDIN_LEGACY_MAX_REGIONS",
+    "ROTORDIN_LEGACY_THRESHOLD_N_M2",
+    "UMPAssembly",
     "UMPElementContribution",
+    "UMPElementSpan",
+    "assemble_ump_global",
     "consistent_ump_matrix",
     "legacy_ump_to_si",
-    "make_ump_rhs_callback",
-    "make_ump_shaft_element_class",
-    "ump_force_from_displacement",
+    "rotordin_legacy_ump_matrix",
 ]
