@@ -27,6 +27,20 @@ def test_w60_case_imports_without_losing_legacy_physics():
     assert project.disks[1].diametral_inertia_kg_m2 == pytest.approx(43.39742658333333)
     assert project.disks[1].polar_inertia_kg_m2 == pytest.approx(25.176051875)
 
+    # The main active rotor span has UMP enabled.  The legacy INI does not carry
+    # a unit token, so migration records the explicit kgf/mm² -> N/m² assumption.
+    assert len(project.ump_regions) == 1
+    ump = project.ump_regions[0]
+    assert ump.start_mm == pytest.approx(918.0)
+    assert ump.end_mm == pytest.approx(1633.0)
+    assert ump.source_value == pytest.approx(1.002)
+    assert ump.source_unit == "kgf/mm²"
+    assert ump.stiffness_per_length_n_m2 == pytest.approx(9_826_263.3)
+    assert ump.integrated_stiffness_n_m == pytest.approx(7_025_778.2595)
+    audit = project.metadata["legacy_import"]["ump_audit"][0]
+    assert audit["mass_row"] == 2
+    assert audit["conversion_factor_to_n_m2"] == pytest.approx(9.80665e6)
+
     assert len(project.bearings) == 2
     front, rear = project.bearings
     assert front.position_mm == pytest.approx(467.8)
@@ -56,7 +70,7 @@ def test_w60_case_imports_without_losing_legacy_physics():
     assert any("UMP" in warning for warning in warnings)
 
 
-def test_w60_supports_build_as_series_n_link_housing_nodes():
+def test_w60_supports_and_ump_build_into_ross_extensions():
     project = load_irdin_project(CASE)
     build = RossModelBuilder(FakeRoss()).build(project)
 
@@ -79,3 +93,19 @@ def test_w60_supports_build_as_series_n_link_housing_nodes():
     assert support_front["kxx"] == pytest.approx(43.68e7)
     assert support_front["kyy"] == pytest.approx(90.34e7)
     assert "kzz" not in support_front
+
+    # UMP boundaries become mesh breakpoints and all elements inside the active
+    # 918..1633 mm span carry the same distributed electromagnetic stiffness.
+    assert 918.0 in build.node_by_position_mm
+    assert 1633.0 in build.node_by_position_mm
+    assert build.ump_shaft_elements
+    assert all(
+        element.ump_stiffness_per_length_n_m2 == pytest.approx(9_826_263.3)
+        for element in build.ump_shaft_elements
+    )
+
+
+def test_w60_ump_unit_can_be_explicitly_overridden_for_si_legacy_assets():
+    project = load_irdin_project(CASE, ump_source_unit="N/m2")
+    assert project.ump_regions[0].stiffness_per_length_n_m2 == pytest.approx(1.002)
+    assert project.ump_regions[0].source_unit == "N/m²"
