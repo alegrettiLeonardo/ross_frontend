@@ -127,6 +127,7 @@ class EnhancedResultsPage(ResultsPage):
     @Slot(object)
     def _on_response_completed(self, result: RotorResponseResult):
         self.response_result = result
+        self.analysis_stack.setCurrentWidget(self.response_chart)
         self.response_chart.set_result(result, "magnitude")
         self._fill_response_table(result)
         label = "Unbalance Response" if result.kind == "project_unbalance_response" else "Frequency Response"
@@ -134,6 +135,7 @@ class EnhancedResultsPage(ResultsPage):
 
     @Slot(str)
     def _on_response_failed(self, message: str):
+        self.analysis_stack.setCurrentWidget(self.response_chart)
         self.response_chart.set_message(message)
         self._set_message_table(message)
         self.statusMessage.emit("Response analysis failed", message, False)
