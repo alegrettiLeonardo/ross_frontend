@@ -23,9 +23,10 @@ def test_approved_bearing_selector_builds_all_six_domain_types(app):
     page._type_changed("coefficient")
     coefficient = page._build_spec()
     assert coefficient.kind == BearingKind.COEFFICIENT
-    assert coefficient.frequency_rpm == [500.0, 1000.0, 2000.0, 4000.0, 6000.0, 8000.0, 10000.0]
-    assert coefficient.kxz[0] == pytest.approx(-0.32e7)
-    assert coefficient.kzz[0] == pytest.approx(1.10e7)
+    assert coefficient.frequency_rpm == [0.0]
+    assert coefficient.kxx[0] == pytest.approx(2.8e7)
+    assert coefficient.kxz[0] == pytest.approx(0.0)
+    assert coefficient.kzz[0] == pytest.approx(2.7e7)
 
     page._type_changed("ball")
     ball = page._build_spec()
