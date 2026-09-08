@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("ross")
@@ -6,7 +8,7 @@ import numpy as np
 
 from ross_frontend.backends.coordinates import rpm_to_rad_s
 from ross_frontend.backends.ross.bearing_calculator import RossBearingCalculator
-from ross_frontend.backends.ross.builder import RossBuildError, RossModelBuilder
+from ross_frontend.backends.ross.builder import RossModelBuilder
 from ross_frontend.backends.ross.response_calculator import FrequencyResponseRequest, RossResponseCalculator
 from ross_frontend.domain import (
     BallBearingSpec,
@@ -16,7 +18,12 @@ from ross_frontend.domain import (
     RotorProject,
     ShaftSectionSpec,
     UMPRegionSpec,
+    UmpFormulation,
 )
+from ross_frontend.legacy_import import load_irdin_project
+
+
+CASE = Path(__file__).resolve().parents[1] / "cases" / "OP-W60-500-60Hz-IC611-P3" / "irdin_input.txt"
 
 
 def real_project():
@@ -42,7 +49,10 @@ def project_with_ump():
         UMPRegionSpec(
             start_mm=0.0,
             end_mm=500.0,
-            stiffness_per_length_n_m2=2.0e6,
+            kxx_prime_n_m2=2.0e6,
+            kyy_prime_n_m2=2.0e6,
+            formulation=UmpFormulation.PHYSICAL_CORRECTED,
+            source_unit="N/m²",
             tag="test UMP",
         )
     ]
@@ -54,6 +64,7 @@ def test_real_ross_build_modal_and_frequency_response():
     project = real_project()
     build = RossModelBuilder().build(project)
     assert build.rotor.ndof > 0
+    assert build.rotor is build.base_rotor
     modal = build.rotor.run_modal(speed=rpm_to_rad_s(1800.0), num_modes=4)
     assert len(modal.wd) >= 2
 
@@ -67,46 +78,48 @@ def test_real_ross_build_modal_and_frequency_response():
 
 
 @pytest.mark.ross
-def test_real_ross_linearized_ump_reduces_global_radial_stiffness():
-    baseline = RossModelBuilder().build(real_project(), ump_realization="off")
-    ump_build = RossModelBuilder().build(project_with_ump(), ump_realization="negative_stiffness")
-    k0 = np.asarray(baseline.rotor.K(0.0), dtype=float)
-    k1 = np.asarray(ump_build.rotor.K(0.0), dtype=float)
-    delta = k0 - k1
+def test_real_ross_ump_rotor_has_single_global_negative_stiffness_path():
+    build = RossModelBuilder().build(project_with_ump())
+    rotor = build.rotor
 
-    assert ump_build.ump_shaft_elements
-    assert k0.shape == k1.shape
-    assert np.linalg.norm(delta) > 0.0
-    assert np.allclose(delta, delta.T, rtol=1e-10, atol=1e-8)
-    assert delta[0, 0] > 0.0
-    assert delta[1, 1] > 0.0
-    assert delta[2, 2] == pytest.approx(0.0, abs=1e-8)
-    assert delta[5, 5] == pytest.approx(0.0, abs=1e-8)
+    assert rotor is not build.base_rotor
+    assert type(build.shaft_elements[0]).__name__ == "ShaftElement"
+    assert hasattr(rotor, "K_without_ump")
+    assert not hasattr(build, "ump_rhs_callback")
+
+    k_without = np.asarray(rotor.K_without_ump(0.0), dtype=float)
+    k_ump = np.asarray(build.K_ump, dtype=float)
+    k_effective = np.asarray(rotor.K(0.0), dtype=float)
+    k_base = np.asarray(build.base_rotor.K(0.0), dtype=float)
+
+    assert k_without.shape == k_ump.shape == k_effective.shape
+    assert np.linalg.norm(k_ump) > 0.0
+    assert np.allclose(k_without, k_base, rtol=1e-12, atol=1e-9)
+    assert np.allclose(k_effective, k_without - k_ump, rtol=1e-12, atol=1e-9)
+    assert np.allclose(k_ump, k_ump.T, rtol=1e-12, atol=1e-9)
+    assert k_ump[0, 0] > 0.0
+    assert k_ump[1, 1] > 0.0
+    assert k_ump[2, 2] == pytest.approx(0.0, abs=1e-9)
+    assert k_ump[5, 5] == pytest.approx(0.0, abs=1e-9)
 
 
 @pytest.mark.ross
-def test_real_ross_ump_rhs_force_equals_removed_stiffness_times_state():
-    project = project_with_ump()
-    embedded = RossModelBuilder().build(project, ump_realization="negative_stiffness")
-    rhs_build = RossModelBuilder().build(project, ump_realization="rhs_force")
+def test_real_w60_legacy_ump_is_continuous_across_internal_station():
+    project = load_irdin_project(CASE)
+    build = RossModelBuilder().build(project)
 
-    assert not rhs_build.ump_shaft_elements
-    assert rhs_build.ump_contributions
-    k_base = np.asarray(rhs_build.rotor.K(0.0), dtype=float)
-    k_embedded = np.asarray(embedded.rotor.K(0.0), dtype=float)
+    assert project.ump_regions[0].formulation == UmpFormulation.ROTORDIN_LEGACY_COMPAT
+    assert type(build.rotor).__name__ == "UmpRotor"
+    assert len(build.ump_contributions) == 2
+    assert [(item.start_mm, item.end_mm) for item in build.ump_contributions] == pytest.approx(
+        [(918.0, 1275.5), (1275.5, 1633.0)]
+    )
+    assert all(item.legacy_rotary_term for item in build.ump_contributions)
 
-    q = np.zeros(rhs_build.rotor.ndof)
-    q[0] = 1.0e-4
-    q[1] = -0.5e-4
-    q[6] = 0.25e-4
-    rhs_force = rhs_build.ump_rhs_callback()(0, disp_resp=q)
-    expected_force = (k_base - k_embedded) @ q
-
-    assert np.linalg.norm(rhs_force) > 0.0
-    assert np.allclose(rhs_force, expected_force, rtol=1e-10, atol=1e-10)
-
-    with pytest.raises(RossBuildError, match="double-count"):
-        embedded.ump_rhs_callback()
+    k_without = np.asarray(build.rotor.K_without_ump(0.0), dtype=float)
+    k_ump = np.asarray(build.K_ump, dtype=float)
+    assert np.linalg.norm(k_ump) > 0.0
+    assert np.allclose(build.rotor.K(0.0), k_without - k_ump, rtol=1e-12, atol=1e-9)
 
 
 @pytest.mark.ross
