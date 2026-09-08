@@ -60,7 +60,7 @@ class Sidebar(QFrame):
         root = QVBoxLayout(self)
         root.setContentsMargins(9, 12, 9, 12)
         root.setSpacing(1)
-        self._add_nav(root, "home", "Home", "Home")
+        self._add_nav(root, "home", "Home", "home")
         self._divider(root)
         self._section(root, "MODEL")
         for key, label, icon in [
