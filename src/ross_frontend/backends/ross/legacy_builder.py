@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ...domain import CoefficientBearingSpec
 from ...ross_ext.rotordin_legacy_bearing import make_rotordin_legacy_bearing_class
+from ...ross_ext.rotordin_legacy_disk import make_rotordin_legacy_disk_class
 from ...ross_ext.rotordin_legacy_shaft import make_rotordin_legacy_shaft_class
 from ...ross_ext.ump_rotor import make_ump_rotor_class
 from ..coordinates import rpm_to_rad_s, rotordin_xz_to_ross_xy
@@ -15,6 +16,7 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
     historical numerical contracts that differ from native ROSS:
 
     * shaft lateral M/K/G are the exact ``coemas/coerig/coegir`` matrices;
+    * rigid disks use the RotorDin gyroscopic sign convention;
     * TABLE bearings use ``intlag`` local three-point quadratic interpolation;
     * the RotorDin default ``DIV/MXDIV`` rule subdivides the first largest gap.
 
@@ -92,15 +94,16 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
             raise ValueError("RotorDinLegacyModelBuilder requires a legacy-imported RotorProject.")
 
         # Polymorphic _breakpoints() and _build_bearing() mean this pass already
-        # has the RotorDin W60 mesh and TABLE interpolation. The shaft matrices
-        # are replaced below because the production builder intentionally remains
-        # native ROSS.
+        # has the RotorDin W60 mesh and TABLE interpolation. Shaft and rigid-disk
+        # gyroscopic matrices are replaced below because the production builder
+        # intentionally remains native ROSS.
         native = super().build(project)
-        legacy_cls = make_rotordin_legacy_shaft_class(self.rs.ShaftElement)
+
+        legacy_shaft_cls = make_rotordin_legacy_shaft_class(self.rs.ShaftElement)
         shaft_elements = []
         for source in native.shaft_elements:
             shaft_elements.append(
-                legacy_cls(
+                legacy_shaft_cls(
                     L=source.L,
                     idl=source.idl,
                     odl=source.odl,
@@ -120,9 +123,23 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
                 )
             )
 
+        legacy_disk_cls = make_rotordin_legacy_disk_class(self.rs.DiskElement)
+        disk_elements = [
+            legacy_disk_cls(
+                n=source.n,
+                m=source.m,
+                Id=source.Id,
+                Ip=source.Ip,
+                tag=getattr(source, "tag", None),
+                scale_factor=getattr(source, "scale_factor", 1.0),
+                color=getattr(source, "color", "Firebrick"),
+            )
+            for source in native.disk_elements
+        ]
+
         rotor_kwargs = self._rotor_kwargs(
             shaft_elements,
-            native.disk_elements,
+            disk_elements,
             native.bearing_elements,
             native.point_mass_elements,
             native.support_mass_elements,
@@ -148,6 +165,7 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
         inserted_points = [value for value in refined_points if value not in set(physical_points)]
         ump_audit = dict(ump_audit)
         ump_audit["shaft_matrix_formulation"] = "rotordin_coemas_coerig_coegir"
+        ump_audit["rigid_disk_gyroscopic_sign"] = "rotordin_matrix_sign"
         ump_audit["bearing_table_interpolation"] = "rotordin_intlag_local_quadratic"
         ump_audit["legacy_mesh"] = {
             "rule": "predad_first_largest_gap_DIV_MXDIV",
@@ -163,7 +181,7 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
             base_rotor=base_rotor,
             node_by_position_mm=native.node_by_position_mm,
             shaft_elements=shaft_elements,
-            disk_elements=native.disk_elements,
+            disk_elements=disk_elements,
             bearing_elements=native.bearing_elements,
             point_mass_elements=native.point_mass_elements,
             support_mass_elements=native.support_mass_elements,
