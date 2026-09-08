@@ -3,8 +3,9 @@ from pathlib import Path
 import pytest
 
 from ross_frontend.backends.ross.builder import RossModelBuilder
-from ross_frontend.legacy_import import load_irdin_project
-from fakes import FakeRoss
+from ross_frontend.domain import UmpFormulation
+from ross_frontend.legacy_import import LegacyImportError, load_irdin_project
+from fakes import FakeRoss, FakeShaftElement
 
 
 CASE = Path(__file__).resolve().parents[1] / "cases" / "OP-W60-500-60Hz-IC611-P3" / "irdin_input.txt"
@@ -19,29 +20,28 @@ def test_w60_case_imports_without_losing_legacy_physics():
     assert len(project.shaft) == 15
     assert project.shaft_length_mm == pytest.approx(2555.2)
 
-    # RotorDin [Massas] rows are converted to rigid disks using the exact
-    # predad.f mmmidkf/smindkf inertia equations.
     assert len(project.disks) == 4
     assert [d.position_mm for d in project.disks] == pytest.approx([737.5, 1275.5, 1932.5, 2550.2])
     assert project.disks[1].mass_kg == pytest.approx(723.19)
     assert project.disks[1].diametral_inertia_kg_m2 == pytest.approx(43.39742658333333)
     assert project.disks[1].polar_inertia_kg_m2 == pytest.approx(25.176051875)
 
-    # RotorDin Fortran documents UMP as N/m/m and the current input writer sends
-    # the stored value directly.  Preserve that contract by default even though
-    # the legacy UI label still says "kg".
     assert len(project.ump_regions) == 1
     ump = project.ump_regions[0]
     assert ump.start_mm == pytest.approx(918.0)
     assert ump.end_mm == pytest.approx(1633.0)
     assert ump.source_value == pytest.approx(1.002)
-    assert ump.source_unit == "N/m²"
-    assert ump.stiffness_per_length_n_m2 == pytest.approx(1.002)
-    assert ump.integrated_stiffness_n_m == pytest.approx(0.71643)
+    assert ump.source_unit == "legacy_unknown"
+    assert ump.solver_interpretation == "N/m²"
+    assert ump.formulation == UmpFormulation.ROTORDIN_LEGACY_COMPAT
+    assert ump.kxx_prime_n_m2 == pytest.approx(1.002)
+    assert ump.kyy_prime_n_m2 == pytest.approx(1.002)
+
     audit = project.metadata["legacy_import"]["ump_audit"][0]
     assert audit["mass_row"] == 2
-    assert audit["conversion_factor_to_n_m2"] == pytest.approx(1.0)
-    assert audit["solver_unit_contract"] == "N/m²"
+    assert audit["formulation"] == "rotordin_legacy_compat"
+    assert audit["undefined_region_pointer_bug_emulated"] is False
+    assert audit["mkb_contamination_bug_emulated"] is False
 
     assert len(project.bearings) == 2
     front, rear = project.bearings
@@ -69,16 +69,16 @@ def test_w60_case_imports_without_losing_legacy_physics():
     assert project.supports[0].kzz == pytest.approx(90.34e7)
 
     warnings = project.metadata["legacy_import"]["warnings"]
-    assert any("UMP" in warning and "N/m²" in warning for warning in warnings)
+    assert any("legacy_unknown" in warning and "fail-closed" in warning for warning in warnings)
 
 
-def test_w60_supports_and_ump_build_into_ross_extensions():
+def test_w60_supports_and_ump_build_as_global_rotor_stiffness_extension():
     project = load_irdin_project(CASE)
     build = RossModelBuilder(FakeRoss()).build(project)
 
     assert set(build.support_link_node_by_bearing) == {0, 1}
-    assert len(build.bearing_elements) == 4  # two rotor bearings + two support-to-ground elements
-    assert len(build.point_mass_elements) == 3  # 34 kg concentrated + two 175 kg housings
+    assert len(build.bearing_elements) == 4
+    assert len(build.point_mass_elements) == 3
 
     front_link = build.support_link_node_by_bearing[0]
     rear_link = build.support_link_node_by_bearing[1]
@@ -96,18 +96,32 @@ def test_w60_supports_and_ump_build_into_ross_extensions():
     assert "kzz" not in support_front
 
     assert 918.0 in build.node_by_position_mm
+    assert 1275.5 in build.node_by_position_mm
     assert 1633.0 in build.node_by_position_mm
-    assert build.ump_shaft_elements
+    assert all(type(element) is FakeShaftElement for element in build.shaft_elements)
+    assert build.base_rotor is not build.rotor
+    assert build.K_ump is not None
     assert build.ump_contributions
-    assert all(
-        element.ump_stiffness_per_length_n_m2 == pytest.approx(1.002)
-        for element in build.ump_shaft_elements
-    )
+    active_spans = [(item.start_mm, item.end_mm) for item in build.ump_contributions]
+    assert active_spans == pytest.approx([(918.0, 1275.5), (1275.5, 1633.0)])
+    assert all(item.formulation == "rotordin_legacy_compat" for item in build.ump_contributions)
+    assert all(item.legacy_rotary_term for item in build.ump_contributions)
     assert len({element.kwargs["tag"] for element in build.shaft_elements}) == len(build.shaft_elements)
 
 
-def test_w60_ump_alternate_kgf_unit_requires_explicit_opt_in():
-    project = load_irdin_project(CASE, ump_source_unit="kgf/mm2")
-    assert project.ump_regions[0].stiffness_per_length_n_m2 == pytest.approx(9_826_263.3)
-    assert project.ump_regions[0].source_unit == "kgf/mm²"
-    assert project.ump_regions[0].integrated_stiffness_n_m == pytest.approx(7_025_778.2595)
+def test_w60_physical_corrected_requires_explicit_source_unit():
+    with pytest.raises(LegacyImportError, match="cannot be imported"):
+        load_irdin_project(
+            CASE,
+            ump_formulation=UmpFormulation.PHYSICAL_CORRECTED,
+        )
+
+    project = load_irdin_project(
+        CASE,
+        ump_source_unit="N/m2",
+        ump_formulation=UmpFormulation.PHYSICAL_CORRECTED,
+    )
+    ump = project.ump_regions[0]
+    assert ump.formulation == UmpFormulation.PHYSICAL_CORRECTED
+    assert ump.source_unit == "N/m²"
+    assert ump.kxx_prime_n_m2 == pytest.approx(1.002)
