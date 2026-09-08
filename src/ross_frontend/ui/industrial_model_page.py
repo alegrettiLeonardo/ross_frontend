@@ -15,7 +15,7 @@ class IndustrialModelPage(ModelPage):
         self.disk_table = self._replace_stub(1, "Disks", ["Name", "Position (mm)", "Mass (kg)", "Id (kg·m²)", "Ip (kg·m²)"])
         self.bearing_table = self._replace_stub(2, "Bearings", ["Name", "Position (mm)", "Model", "K/C points", "Flexible support"])
         self.support_table = self._replace_stub(3, "Supports", ["Bearing", "Kxx (N/m)", "Kyy (N/m)", "Cxx (N·s/m)", "Cyy (N·s/m)", "Housing mass (kg)"])
-        self.loads_table = self._append_table("Loads / Probes", ["Kind", "Name", "Position (mm)", "Value / Coordinate", "Phase / Orientation"])
+        self.loads_table = self._append_table("Loads / Probes", ["Kind", "Name", "Position / Span (mm)", "Value / Coordinate", "Phase / Model"])
         self._populate_component_tables()
 
     @staticmethod
@@ -90,15 +90,23 @@ class IndustrialModelPage(ModelPage):
                 [support.bearing_index + 1, f"{support.kxx:.4e}", f"{support.kzz:.4e}", f"{support.cxx:.4e}", f"{support.czz:.4e}", f"{support.mass_kg:.3f}"],
             )
 
-        rows = []
+        rows: list[tuple[str, str, str, str, str]] = []
         for item in self.project.unbalances:
-            rows.append(("Unbalance", item.tag, item.position_mm, f"{item.magnitude_g_mm:g} g·mm", f"{item.phase_deg:g}°"))
+            rows.append(("Unbalance", item.tag, f"{item.position_mm:.1f}", f"{item.magnitude_g_mm:g} g·mm", f"{item.phase_deg:g}°"))
         for item in self.project.probes:
-            rows.append(("Probe", item.tag, item.position_mm, f"Coordinate {item.coordinate}", f"{item.orientation_deg:g}°"))
+            rows.append(("Probe", item.tag, f"{item.position_mm:.1f}", f"Coordinate {item.coordinate}", f"{item.orientation_deg:g}°"))
+        for item in self.project.ump_regions:
+            rows.append(
+                (
+                    "UMP",
+                    item.tag,
+                    f"{item.start_mm:.1f} – {item.end_mm:.1f}",
+                    f"{item.stiffness_per_length_n_m2:.4e} N/m²",
+                    "F=KUMP·q / K−KUMP",
+                )
+            )
         self.loads_table.setRowCount(len(rows))
         for row, values in enumerate(rows):
-            values = list(values)
-            values[2] = f"{float(values[2]):.1f}"
             self._put(self.loads_table, row, values)
 
     def set_project(self, project: RotorProject):
