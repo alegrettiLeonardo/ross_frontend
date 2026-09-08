@@ -84,6 +84,7 @@ def test_ball_plain_journal_and_tilting_pad_parameters_are_converted_to_si():
                 oil_supply_temperature_c=50,
                 frequency_rpm=[900, 1800],
                 load_y_n=-1000,
+                oil_supply_pressure_pa=1.5e5,
                 oil_flow_l_min=30,
             ),
             TiltingPadBearingSpec(
@@ -96,6 +97,9 @@ def test_ball_plain_journal_and_tilting_pad_parameters_are_converted_to_si():
                 pivot_angle_deg=[0, 72, 144, 216, 288],
                 frequency_rpm=[900],
                 oil_supply_temperature_c=45,
+                oil_supply_pressure_pa=2.0e5,
+                load_x_n=250,
+                load_y_n=-1500,
                 oil_flow_l_min=20,
             ),
         ],
@@ -107,6 +111,12 @@ def test_ball_plain_journal_and_tilting_pad_parameters_are_converted_to_si():
     assert isclose(plain["journal_diameter"], 0.08)
     assert isclose(plain["radial_clearance"], 1e-4)
     assert isclose(plain["oil_supply_temperature"], 323.15)
+    assert isclose(plain["oil_supply_pressure"], 1.5e5)
+    assert plain["equilibrium_type"] == "match_load"
     assert isclose(plain["oil_flow_v"], 30 / 1000 / 60)
     assert isclose(tilt["pad_arc"], pi / 3)
+    assert isclose(tilt["oil_supply_pressure"], 2.0e5)
+    assert tilt["equilibrium_type"] == "match_load"
+    assert isclose(tilt["fxs_load"], 250)
+    assert isclose(tilt["fys_load"], -1500)
     assert isclose(tilt["oil_flow_v"], 20 / 1000 / 60)
