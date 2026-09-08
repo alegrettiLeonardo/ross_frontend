@@ -108,10 +108,14 @@ def test_w60_supports_and_ump_build_as_native_ross_link_topology():
     assert rear_mass.kwargs["n"] == rear_link
     assert front_mass.kwargs["mx"] == pytest.approx(175.0)
     assert front_mass.kwargs["my"] == pytest.approx(175.0)
-    assert front_mass.kwargs["mz"] == pytest.approx(0.0)
+    assert front_mass.kwargs["mz"] == pytest.approx(175.0)
     assert rear_mass.kwargs["mx"] == pytest.approx(175.0)
     assert rear_mass.kwargs["my"] == pytest.approx(175.0)
-    assert rear_mass.kwargs["mz"] == pytest.approx(0.0)
+    assert rear_mass.kwargs["mz"] == pytest.approx(175.0)
+
+    # ROSS creates x/y/z translations for every n_link. The legacy support is
+    # lateral-only, so mz is a positive numerical completion of an otherwise
+    # decoupled axial DOF; it is not a new lateral RotorDin parameter.
 
     # Shaft-only [Concent] mass is a zero-inertia disk carrier internally but
     # stays separately classified as a point mass in RossBuild/domain output.
