@@ -30,7 +30,7 @@ def load_ross():
         import ross as rs
     except ImportError as exc:
         raise RossDependencyError(
-            "ROSS is not installed. Install the project dependencies (ross-rotordynamics==2.3.0)."
+            "ROSS is unavailable. Initialize vendor/ross or install ross-rotordynamics==2.3.0."
         ) from exc
     return rs
 
@@ -43,15 +43,18 @@ class RossBuild:
     disk_elements: list[Any]
     bearing_elements: list[Any]
     point_mass_elements: list[Any]
+    support_link_node_by_bearing: dict[int, int]
 
 
 class RossModelBuilder:
     """Translate the frontend domain model into native ROSS objects.
 
     Components in ROSS are attached to nodes. The builder therefore creates a
-    breakpoint at every shaft boundary and at each component position. Conical
-    geometry is re-interpolated at those breakpoints, so adding a bearing does
-    not change the physical taper.
+    breakpoint at every shaft boundary and component position. Conical geometry
+    is re-interpolated at those breakpoints. Flexible bearing supports are
+    realized as bearings in series using external ``n_link`` housing nodes:
+
+        shaft node -- bearing K/C -- housing mass -- support K/C -- ground
     """
 
     _POS_DIGITS = 9
@@ -94,7 +97,7 @@ class RossModelBuilder:
         for section in project.shaft:
             x += section.length_mm
             points.add(self._p(x))
-        for item in [*project.disks, *project.point_masses, *project.bearings]:
+        for item in [*project.disks, *project.point_masses, *project.bearings, *project.unbalances, *project.probes]:
             points.add(self._p(item.position_mm))
             linked = getattr(item, "n_link_position_mm", None)
             if linked is not None:
@@ -163,16 +166,72 @@ class RossModelBuilder:
             for m in project.point_masses
         ]
 
-        bearing_elements = [self._build_bearing(b, node_by_position) for b in project.bearings]
+        support_by_bearing = {support.bearing_index: support for support in project.supports}
+        support_link_node_by_bearing: dict[int, int] = {}
+        bearing_elements: list[Any] = []
+        next_link_node = len(points)
+        for index, bearing in enumerate(project.bearings):
+            support = support_by_bearing.get(index)
+            if support is None:
+                bearing_elements.append(self._build_bearing(bearing, node_by_position))
+                continue
+            if not isinstance(bearing, CoefficientBearingSpec):
+                raise RossBuildError(
+                    "Flexible support realization is currently verified for coefficient/table bearings only."
+                )
+            link_node = next_link_node
+            next_link_node += 1
+            support_link_node_by_bearing[index] = link_node
+            bearing_elements.append(self._build_bearing(bearing, node_by_position, n_link_override=link_node))
+            support_coeff = rotordin_xz_to_ross_xy(
+                kxx=support.kxx,
+                kzz=support.kzz,
+                kxz=support.kxz,
+                kzx=support.kzx,
+                cxx=support.cxx,
+                czz=support.czz,
+                cxz=support.cxz,
+                czx=support.czx,
+            )
+            bearing_elements.append(
+                rs.BearingElement(
+                    n=link_node,
+                    kxx=support_coeff.kxx,
+                    kyy=support_coeff.kyy,
+                    kxy=support_coeff.kxy,
+                    kyx=support_coeff.kyx,
+                    cxx=support_coeff.cxx,
+                    cyy=support_coeff.cyy,
+                    cxy=support_coeff.cxy,
+                    cyx=support_coeff.cyx,
+                    tag=support.tag or f"Support {index + 1}",
+                )
+            )
+            point_mass_elements.append(
+                rs.PointMass(
+                    n=link_node,
+                    m=support.mass_kg,
+                    tag=f"{support.tag or f'Support {index + 1}'} housing mass",
+                )
+            )
+
         rotor = rs.Rotor(
             shaft_elements=shaft_elements,
             disk_elements=disk_elements,
             bearing_elements=bearing_elements,
             point_mass_elements=point_mass_elements,
         )
-        return RossBuild(rotor, node_by_position, shaft_elements, disk_elements, bearing_elements, point_mass_elements)
+        return RossBuild(
+            rotor,
+            node_by_position,
+            shaft_elements,
+            disk_elements,
+            bearing_elements,
+            point_mass_elements,
+            support_link_node_by_bearing,
+        )
 
-    def _build_bearing(self, spec, node_by_position):
+    def _build_bearing(self, spec, node_by_position, *, n_link_override: int | None = None):
         rs = self.rs
         n = node_by_position[self._p(spec.position_mm)]
         tag = spec.tag or None
@@ -188,8 +247,8 @@ class RossModelBuilder:
                 cxz=spec.cxz,
                 czx=spec.czx,
             )
-            n_link = None
-            if spec.n_link_position_mm is not None:
+            n_link = n_link_override
+            if n_link is None and spec.n_link_position_mm is not None:
                 n_link = node_by_position[self._p(spec.n_link_position_mm)]
             return rs.BearingElement(
                 n=n,
@@ -205,6 +264,9 @@ class RossModelBuilder:
                 n_link=n_link,
                 tag=tag,
             )
+
+        if n_link_override is not None:
+            raise RossBuildError("n_link override is not enabled for this bearing family yet.")
 
         if isinstance(spec, BallBearingSpec):
             return rs.BallBearingElement(
