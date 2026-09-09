@@ -21,6 +21,20 @@ class AdapterStatus(StrEnum):
     BLOCKED = "Blocked"
 
 
+class LateralConvention(StrEnum):
+    """Positive-rotation convention used by lateral dynamic analyses."""
+
+    ROSS_NATIVE = "ROSS_NATIVE"
+    ROTORDIN_POSITIVE = "ROTORDIN_POSITIVE"
+
+
+class ProbeAngleContract(StrEnum):
+    """Unit contract for raw lateral probe orientation values."""
+
+    DEGREES = "DEGREES"
+    ROTORDIN_FRONTEND_BUG_RAD = "ROTORDIN_FRONTEND_BUG_RAD"
+
+
 @dataclass(slots=True, frozen=True)
 class MaterialSpec:
     name: str = "Steel"
@@ -250,6 +264,8 @@ class RotorProject:
     frame: str = ""
     poles: int = 2
     description: str = ""
+    lateral_convention: LateralConvention = LateralConvention.ROSS_NATIVE
+    probe_angle_contract: ProbeAngleContract = ProbeAngleContract.DEGREES
     materials: dict[str, MaterialSpec] = field(default_factory=lambda: {"Steel": MaterialSpec()})
     shaft_sections: list[ShaftSection] = field(default_factory=list)
     bearings: list[BearingSpec] = field(default_factory=list)
@@ -297,6 +313,16 @@ class RotorProject:
             raise EngineeringError("Pole count must be positive.")
         if not self.shaft_sections:
             raise EngineeringError("At least one physical shaft section is required.")
+        if not isinstance(self.lateral_convention, LateralConvention):
+            try:
+                self.lateral_convention = LateralConvention(str(self.lateral_convention))
+            except ValueError as exc:
+                raise EngineeringError(f"Unsupported lateral convention {self.lateral_convention!r}.") from exc
+        if not isinstance(self.probe_angle_contract, ProbeAngleContract):
+            try:
+                self.probe_angle_contract = ProbeAngleContract(str(self.probe_angle_contract))
+            except ValueError as exc:
+                raise EngineeringError(f"Unsupported probe angle contract {self.probe_angle_contract!r}.") from exc
         for material in self.materials.values():
             material.validate()
         for section in self.shaft_sections:
