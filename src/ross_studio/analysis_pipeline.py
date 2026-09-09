@@ -7,8 +7,8 @@ from typing import Any, Callable
 
 import numpy as np
 
-from .analysis_backend import RossAnalysisBackend
-from .domain import EngineeringError, LoadSpec, ProbeSpec, RotorProject
+from .analysis_backend import RossAnalysisBackend, RossAppliedUnbalance, RossUnbalanceInput
+from .domain import EngineeringError, ProbeSpec, RotorProject
 from .ross_backend import RossBuildResult
 
 
@@ -99,6 +99,7 @@ class AnalysisPipelineResult:
     modal_modes: list[ModalModeSummary]
     critical_speeds: list[CriticalSpeedSummary]
     probe_responses: list[ProbeResponseSummary]
+    unbalance_inputs: tuple[RossAppliedUnbalance, ...] = ()
     audits: list[AnalysisAudit] = field(default_factory=list)
     stage_elapsed_s: dict[str, float] = field(default_factory=dict)
 
@@ -132,11 +133,11 @@ CancelCallback = Callable[[], bool]
 
 
 class AnalysisPipelineService:
-    """Orchestrate a single strict ROSS rotor through the real analysis chain.
+    """Run one qualified strict ROSS rotor through the engineering analysis chain.
 
-    The model is built exactly once. All subsequent ROSS calls operate on the same
-    qualified Rotor instance so topology, masses, bearings and support link nodes
-    cannot drift between analyses.
+    The domain retains engineering source units. Unit normalization for unbalance is
+    deliberately absent from this orchestration layer and occurs only inside
+    RossAnalysisBackend immediately before the ROSS API call.
     """
 
     STAGES = (
@@ -185,7 +186,9 @@ class AnalysisPipelineService:
                     "warning",
                 ))
         if high <= low:
-            raise EngineeringError(f"No valid dynamic speed interval remains after bearing K/C limits: {low:g}-{high:g} rpm.")
+            raise EngineeringError(
+                f"No valid dynamic speed interval remains after bearing K/C limits: {low:g}-{high:g} rpm."
+            )
         return low, high, audits
 
     @staticmethod
@@ -272,22 +275,6 @@ class AnalysisPipelineService:
         return deduped
 
     @staticmethod
-    def _unbalance_kg_m(load: LoadSpec) -> float:
-        unit = str(load.metadata.get("magnitude_unit", "kg*m")).replace(" ", "").lower()
-        factors = {
-            "kg*m": 1.0,
-            "kg.m": 1.0,
-            "kgm": 1.0,
-            "kg*mm": 1e-3,
-            "kg.mm": 1e-3,
-            "g*mm": 1e-6,
-            "g.mm": 1e-6,
-        }
-        if unit not in factors:
-            raise EngineeringError(f"Unsupported unbalance unit {unit!r} for {load.name!r}.")
-        return float(load.magnitude) * factors[unit]
-
-    @staticmethod
     def _project_probe(response: Any, rotor: Any, node: int, spec: ProbeSpec) -> np.ndarray:
         ndof = int(rotor.number_dof)
         x = np.asarray(response.forced_resp[node * ndof + 0, :], dtype=complex)
@@ -346,8 +333,12 @@ class AnalysisPipelineService:
         project.validate()
         case = project.operating_cases[0]
         low_rpm, high_rpm, audits = self._bearing_envelope_rpm(project)
-        campbell_speed_rpm = self._speed_grid(low_rpm, high_rpm, self.policy.campbell_points, case.rated_speed_rpm)
-        response_speed_rpm = self._speed_grid(low_rpm, high_rpm, self.policy.response_points, case.rated_speed_rpm)
+        campbell_speed_rpm = self._speed_grid(
+            low_rpm, high_rpm, self.policy.campbell_points, case.rated_speed_rpm
+        )
+        response_speed_rpm = self._speed_grid(
+            low_rpm, high_rpm, self.policy.response_points, case.rated_speed_rpm
+        )
         stage_elapsed: dict[str, float] = {}
         total = len(self.STAGES)
 
@@ -366,7 +357,12 @@ class AnalysisPipelineService:
             self._emit(progress, PipelineEvent(name, "completed", index, total, message, elapsed))
             return value
 
-        build = stage(1, "Strict Rotor", "Building one qualified ROSS Rotor with strict=True", lambda: self.backend.build_rotor(project, strict=True))
+        build = stage(
+            1,
+            "Strict Rotor",
+            "Building one qualified ROSS Rotor with strict=True",
+            lambda: self.backend.build_rotor(project, strict=True),
+        )
         static = stage(2, "Static", "ROSS gravity/static solution", lambda: self.backend.run_static_build(build))
         audits.append(AnalysisAudit(
             "ROSS_STATIC_SUPPORT_POLICY",
@@ -383,18 +379,18 @@ class AnalysisPipelineService:
 
         # Critical speeds are extracted from a ROSS Campbell sweep rather than
         # Rotor.run_critical_speed(), because the native Newton initializer calls
-        # run_modal(0). The OP-W60 imported K/C tables begin at 900 rpm; using the
-        # valid bearing-data envelope avoids silent spline extrapolation below it.
+        # run_modal(0). The OP-W60 K/C tables start at 900 rpm; the qualified
+        # dynamic envelope therefore avoids silent bearing-table extrapolation.
         campbell_holder: dict[str, Any] = {}
 
         def critical_stage() -> list[CriticalSpeedSummary]:
-            campbell = self.backend.run_campbell_build(
+            campbell_result = self.backend.run_campbell_build(
                 build,
                 campbell_speed_rpm.tolist(),
                 frequencies=self.policy.campbell_frequencies,
             )
-            campbell_holder["result"] = campbell
-            return self._critical_from_campbell(campbell)
+            campbell_holder["result"] = campbell_result
+            return self._critical_from_campbell(campbell_result)
 
         critical = stage(
             4,
@@ -414,40 +410,53 @@ class AnalysisPipelineService:
             lambda: campbell_holder["result"],
         )
 
-        unbalance_loads = [load for load in project.loads if load.kind.strip().casefold() == "unbalance"]
+        unbalance_loads = [
+            load for load in project.loads if load.kind.strip().casefold() == "unbalance"
+        ]
         if not unbalance_loads:
             raise EngineeringError("The selected pipeline requires at least one unbalance load.")
-        unbalance_nodes: list[int] = []
-        unbalance_magnitude: list[float] = []
-        unbalance_phase: list[float] = []
+
+        raw_inputs: list[RossUnbalanceInput] = []
+        load_by_node: dict[int, Any] = {}
         for load in unbalance_loads:
             node = build.node_insertion_plan.node_for(load.position_mm)
             if node is None:
-                raise EngineeringError(f"Unbalance {load.name!r} at {load.position_mm:g} mm has no exact analysis node.")
-            unbalance_nodes.append(node)
-            unbalance_magnitude.append(self._unbalance_kg_m(load))
-            unbalance_phase.append(radians(float(load.phase_deg)))
+                raise EngineeringError(
+                    f"Unbalance {load.name!r} at {load.position_mm:g} mm has no exact analysis node."
+                )
+            source_unit = str(
+                load.metadata.get("source_unit", load.metadata.get("magnitude_unit", "kg*m"))
+            )
+            raw_inputs.append(RossUnbalanceInput(
+                node=node,
+                raw_magnitude=float(load.magnitude),
+                source_unit=source_unit,
+                phase_rad=radians(float(load.phase_deg)),
+            ))
+            load_by_node[node] = load
+
+        unbalance_run = stage(
+            6,
+            "Unbalance Response",
+            f"ROSS synchronous response at {len(response_speed_rpm)} speed stations for {len(raw_inputs)} unbalance load(s)",
+            lambda: self.backend.run_unbalance_build(build, raw_inputs, response_speed_rpm.tolist()),
+        )
+        response = unbalance_run.response
         audits.append(AnalysisAudit(
             "UNBALANCE_INPUT_UNITS",
             "; ".join(
-                f"{load.name}: {load.magnitude:g} {load.metadata.get('magnitude_unit', 'kg*m')} at x={load.position_mm:g} mm"
-                for load in unbalance_loads
+                f"{load_by_node[item.node].name}: {item.raw_magnitude:g} {item.source_unit} "
+                f"-> {item.magnitude_kg_m:.9g} kg*m at x={load_by_node[item.node].position_mm:g} mm"
+                for item in unbalance_run.applied_inputs
             ),
             "info",
         ))
+        audits.append(AnalysisAudit(
+            "UNBALANCE_NORMALIZATION_BOUNDARY",
+            "Source-unit unbalance is preserved in RotorProject and converted to SI only inside RossAnalysisBackend immediately before Rotor.run_unbalance_response().",
+            "info",
+        ))
 
-        response = stage(
-            6,
-            "Unbalance Response",
-            f"ROSS synchronous response at {len(response_speed_rpm)} speed stations for {len(unbalance_nodes)} unbalance load(s)",
-            lambda: self.backend.run_unbalance_build(
-                build,
-                unbalance_nodes,
-                unbalance_magnitude,
-                unbalance_phase,
-                response_speed_rpm.tolist(),
-            ),
-        )
         probes = stage(
             7,
             "Probes",
@@ -475,6 +484,7 @@ class AnalysisPipelineService:
             modal_modes=modal_modes,
             critical_speeds=critical,
             probe_responses=probes,
+            unbalance_inputs=unbalance_run.applied_inputs,
             audits=audits,
             stage_elapsed_s=stage_elapsed,
         )
