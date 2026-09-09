@@ -71,7 +71,14 @@ class BearingCatalogService:
         rows: list[dict[str, str | bool]] = []
         for cap in self.registry.capabilities(group):
             status, reason = self.registry.effective_status(cap.ross_class)
-            rows.append({"group": cap.group.value, "class": cap.ross_class, "title": cap.title, "status": status.value, "reason": reason, "can_execute": status == AdapterStatus.VALIDATED})
+            rows.append({
+                "group": cap.group.value,
+                "class": cap.ross_class,
+                "title": cap.title,
+                "status": status.value,
+                "reason": reason,
+                "can_execute": status == AdapterStatus.VALIDATED,
+            })
         return rows
 
 
@@ -91,13 +98,49 @@ class EngineeringValidationService:
             project.validate()
         except Exception as exc:
             return [ValidationIssue("error", "DOMAIN", str(exc))]
+
+        support_indices = [support.bearing_index for support in project.supports]
+        duplicates = sorted({index for index in support_indices if support_indices.count(index) > 1})
+        for bearing_index in duplicates:
+            issues.append(ValidationIssue(
+                "error",
+                "DUPLICATE_SUPPORT_LINK",
+                f"Bearing #{bearing_index + 1} has more than one flexible support. "
+                "ROSS Studio 0.8 requires one unambiguous support chain per bearing.",
+            ))
+
+        for support in project.supports:
+            if 0 <= support.bearing_index < len(project.bearings):
+                bearing = project.bearings[support.bearing_index]
+                if bearing.ross_class == "CylindricalBearing":
+                    issues.append(ValidationIssue(
+                        "error",
+                        "CYLINDRICAL_SUPPORT_LINK_UNAVAILABLE",
+                        f"{bearing.name} uses CylindricalBearing with flexible support {support.name}. "
+                        "ROSS 2.3 CylindricalBearing does not expose n_link; execution is blocked until a qualified equivalent adapter exists.",
+                    ))
+
         if project.distributed_masses:
-            issues.append(ValidationIssue("warning", "DISTRIBUTED_MASS_REALIZATION", "Distributed rotor masses are preserved in the domain and topology, but 0.8.0 does not silently lump them into DiskElement. A qualified realization policy is required before production analysis."))
+            issues.append(ValidationIssue(
+                "warning",
+                "DISTRIBUTED_MASS_REALIZATION",
+                "Distributed rotor masses are preserved in the domain and topology, but 0.8.0 does not silently lump them into DiskElement. "
+                "A qualified realization policy is required before production analysis.",
+            ))
+
         node_positions = set(project.topology_split_positions_mm())
         for load in project.loads:
             if round(load.position_mm, 10) not in node_positions:
-                issues.append(ValidationIssue("warning", "LOAD_NODE_MAPPING", f"{load.name} at {load.position_mm:g} mm is preserved axially and requires explicit node insertion/mapping before force assembly."))
+                issues.append(ValidationIssue(
+                    "warning",
+                    "LOAD_NODE_MAPPING",
+                    f"{load.name} at {load.position_mm:g} mm is preserved axially and requires explicit node insertion/mapping before force assembly.",
+                ))
         for mass in project.point_masses:
             if round(mass.position_mm, 10) not in node_positions:
-                issues.append(ValidationIssue("warning", "POINT_MASS_NODE_MAPPING", f"{mass.name} at {mass.position_mm:g} mm requires explicit node insertion/mapping."))
+                issues.append(ValidationIssue(
+                    "warning",
+                    "POINT_MASS_NODE_MAPPING",
+                    f"{mass.name} at {mass.position_mm:g} mm requires explicit node insertion/mapping.",
+                ))
         return issues
