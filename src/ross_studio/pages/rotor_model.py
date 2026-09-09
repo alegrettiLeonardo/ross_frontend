@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QHeaderView, QLabel, QPushBut
 
 from ..icons import engineering_icon
 from ..models import ProjectModel
+from ..topology import NodeInsertionService
 from ..widgets import Card, ModelSummaryCard, ProjectInfoCard, QuickActionsCard, RotorSketch, configure_table, item
 
 
@@ -39,7 +40,7 @@ class RotorModelPage(QWidget):
         physical = QLabel(f"Physical Shaft Sections  {project.physical_sections}")
         physical.setObjectName("muted")
         header_row.addWidget(physical)
-        arrow = QLabel("  →  topology / attachment splitting  →  ")
+        arrow = QLabel("  →  explicit node insertion  →  ")
         arrow.setObjectName("muted")
         header_row.addWidget(arrow)
         fem = QLabel(f"ROSS ShaftElements  {project.ross_shaft_elements}")
@@ -133,8 +134,31 @@ class RotorModelPage(QWidget):
 
     def _distributed_mass_tab(self) -> QWidget:
         eng = self.project.engineering
-        rows = [] if eng is None else [[m.name, f"{m.start_mm:g}", f"{m.length_mm:g}", f"{m.mass_kg:g}", f"{m.od_mm:g}", f"{m.id_mm:g}", "Yes" if m.is_package else "No", "Yes" if m.ump_enabled else "No"] for m in eng.distributed_masses]
-        return self._tab("Disks / Rotor Components", ["Name", "Start (mm)", "Length (mm)", "Mass (kg)", "OD (mm)", "ID (mm)", "Package", "UMP"], rows, stretch_col=0)
+        rows: list[list[object]] = []
+        if eng is not None:
+            plan = NodeInsertionService.plan(eng)
+            for mass in eng.distributed_masses:
+                id_kg_m2, ip_kg_m2 = mass.equivalent_disk_inertias_kg_m2()
+                rows.append([
+                    mass.name,
+                    f"{mass.start_mm:g}",
+                    f"{mass.center_mm:g}",
+                    plan.node_for(mass.center_mm),
+                    f"{mass.length_mm:g}",
+                    f"{mass.mass_kg:g}",
+                    f"{mass.od_mm:g}",
+                    f"{mass.id_mm:g}",
+                    f"{id_kg_m2:.6g}",
+                    f"{ip_kg_m2:.6g}",
+                    "DiskElement",
+                    "Yes" if mass.ump_enabled else "No",
+                ])
+        return self._tab(
+            "Disks / Rotor Components",
+            ["Name", "Start (mm)", "Center (mm)", "Node", "Length (mm)", "Mass (kg)", "OD (mm)", "ID (mm)", "Id (kg·m²)", "Ip (kg·m²)", "ROSS realization", "UMP"],
+            rows,
+            stretch_col=0,
+        )
 
     def _supports_tab(self) -> QWidget:
         eng = self.project.engineering
@@ -153,11 +177,12 @@ class RotorModelPage(QWidget):
 
     def _loads_tab(self) -> QWidget:
         eng = self.project.engineering
-        nodes = set() if eng is None else set(eng.topology_split_positions_mm())
-        rows = [] if eng is None else [[l.name, l.kind, f"{l.position_mm:g}", f"{l.magnitude:g}", f"{l.phase_deg:g}", "Exact node" if round(l.position_mm, 10) in nodes else "Mapping required"] for l in eng.loads]
-        return self._tab("Loads", ["Name", "Type", "Position (mm)", "Magnitude", "Phase (deg)", "Node mapping"], rows, stretch_col=0)
+        plan = None if eng is None else NodeInsertionService.plan(eng)
+        rows = [] if eng is None else [[l.name, l.kind, f"{l.position_mm:g}", plan.node_for(l.position_mm), f"{l.magnitude:g}", f"{l.phase_deg:g}", "Exact inserted node" if plan.node_for(l.position_mm) is not None else "ERROR"] for l in eng.loads]
+        return self._tab("Loads", ["Name", "Type", "Position (mm)", "Node", "Magnitude", "Phase (deg)", "Node mapping"], rows, stretch_col=0)
 
     def _probes_tab(self) -> QWidget:
         eng = self.project.engineering
-        rows = [] if eng is None else [[p.name, f"{p.position_mm:g}", p.coordinate, f"{p.orientation_deg:g}"] for p in eng.probes]
-        return self._tab("Probes", ["Name", "Position (mm)", "Coordinate", "Orientation (deg)"], rows, stretch_col=0)
+        plan = None if eng is None else NodeInsertionService.plan(eng)
+        rows = [] if eng is None else [[p.name, f"{p.position_mm:g}", plan.node_for(p.position_mm), p.coordinate, f"{p.orientation_deg:g}"] for p in eng.probes]
+        return self._tab("Probes", ["Name", "Position (mm)", "Node", "Coordinate", "Orientation (deg)"], rows, stretch_col=0)
