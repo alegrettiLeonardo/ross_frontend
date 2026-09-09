@@ -77,6 +77,7 @@ def main() -> int:
         },
         "speed_envelope_rpm": [float(result.speed_rpm[0]), float(result.speed_rpm[-1])],
         "response_speed_station_count": int(len(result.speed_rpm)),
+        "response_speed_rpm": [float(value) for value in result.speed_rpm],
         "campbell_speed_station_count": int(len(result.campbell.speed_range)),
         "static": {
             "max_abs_deformation_m": float(np.max(np.abs(np.asarray(result.static.deformation, dtype=float)))),
@@ -130,6 +131,9 @@ def main() -> int:
                 "rated_amplitude_m": probe.rated_amplitude_m,
                 "rated_amplitude_um": probe.rated_amplitude_um,
                 "rated_phase_deg": probe.rated_phase_deg,
+                "amplitude_m": [float(value) for value in probe.amplitude_m],
+                "amplitude_um": [float(value) * 1e6 for value in probe.amplitude_m],
+                "phase_deg": [float(value) for value in probe.phase_deg],
             }
             for probe in result.probe_responses
         ],
