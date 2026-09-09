@@ -181,8 +181,7 @@ class RossStudioWindow(QMainWindow):
             key = self._bearing_key_for_class(self.bearing_page, selected_class)
             if key is not None:
                 self.bearing_page._select_type(key, announce=False)
-        if keep_result and self.bearing_calculation is not None:
-            self.bearing_page.apply_button.setEnabled(True)
+        self.bearing_page.apply_button.setEnabled(bool(keep_result and self.bearing_calculation is not None))
         if was_current:
             self.stack.setCurrentWidget(self.bearing_page)
 
@@ -236,6 +235,8 @@ class RossStudioWindow(QMainWindow):
                 self.status.set_status("Bearing calculation cancelled", ross_class)
                 return
             inputs = dialog.values()
+        else:
+            inputs["rated_speed_rpm"] = float(engineering.operating_cases[0].rated_speed_rpm)
 
         try:
             result = self.bearing_service.calculate(engineering, 0, ross_class, inputs)
@@ -299,8 +300,12 @@ class RossStudioWindow(QMainWindow):
         self.status.set_status("Engineering model loaded", f"{self.project.physical_sections} physical sections → {self.project.ross_shaft_elements} ROSS ShaftElements", units="Units: SI (mm, kg, N)")
 
     def _open_bearing_group(self, group: str) -> None:
+        requested = str(group)
+        if self.bearing_page.current_group.value != requested:
+            self.bearing_calculation = None
         if hasattr(self.bearing_page, "set_group"):
             self.bearing_page.set_group(group)
+        self.bearing_page.apply_button.setEnabled(self.bearing_calculation is not None)
         self.stack.setCurrentWidget(self.bearing_page)
         self.status.set_status(f"Bearing group: {group}", "Class capability gating active")
 
