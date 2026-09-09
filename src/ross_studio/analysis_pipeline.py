@@ -14,7 +14,7 @@ from .ross_backend import RossBuildResult
 
 @dataclass(slots=True, frozen=True)
 class AnalysisPolicy:
-    """Numerical policy for the qualified 0.8 engineering pipeline."""
+    """Numerical policy for the qualified engineering pipeline."""
 
     modal_num_modes: int = 12
     campbell_frequencies: int = 6
@@ -127,17 +127,22 @@ class AnalysisPipelineResult:
             return None
         return min(item.damping_ratio for item in self.modal_modes)
 
+    @property
+    def ump_assembly(self) -> Any | None:
+        return getattr(self.build.rotor, "ump_assembly", None)
+
 
 ProgressCallback = Callable[[PipelineEvent], None]
 CancelCallback = Callable[[], bool]
 
 
 class AnalysisPipelineService:
-    """Run one qualified strict ROSS rotor through the engineering analysis chain.
+    """Run one strict ROSS rotor through the qualified analysis chain.
 
-    The domain retains engineering source units. Unit normalization for unbalance is
-    deliberately absent from this orchestration layer and occurs only inside
-    RossAnalysisBackend immediately before the ROSS API call.
+    Engineering source units stay in the domain. Unbalance normalization is
+    performed only inside ``RossAnalysisBackend``. Linearized UMP is assembled at
+    build time as an electromagnetic negative-stiffness contribution so Modal,
+    Campbell and harmonic response all consume the same ``K_eff = K-K_UMP``.
     """
 
     STAGES = (
@@ -323,6 +328,33 @@ class AnalysisPipelineService:
             ))
         return rows
 
+    @staticmethod
+    def _append_ump_audits(build: RossBuildResult, audits: list[AnalysisAudit]) -> None:
+        assembly = getattr(build.rotor, "ump_assembly", None)
+        if assembly is None or not assembly.active:
+            return
+        audits.append(AnalysisAudit(
+            "UMP_NEGATIVE_STIFFNESS_ACTIVE",
+            "Linearized electromagnetic UMP is active in dynamic analyses using K_eff = K_mechanical+bearing - K_UMP. M, C and G are unchanged and gravity static excludes UMP.",
+            "info",
+        ))
+        audits.append(AnalysisAudit(
+            "UMP_SOURCE_UNIT_CONTRACT",
+            "UMP distributed coefficient contract is N/m^2 (force/displacement/axial-length); no hidden scaling is applied at the ROSS boundary.",
+            "info",
+        ))
+        audits.append(AnalysisAudit(
+            "UMP_LEGACY_ROTARY_TERM_NOT_REPRODUCED",
+            "The RotorDin source comment specifies the UMP inertia term as zero. ROSS Studio therefore assembles only the dimensionally consistent translational Hermite contribution and does not reproduce the legacy coemas rotary-inertia side term.",
+            "warning",
+        ))
+        for span in assembly.spans:
+            audits.append(AnalysisAudit(
+                "UMP_SPAN_ASSEMBLY",
+                f"{span.name}: x={span.start_mm:g}-{span.end_mm:g} mm, k'={span.stiffness_per_length_n_m2:.9g} N/m^2, integrated k={span.integrated_stiffness_n_m:.9g} N/m, shaft elements={list(span.shaft_element_indices)}.",
+                "info",
+            ))
+
     def run(
         self,
         project: RotorProject,
@@ -333,12 +365,8 @@ class AnalysisPipelineService:
         project.validate()
         case = project.operating_cases[0]
         low_rpm, high_rpm, audits = self._bearing_envelope_rpm(project)
-        campbell_speed_rpm = self._speed_grid(
-            low_rpm, high_rpm, self.policy.campbell_points, case.rated_speed_rpm
-        )
-        response_speed_rpm = self._speed_grid(
-            low_rpm, high_rpm, self.policy.response_points, case.rated_speed_rpm
-        )
+        campbell_speed_rpm = self._speed_grid(low_rpm, high_rpm, self.policy.campbell_points, case.rated_speed_rpm)
+        response_speed_rpm = self._speed_grid(low_rpm, high_rpm, self.policy.response_points, case.rated_speed_rpm)
         stage_elapsed: dict[str, float] = {}
         total = len(self.STAGES)
 
@@ -357,18 +385,16 @@ class AnalysisPipelineService:
             self._emit(progress, PipelineEvent(name, "completed", index, total, message, elapsed))
             return value
 
-        build = stage(
-            1,
-            "Strict Rotor",
-            "Building one qualified ROSS Rotor with strict=True",
-            lambda: self.backend.build_rotor(project, strict=True),
-        )
+        build = stage(1, "Strict Rotor", "Building one qualified ROSS Rotor with strict=True", lambda: self.backend.build_rotor(project, strict=True))
+        self._append_ump_audits(build, audits)
+
         static = stage(2, "Static", "ROSS gravity/static solution", lambda: self.backend.run_static_build(build))
         audits.append(AnalysisAudit(
             "ROSS_STATIC_SUPPORT_POLICY",
             "ROSS 2.3 run_static() computes gravity reactions with rigidized shaft bearing supports; dynamic flexible-support K/C remains active in modal/response analyses.",
             "info",
         ))
+
         modal = stage(
             3,
             "Modal",
@@ -377,10 +403,6 @@ class AnalysisPipelineService:
         )
         modal_modes = self._modal_summary(modal)
 
-        # Critical speeds are extracted from a ROSS Campbell sweep rather than
-        # Rotor.run_critical_speed(), because the native Newton initializer calls
-        # run_modal(0). The OP-W60 K/C tables start at 900 rpm; the qualified
-        # dynamic envelope therefore avoids silent bearing-table extrapolation.
         campbell_holder: dict[str, Any] = {}
 
         def critical_stage() -> list[CriticalSpeedSummary]:
@@ -410,9 +432,7 @@ class AnalysisPipelineService:
             lambda: campbell_holder["result"],
         )
 
-        unbalance_loads = [
-            load for load in project.loads if load.kind.strip().casefold() == "unbalance"
-        ]
+        unbalance_loads = [load for load in project.loads if load.kind.strip().casefold() == "unbalance"]
         if not unbalance_loads:
             raise EngineeringError("The selected pipeline requires at least one unbalance load.")
 
@@ -421,12 +441,8 @@ class AnalysisPipelineService:
         for load in unbalance_loads:
             node = build.node_insertion_plan.node_for(load.position_mm)
             if node is None:
-                raise EngineeringError(
-                    f"Unbalance {load.name!r} at {load.position_mm:g} mm has no exact analysis node."
-                )
-            source_unit = str(
-                load.metadata.get("source_unit", load.metadata.get("magnitude_unit", "kg*m"))
-            )
+                raise EngineeringError(f"Unbalance {load.name!r} at {load.position_mm:g} mm has no exact analysis node.")
+            source_unit = str(load.metadata.get("source_unit", load.metadata.get("magnitude_unit", "kg*m")))
             raw_inputs.append(RossUnbalanceInput(
                 node=node,
                 raw_magnitude=float(load.magnitude),
@@ -445,8 +461,7 @@ class AnalysisPipelineService:
         audits.append(AnalysisAudit(
             "UNBALANCE_INPUT_UNITS",
             "; ".join(
-                f"{load_by_node[item.node].name}: {item.raw_magnitude:g} {item.source_unit} "
-                f"-> {item.magnitude_kg_m:.9g} kg*m at x={load_by_node[item.node].position_mm:g} mm"
+                f"{load_by_node[item.node].name}: {item.raw_magnitude:g} {item.source_unit} -> {item.magnitude_kg_m:.9g} kg*m at x={load_by_node[item.node].position_mm:g} mm"
                 for item in unbalance_run.applied_inputs
             ),
             "info",
