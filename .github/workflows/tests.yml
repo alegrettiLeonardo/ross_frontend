@@ -1,0 +1,49 @@
+name: ROSS Studio tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Qt headless system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Compile Python sources
+        run: python -m compileall -q src tests tools
+      - name: Run tests
+        run: python -m pytest -q -ra
+      - name: Run production-resolution OP-W60 pipeline
+        run: python tools/qualify_op_w60_pipeline.py
+      - name: Enforce ROSS against regenerated RotorDin golden
+        run: python tools/correlate_op_w60_rotordin.py --enforce
+      - name: Isolate mesh and bearing-interpolation effects
+        run: python tools/isolate_op_w60_response_differences.py
+      - name: Isolate cross-coupling gyro phasor and RANUN conventions
+        run: python tools/isolate_op_w60_conventions.py
+      - name: Publish OP-W60 qualification and correlation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: op-w60-pipeline-qualification
+          path: |
+            artifacts/op_w60_pipeline_summary.json
+            artifacts/op_w60_ross_vs_rotordin_correlation.json
+            artifacts/op_w60_ross_vs_rotordin_correlation.csv
+            artifacts/op_w60_response_ab_isolation.json
+            artifacts/op_w60_convention_isolation.json
+          if-no-files-found: ignore
