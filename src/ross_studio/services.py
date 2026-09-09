@@ -27,10 +27,10 @@ class RossCapabilityRegistry:
         Capability(BearingGroup.GENERAL, "BallBearingElement", "Ball Bearing", AdapterStatus.VALIDATED),
         Capability(BearingGroup.GENERAL, "RollerBearingElement", "Roller Bearing", AdapterStatus.VALIDATED),
         Capability(BearingGroup.GENERAL, "CylindricalBearing", "Cylindrical Bearing", AdapterStatus.VALIDATED),
-        Capability(BearingGroup.THD, "PlainJournal", "Plain Journal", AdapterStatus.PLANNED, "THD editor/adapter requires validated geometry, lubricant and thermal mapping."),
-        Capability(BearingGroup.THD, "TiltingPad", "Tilting Pad", AdapterStatus.PLANNED, "THD editor exists visually but scientific parameter mapping is not qualified yet."),
-        Capability(BearingGroup.THD, "ThrustPad", "Thrust Pad", AdapterStatus.PLANNED, "ROSS class exists; ROSS Studio thrust-domain adapter is not qualified."),
-        Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.PLANNED, "ROSS class exists; ROSS Studio damper-domain adapter is pending qualification."),
+        Capability(BearingGroup.THD, "PlainJournal", "Plain Journal", AdapterStatus.VALIDATED, "Native ROSS fluid-film calculation; solved K/C table is cached for rotor execution."),
+        Capability(BearingGroup.THD, "TiltingPad", "Tilting Pad", AdapterStatus.VALIDATED, "Native ROSS Reynolds/thermal calculation; solved K/C table is cached for rotor execution."),
+        Capability(BearingGroup.THD, "ThrustPad", "Thrust Pad", AdapterStatus.PLANNED, "Requires a qualified axial Kzz/Czz domain and rotor-result contract before execution is enabled."),
+        Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.VALIDATED, "Native ROSS squeeze-film calculation; solved K/C table is cached for rotor execution."),
         Capability(BearingGroup.AMB, "MagneticBearingElement", "Active Magnetic Bearing", AdapterStatus.BLOCKED, "Requires an explicit actuator/sensor/controller domain before execution is enabled."),
     )
 
