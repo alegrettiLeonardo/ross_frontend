@@ -20,7 +20,7 @@ OUT = ROOT / "artifacts" / "op_w60_pipeline_summary.json"
 def main() -> int:
     project = load_irdin_project(FIXTURE)
     backend = RossAnalysisBackend(rs)
-    service = AnalysisPipelineService(backend=backend)  # production GUI defaults
+    service = AnalysisPipelineService(backend=backend)
 
     def progress(event) -> None:
         print(
@@ -53,6 +53,31 @@ def main() -> int:
                 "centrifugal_force_at_rated_n": applied.magnitude_kg_m * rated_omega**2,
             }
         )
+
+    ump = result.ump_assembly
+    ump_summary = {
+        "active": bool(ump is not None and ump.active),
+        "equation": "K_eff = K_mechanical+bearing - K_UMP",
+        "source_unit": "N/m^2",
+        "total_integrated_stiffness_n_m": 0.0,
+        "max_abs_global_matrix_entry_n_m": 0.0,
+        "spans": [],
+    }
+    if ump is not None and ump.active:
+        ump_summary["total_integrated_stiffness_n_m"] = ump.total_integrated_stiffness_n_m
+        ump_summary["max_abs_global_matrix_entry_n_m"] = ump.max_abs_entry_n_m
+        ump_summary["spans"] = [
+            {
+                "name": span.name,
+                "start_mm": span.start_mm,
+                "end_mm": span.end_mm,
+                "stiffness_per_length_n_m2": span.stiffness_per_length_n_m2,
+                "integrated_stiffness_n_m": span.integrated_stiffness_n_m,
+                "shaft_element_indices": list(span.shaft_element_indices),
+                "source": span.source,
+            }
+            for span in ump.spans
+        ]
 
     summary = {
         "project": project.name,
@@ -112,6 +137,7 @@ def main() -> int:
             }
             for critical in result.critical_speeds
         ],
+        "ump": ump_summary,
         "unbalance_contract": {
             "domain_source_unit": "g*mm",
             "ross_required_unit": "kg*m",
