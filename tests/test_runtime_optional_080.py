@@ -5,6 +5,8 @@ import os
 import numpy as np
 import pytest
 
+from ross_studio.analysis_backend import RossAnalysisBackend
+from ross_studio.analysis_pipeline import AnalysisPipelineService, AnalysisPolicy
 from ross_studio.legacy_import import load_irdin_project
 from ross_studio.models import load_reference_project_model
 from ross_studio.ross_backend import RossModelBuilder
@@ -56,6 +58,52 @@ def test_real_ross_23_strict_builds_op_w60_with_inserted_nodes_and_legacy_masses
 
     support_mass_by_tag = {mass.tag: mass for mass in result.rotor.point_mass_elements}
     assert set(support_mass_by_tag) == {"Support 1 mass", "Support 2 mass"}
+
+
+def test_real_ross_23_runs_complete_op_w60_scientific_pipeline() -> None:
+    rs = pytest.importorskip("ross")
+    project = load_irdin_project(FIXTURE)
+    service = AnalysisPipelineService(
+        backend=RossAnalysisBackend(rs),
+        policy=AnalysisPolicy(
+            modal_num_modes=12,
+            campbell_frequencies=6,
+            campbell_points=13,
+            response_points=13,
+        ),
+    )
+    events = []
+    result = service.run(project, progress=events.append)
+
+    assert result.build.unresolved_positions_mm == []
+    assert len(result.build.rotor.shaft_elements) == 27
+    assert result.static is not None
+    assert result.modal is not None
+    assert result.campbell is not None
+    assert result.unbalance is not None
+    assert len(result.modal_modes) == 6
+    assert len(result.probe_responses) == 4
+    assert len(result.speed_rpm) >= 13
+    assert result.speed_rpm[0] == pytest.approx(900.0)
+    assert result.speed_rpm[-1] == pytest.approx(4500.0)
+    assert np.any(np.isclose(result.speed_rpm, 3600.0))
+
+    assert np.all(np.isfinite(np.asarray(result.static.deformation, dtype=float)))
+    assert np.all(np.isfinite(np.asarray(result.modal.wd, dtype=float)))
+    assert np.all(np.isfinite(np.asarray(result.campbell.wd, dtype=float)))
+    assert np.all(np.isfinite(np.abs(np.asarray(result.unbalance.forced_resp))))
+
+    assert {row.position_mm for row in result.probe_responses} == {467.8, 2202.2}
+    assert all(row.node in result.build.rotor.nodes for row in result.probe_responses)
+    assert all(np.isfinite(row.peak_amplitude_m) for row in result.probe_responses)
+    assert all(np.isfinite(row.rated_amplitude_m) for row in result.probe_responses)
+
+    audit_codes = {audit.code for audit in result.audits}
+    assert "BEARING_KC_ENVELOPE" in audit_codes
+    assert "CRITICAL_METHOD" in audit_codes
+    assert "UNBALANCE_INPUT_UNITS" in audit_codes
+    completed = [event.stage for event in events if event.state == "completed"]
+    assert completed == list(AnalysisPipelineService.STAGES)
 
 
 def test_qt_engineering_routes_and_bearing_groups() -> None:
