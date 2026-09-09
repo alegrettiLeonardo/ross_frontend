@@ -9,6 +9,7 @@ import numpy as np
 
 from .domain import BearingSpec, EngineeringError, RotorProject, ShaftSection
 from .services import EngineeringValidationService
+from .topology import NodeInsertionPlan, NodeInsertionService
 
 
 @dataclass(slots=True, frozen=True)
@@ -35,6 +36,17 @@ class NodeMapping:
     exact: bool
 
 
+@dataclass(slots=True, frozen=True)
+class EquivalentDiskPlan:
+    name: str
+    node: int
+    position_mm: float
+    mass_kg: float
+    id_kg_m2: float
+    ip_kg_m2: float
+    source: str = "legacy [Massas]"
+
+
 @dataclass(slots=True)
 class RossBuildResult:
     rotor: Any
@@ -42,6 +54,8 @@ class RossBuildResult:
     node_positions_mm: list[float]
     unresolved_positions_mm: list[float]
     support_link_nodes: dict[str, int]
+    node_insertion_plan: NodeInsertionPlan
+    equivalent_disks: list[EquivalentDiskPlan]
 
 
 class RossModelBuilder:
@@ -56,7 +70,7 @@ class RossModelBuilder:
     @staticmethod
     def shaft_plan(project: RotorProject) -> list[ShaftElementPlan]:
         project.validate()
-        split = project.topology_split_positions_mm()
+        split = NodeInsertionService.plan(project).positions_mm
         plan: list[ShaftElementPlan] = []
 
         def section_at(x0: float, x1: float) -> tuple[ShaftSection, float, float]:
@@ -80,14 +94,13 @@ class RossModelBuilder:
 
     @staticmethod
     def node_positions_mm(project: RotorProject) -> list[float]:
-        return project.topology_split_positions_mm()
+        return list(NodeInsertionService.plan(project).positions_mm)
 
     @staticmethod
     def map_position(project: RotorProject, position_mm: float, *, tolerance_mm: float = 1e-7) -> NodeMapping:
-        for node, x in enumerate(project.topology_split_positions_mm()):
-            if abs(x - position_mm) <= tolerance_mm:
-                return NodeMapping(position_mm, node, True)
-        return NodeMapping(position_mm, None, False)
+        plan = NodeInsertionService.plan(project)
+        node = plan.node_for(position_mm, tolerance_mm=tolerance_mm)
+        return NodeMapping(position_mm, node, node is not None)
 
     def _material(self, project: RotorProject, name: str) -> Any:
         rs = self._ross()
@@ -197,15 +210,11 @@ class RossModelBuilder:
         issues = EngineeringValidationService().validate(project)
         if strict and any(issue.severity == "error" for issue in issues):
             raise EngineeringError("; ".join(issue.message for issue in issues if issue.severity == "error"))
-        if strict and project.distributed_masses:
-            raise EngineeringError(
-                "Distributed masses are preserved but do not yet have a qualified ROSS realization in 0.8.0; "
-                "strict build is intentionally blocked."
-            )
 
         rs = self._ross()
+        insertion_plan = NodeInsertionService.plan(project)
         plan = self.shaft_plan(project)
-        node_positions = self.node_positions_mm(project)
+        node_positions = list(insertion_plan.positions_mm)
         material_cache = {name: self._material(project, name) for name in project.materials}
         shaft_elements = [
             rs.ShaftElement(
@@ -252,7 +261,33 @@ class RossModelBuilder:
                 point_masses.append(rs.PointMass(n=link_node, m=support.mass_kg, tag=f"{support.name} mass"))
 
         disks: list[Any] = []
+        equivalent_disks: list[EquivalentDiskPlan] = []
         unresolved: list[float] = []
+
+        for mass in project.distributed_masses:
+            mapping = self.map_position(project, mass.center_mm)
+            if mapping.node is None:
+                unresolved.append(mass.center_mm)
+                continue
+            id_kg_m2, ip_kg_m2 = mass.equivalent_disk_inertias_kg_m2()
+            disks.append(
+                rs.DiskElement(
+                    mapping.node,
+                    mass.mass_kg,
+                    id_kg_m2,
+                    ip_kg_m2,
+                    tag=f"{mass.name} / legacy equivalent",
+                )
+            )
+            equivalent_disks.append(EquivalentDiskPlan(
+                name=mass.name,
+                node=mapping.node,
+                position_mm=mass.center_mm,
+                mass_kg=mass.mass_kg,
+                id_kg_m2=id_kg_m2,
+                ip_kg_m2=ip_kg_m2,
+            ))
+
         for disk in project.disks:
             mapping = self.map_position(project, disk.position_mm)
             if mapping.node is None:
@@ -265,7 +300,19 @@ class RossModelBuilder:
             if mapping.node is None:
                 unresolved.append(mass.position_mm)
                 continue
-            point_masses.append(rs.PointMass(n=mapping.node, m=mass.mass_kg, tag=mass.name))
+            kwargs: dict[str, Any] = {"n": mapping.node, "m": mass.mass_kg, "tag": mass.name}
+            if mass.mx_kg is not None:
+                kwargs["mx"] = mass.mx_kg
+            if mass.my_kg is not None:
+                kwargs["my"] = mass.my_kg
+            if mass.mz_kg is not None:
+                kwargs["mz"] = mass.mz_kg
+            point_masses.append(rs.PointMass(**kwargs))
+
+        unresolved = sorted(set(unresolved))
+        if strict and unresolved:
+            joined = ", ".join(f"{x:g}" for x in unresolved)
+            raise EngineeringError(f"Strict ROSS build has unresolved axial positions: {joined} mm.")
 
         rotor = rs.Rotor(
             shaft_elements=shaft_elements,
@@ -278,8 +325,10 @@ class RossModelBuilder:
             rotor=rotor,
             shaft_plan=plan,
             node_positions_mm=node_positions,
-            unresolved_positions_mm=sorted(set(unresolved)),
+            unresolved_positions_mm=unresolved,
             support_link_nodes=support_link_nodes,
+            node_insertion_plan=insertion_plan,
+            equivalent_disks=equivalent_disks,
         )
 
 
