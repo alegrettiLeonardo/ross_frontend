@@ -17,6 +17,7 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
 
     * shaft lateral M/K/G are the exact ``coemas/coerig/coegir`` matrices;
     * rigid disks use the RotorDin gyroscopic sign convention;
+    * inline TABLE rows use RotorDin's canonical ``xx,xz,zx,zz`` order;
     * TABLE bearings use ``intlag`` local three-point quadratic interpolation;
     * the RotorDin default ``DIV/MXDIV`` rule subdivides the first largest gap.
 
@@ -55,19 +56,48 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
                 refined.append(self._p(x0 + gap * j / divisions))
         return sorted(set(refined))
 
+    @staticmethod
+    def _rotordin_table_coefficients(spec: CoefficientBearingSpec):
+        """Decode the inline RotorDin TABLE row stored by the legacy importer.
+
+        The historical INI stores each TABLE point exactly in the order consumed
+        by ``parmant``/``kmc``::
+
+            rpm, Kxx, Kxz, Kzx, Kzz, Cxx, Cxz, Czx, Czz
+
+        The generic domain names currently preserve the old grid-column
+        interpretation, so its ``kzz`` slot contains TABLE column 3 (Kzx) and its
+        ``kzx`` slot contains TABLE column 4 (Kzz); damping is analogous.  The
+        compatibility builder must therefore restore the Fortran canonical order
+        before mapping RotorDin x/z to ROSS x/y.  This is deliberately isolated
+        here until the generic legacy importer schema is migrated without breaking
+        persisted projects.
+        """
+        return dict(
+            kxx=spec.kxx,
+            kxz=spec.kxz,
+            kzx=spec.kzz,
+            kzz=spec.kzx,
+            cxx=spec.cxx,
+            cxz=spec.cxz,
+            czx=spec.czz,
+            czz=spec.czx,
+        )
+
     def _build_bearing(self, spec, node_by_position, *, n_link_override: int | None = None):
         if not isinstance(spec, CoefficientBearingSpec) or spec.frequency_rpm is None:
             return super()._build_bearing(spec, node_by_position, n_link_override=n_link_override)
 
+        table = self._rotordin_table_coefficients(spec)
         coeff = rotordin_xz_to_ross_xy(
-            kxx=spec.kxx,
-            kzz=spec.kzz,
-            kxz=spec.kxz,
-            kzx=spec.kzx,
-            cxx=spec.cxx,
-            czz=spec.czz,
-            cxz=spec.cxz,
-            czx=spec.czx,
+            kxx=table["kxx"],
+            kzz=table["kzz"],
+            kxz=table["kxz"],
+            kzx=table["kzx"],
+            cxx=table["cxx"],
+            czz=table["czz"],
+            cxz=table["cxz"],
+            czx=table["czx"],
         )
         n = node_by_position[self._p(spec.position_mm)]
         n_link = n_link_override
@@ -94,9 +124,9 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
             raise ValueError("RotorDinLegacyModelBuilder requires a legacy-imported RotorProject.")
 
         # Polymorphic _breakpoints() and _build_bearing() mean this pass already
-        # has the RotorDin W60 mesh and TABLE interpolation. Shaft and rigid-disk
-        # gyroscopic matrices are replaced below because the production builder
-        # intentionally remains native ROSS.
+        # has the RotorDin W60 mesh, TABLE coefficient order and interpolation.
+        # Shaft and rigid-disk gyroscopic matrices are replaced below because the
+        # production builder intentionally remains native ROSS.
         native = super().build(project)
 
         legacy_shaft_cls = make_rotordin_legacy_shaft_class(self.rs.ShaftElement)
@@ -166,6 +196,7 @@ class RotorDinLegacyModelBuilder(RossModelBuilder):
         ump_audit = dict(ump_audit)
         ump_audit["shaft_matrix_formulation"] = "rotordin_coemas_coerig_coegir"
         ump_audit["rigid_disk_gyroscopic_sign"] = "rotordin_matrix_sign"
+        ump_audit["bearing_table_source_order"] = "rpm_Kxx_Kxz_Kzx_Kzz_Cxx_Cxz_Czx_Czz"
         ump_audit["bearing_table_interpolation"] = "rotordin_intlag_local_quadratic"
         ump_audit["legacy_mesh"] = {
             "rule": "predad_first_largest_gap_DIV_MXDIV",
