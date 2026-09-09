@@ -9,6 +9,7 @@ import pytest
 from ross_studio.analysis_pipeline import AnalysisPipelineService, AnalysisPolicy
 from ross_studio.domain import LoadSpec, ProbeSpec
 from ross_studio.legacy_import import load_irdin_project
+from ross_studio.ross_compat import _init_orbit_symmetric
 
 
 FIXTURE = Path(__file__).parents[1] / "src" / "ross_studio" / "resources" / "OP-W60-500-60Hz-IC611-P3.txt"
@@ -73,3 +74,18 @@ def test_critical_speed_extraction_uses_synchronous_crossing() -> None:
     expected = (100.0 + (50.0 / 60.0) * 100.0) * 60.0 / (2.0 * np.pi)
     assert rows[0].speed_rpm == pytest.approx(expected)
     assert rows[0].whirl == "Forward"
+
+
+def test_ross_230_orbit_shim_handles_complex_mode_components_with_real_symmetric_axes() -> None:
+    values = _init_orbit_symmetric(1.0 + 2.0j, 3.0 + 4.0j)
+    major_index = values[7]
+    minor_axis = values[10]
+    major_axis = values[11]
+    kappa = values[12]
+
+    assert major_index in (0, 1)
+    assert np.isfinite(minor_axis)
+    assert np.isfinite(major_axis)
+    assert np.isfinite(kappa)
+    assert major_axis >= minor_axis >= 0.0
+    assert abs(kappa) <= 1.0
