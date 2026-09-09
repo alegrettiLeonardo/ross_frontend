@@ -1,0 +1,4 @@
+[submodule "vendor/ross"]
+	path = vendor/ross
+	url = https://github.com/petrobras/ross.git
+	branch = main
