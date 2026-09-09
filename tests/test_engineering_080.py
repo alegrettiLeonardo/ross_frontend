@@ -216,3 +216,14 @@ def test_invalid_legacy_mass_geometry_blocks_strict_realization() -> None:
     project.distributed_masses[0].id_mm = project.distributed_masses[0].od_mm
     issues = EngineeringValidationService().validate(project)
     assert any(issue.severity == "error" and issue.code == "DISTRIBUTED_MASS_GEOMETRY" for issue in issues)
+
+
+def test_directional_shaft_point_mass_is_not_silently_reduced_to_scalar() -> None:
+    project = load_irdin_project(FIXTURE)
+    project.point_masses[0].mx_kg = 34.0
+    project.point_masses[0].my_kg = 20.0
+    issues = EngineeringValidationService().validate(project)
+    assert any(
+        issue.severity == "error" and issue.code == "DIRECTIONAL_SHAFT_POINT_MASS_UNAVAILABLE"
+        for issue in issues
+    )
