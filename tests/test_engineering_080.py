@@ -23,6 +23,28 @@ class FakeRoss:
     class MagneticBearingElement: pass
 
 
+class CaptureElement:
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+
+class FakeRossAssembly:
+    Material = CaptureElement
+    ShaftElement = CaptureElement
+    BearingElement = CaptureElement
+    DiskElement = CaptureElement
+    PointMass = CaptureElement
+
+    class Rotor:
+        def __init__(self, *, shaft_elements, disk_elements=None, bearing_elements=None, point_mass_elements=None, tag=None):
+            self.shaft_elements = shaft_elements
+            self.disk_elements = disk_elements or []
+            self.bearing_elements = bearing_elements or []
+            self.point_mass_elements = point_mass_elements or []
+            self.tag = tag
+
+
 def test_op_w60_import_contract() -> None:
     project = load_irdin_project(FIXTURE)
     assert project.name == "OP-W60-500-60Hz-IC611-P3"
@@ -98,7 +120,27 @@ def test_catalog_separates_class_existence_from_adapter_readiness() -> None:
 def test_readiness_flags_unqualified_realizations_without_destroying_data() -> None:
     project = load_irdin_project(FIXTURE)
     issues = EngineeringValidationService().validate(project)
-    codes = {i.code for i in issues}
+    codes = {issue.code for issue in issues}
     assert "DISTRIBUTED_MASS_REALIZATION" in codes
     assert "POINT_MASS_NODE_MAPPING" in codes
-    assert all(i.severity != "error" for i in issues)
+    assert all(issue.severity != "error" for issue in issues)
+
+
+def test_flexible_supports_are_assembled_as_linked_nodes() -> None:
+    project = load_irdin_project(FIXTURE)
+    result = RossModelBuilder(FakeRossAssembly).build(project, strict=False)
+
+    assert len(result.shaft_plan) == 22
+    assert result.support_link_nodes == {"Support 1": 23, "Support 2": 24}
+    assert len(result.rotor.bearing_elements) == 4
+    assert len(result.rotor.point_mass_elements) == 2
+
+    rotor_bearing_1, support_1, rotor_bearing_2, support_2 = result.rotor.bearing_elements
+    assert rotor_bearing_1.kwargs["n_link"] == 23
+    assert rotor_bearing_2.kwargs["n_link"] == 24
+    assert support_1.kwargs["n"] == 23
+    assert support_2.kwargs["n"] == 24
+    assert support_1.kwargs["kxx"] == pytest.approx(43.68e7)
+    assert support_1.kwargs["kyy"] == pytest.approx(90.34e7)
+    assert result.rotor.point_mass_elements[0].kwargs["m"] == pytest.approx(175.0)
+    assert 105.0 in result.unresolved_positions_mm
