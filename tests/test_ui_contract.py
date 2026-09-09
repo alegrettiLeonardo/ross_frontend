@@ -67,6 +67,9 @@ def test_required_screen_sources_exist() -> None:
         root / "ross_compat.py",
         root / "ross_conventions.py",
         root / "ump.py",
+        root / "concentrated.py",
+        root / "bearing_studio_service.py",
+        root / "bearing_input_dialog.py",
     ]
     assert all(path.is_file() for path in required)
 
