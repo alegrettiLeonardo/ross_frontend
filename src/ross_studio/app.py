@@ -78,7 +78,7 @@ class TitleBar(QFrame):
 
 
 class RossStudioWindow(QMainWindow):
-    MODEL_EDITOR_KEYS = {"rotor", "shaft", "disks", "seals", "supports", "couplings", "loads", "home"}
+    MODEL_EDITOR_KEYS = {"rotor", "shaft", "disks", "seals", "supports", "couplings", "loads", "probes", "home"}
     RESULT_KEYS = {"rotor_dynamics", "response", "stability", "transient", "faults", "stochastic", "results"}
 
     def __init__(self) -> None:
@@ -143,7 +143,8 @@ class RossStudioWindow(QMainWindow):
             return
         if key in self.RESULT_KEYS:
             self.stack.setCurrentWidget(self.results_page)
-            self.status.set_status("Results workspace", "Select an analysis result", units="Units: SI (mm, kg, N, Hz, rpm)")
+            state = "Real ROSS results loaded" if self.results_page.result is not None else "No real analysis executed"
+            self.status.set_status("Results workspace", state, units="Units: SI (mm, kg, N, Hz, rpm)")
             return
         self.stack.setCurrentWidget(self.rotor_page)
         self.rotor_page.select_editor(key)
@@ -172,8 +173,28 @@ class RossStudioWindow(QMainWindow):
     def run_analysis(self) -> None:
         dlg = SolverConsole(self.project, self)
         dlg.exec()
-        if dlg.status.text() == "Completed":
-            self.status.set_status("Analysis completed", "No issues found")
+        result = dlg.analysis_result
+        if result is not None:
+            self.results_page.set_results(result)
+            self.stack.setCurrentWidget(self.results_page)
+            try:
+                self.sidebar.set_active("results")
+            except Exception:
+                pass
+            critical_text = (
+                f"first critical {result.first_critical_rpm:,.1f} rpm"
+                if result.first_critical_rpm is not None
+                else "no 1X critical inside qualified K/C envelope"
+            )
+            self.status.set_status(
+                "Real ROSS analysis completed",
+                f"{len(result.modal_modes)} modal modes · {critical_text} · {len(result.probe_responses)} probe channels",
+                units="Units: Hz, rpm, µm",
+            )
+        elif dlg.status.text() == "Failed":
+            self.status.set_status("Analysis failed", dlg.status_detail.text())
+        elif dlg.status.text() == "Stopped":
+            self.status.set_status("Analysis stopped", "Cancelled between ROSS analysis stages")
 
 
 def launch() -> int:
