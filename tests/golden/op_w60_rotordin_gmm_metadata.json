@@ -52,6 +52,25 @@
     {"position_mm": 2202.2, "coordinate": 1, "orientation_raw": 45.0},
     {"position_mm": 2202.2, "coordinate": 2, "orientation_raw": 45.0}
   ],
-  "known_legacy_contract_note": "The regenerated RotorDin output labels the raw probe orientation as radians because response_angle_unit defaults to R. A D-unit serialization experiment produced an identical response table in the supplied solver path. Individual oriented-channel phase is therefore not treated as qualified until this legacy response-angle contract is isolated. Orthogonal probe-pair resultant amplitude is invariant to this ambiguity and is the primary correlation metric.",
+  "lateral_convention_evidence": {
+    "bearing_cross_terms": "identity: RotorDin Kxz/Kzx,Cxz/Czx map directly to ROSS Kxy/Kyx,Cxy/Cyx",
+    "rotordin_disk_gyro_theta_x_theta_z": "-Ip",
+    "ross_disk_gyro_alpha_beta": "+Ip",
+    "rotordin_shaft_gyro_xz_leading_sign": "negative",
+    "ross_shaft_gyro_xy_leading_sign": "positive",
+    "qualified_import_convention": "ROTORDIN_POSITIVE",
+    "ross_adapter_action": "invert assembled G and reverse synchronous circular-force handedness; leave M/K/C and bearing coefficients unchanged"
+  },
+  "response_angle_contract": {
+    "ui_semantic": "degrees",
+    "frontend_field": "orientation_deg",
+    "solver_expected_token": "RANUN=D means degrees; default/other means radians",
+    "migrated_frontend_serialization": "single-character RANUN is right-justified in A10",
+    "cadjf_bug": "right-justified one-character RANUN is reduced to blank by cadjf(cin,1), so response defaults to radians",
+    "golden_effective_contract": "ROTORDIN_FRONTEND_BUG_RAD",
+    "physical_contract": "DEGREES",
+    "validation": "manually left-justifying D makes the supplied solver use degrees; the resulting table equals the orthogonal rotation of the bug-compatible complex channels from raw 45 rad to 45 deg within numerical precision"
+  },
+  "known_legacy_contract_note": "The committed golden CSV reproduces the current migrated RotorDin frontend bug-compatible path: raw probe orientation 45 is interpreted as 45 rad because right-justified RANUN is lost by cadjf. ROSS Studio production uses the intended physical DEGREES contract. Bug-compatible radians remain available only for regression/correlation diagnostics.",
   "golden_csv": "tests/golden/op_w60_rotordin_gmm_900_4500.csv"
 }
