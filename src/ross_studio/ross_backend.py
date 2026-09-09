@@ -47,6 +47,15 @@ class EquivalentDiskPlan:
     source: str = "legacy [Massas]"
 
 
+@dataclass(slots=True, frozen=True)
+class EquivalentPointMassPlan:
+    name: str
+    node: int
+    position_mm: float
+    mass_kg: float
+    source: str = "legacy [Concent]"
+
+
 @dataclass(slots=True)
 class RossBuildResult:
     rotor: Any
@@ -56,6 +65,7 @@ class RossBuildResult:
     support_link_nodes: dict[str, int]
     node_insertion_plan: NodeInsertionPlan
     equivalent_disks: list[EquivalentDiskPlan]
+    equivalent_point_masses: list[EquivalentPointMassPlan]
 
 
 class RossModelBuilder:
@@ -233,7 +243,7 @@ class RossModelBuilder:
         support_by_bearing = {support.bearing_index: support for support in project.supports}
         support_link_nodes: dict[str, int] = {}
         bearings: list[Any] = []
-        point_masses: list[Any] = []
+        support_point_masses: list[Any] = []
         next_link_node = len(node_positions)
         for bearing_index, bearing_spec in enumerate(project.bearings):
             support = support_by_bearing.get(bearing_index)
@@ -258,10 +268,11 @@ class RossModelBuilder:
                         tag=f"{support.name} / ground",
                     )
                 )
-                point_masses.append(rs.PointMass(n=link_node, m=support.mass_kg, tag=f"{support.name} mass"))
+                support_point_masses.append(rs.PointMass(n=link_node, m=support.mass_kg, tag=f"{support.name} mass"))
 
         disks: list[Any] = []
         equivalent_disks: list[EquivalentDiskPlan] = []
+        equivalent_point_masses: list[EquivalentPointMassPlan] = []
         unresolved: list[float] = []
 
         for mass in project.distributed_masses:
@@ -295,19 +306,31 @@ class RossModelBuilder:
                 continue
             disks.append(rs.DiskElement(mapping.node, disk.mass_kg, disk.id_kg_m2, disk.ip_kg_m2, tag=disk.name))
 
+        # ROSS 2.3 PointMass is a link/support element and its Rotor constructor expects
+        # every PointMass node to coincide with a BearingElement row.  A scalar mass on
+        # an ordinary shaft node is therefore realized as DiskElement(m, Id=0, Ip=0).
+        # Its 6-DOF mass matrix is diag(m,m,m,0,0,0), exactly the required isotropic
+        # translational point mass with no rotary inertia and no gyroscopic contribution.
         for mass in project.point_masses:
             mapping = self.map_position(project, mass.position_mm)
             if mapping.node is None:
                 unresolved.append(mass.position_mm)
                 continue
-            kwargs: dict[str, Any] = {"n": mapping.node, "m": mass.mass_kg, "tag": mass.name}
-            if mass.mx_kg is not None:
-                kwargs["mx"] = mass.mx_kg
-            if mass.my_kg is not None:
-                kwargs["my"] = mass.my_kg
-            if mass.mz_kg is not None:
-                kwargs["mz"] = mass.mz_kg
-            point_masses.append(rs.PointMass(**kwargs))
+            if any(value is not None for value in (mass.mx_kg, mass.my_kg, mass.mz_kg)):
+                if strict:
+                    raise EngineeringError(
+                        f"{mass.name} defines directional point-mass components. The qualified ROSS 2.3 "
+                        "shaft-node adapter currently supports scalar isotropic point mass only."
+                    )
+                unresolved.append(mass.position_mm)
+                continue
+            disks.append(rs.DiskElement(mapping.node, mass.mass_kg, 0.0, 0.0, tag=f"{mass.name} / shaft point mass"))
+            equivalent_point_masses.append(EquivalentPointMassPlan(
+                name=mass.name,
+                node=mapping.node,
+                position_mm=mass.position_mm,
+                mass_kg=mass.mass_kg,
+            ))
 
         unresolved = sorted(set(unresolved))
         if strict and unresolved:
@@ -318,7 +341,7 @@ class RossModelBuilder:
             shaft_elements=shaft_elements,
             disk_elements=disks or None,
             bearing_elements=bearings or None,
-            point_mass_elements=point_masses or None,
+            point_mass_elements=support_point_masses or None,
             tag=project.name,
         )
         return RossBuildResult(
@@ -329,6 +352,7 @@ class RossModelBuilder:
             support_link_nodes=support_link_nodes,
             node_insertion_plan=insertion_plan,
             equivalent_disks=equivalent_disks,
+            equivalent_point_masses=equivalent_point_masses,
         )
 
 
