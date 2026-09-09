@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -144,3 +145,24 @@ def test_flexible_supports_are_assembled_as_linked_nodes() -> None:
     assert support_1.kwargs["kyy"] == pytest.approx(90.34e7)
     assert result.rotor.point_mass_elements[0].kwargs["m"] == pytest.approx(175.0)
     assert 105.0 in result.unresolved_positions_mm
+
+
+def test_duplicate_support_for_same_bearing_is_blocked() -> None:
+    project = load_irdin_project(FIXTURE)
+    duplicate = deepcopy(project.supports[0])
+    duplicate.name = "Duplicate support"
+    project.supports.append(duplicate)
+
+    issues = EngineeringValidationService().validate(project)
+    assert any(issue.severity == "error" and issue.code == "DUPLICATE_SUPPORT_LINK" for issue in issues)
+
+
+def test_cylindrical_bearing_with_flexible_support_is_blocked_for_ross_23() -> None:
+    project = load_irdin_project(FIXTURE)
+    project.bearings[0].ross_class = "CylindricalBearing"
+
+    issues = EngineeringValidationService().validate(project)
+    assert any(
+        issue.severity == "error" and issue.code == "CYLINDRICAL_SUPPORT_LINK_UNAVAILABLE"
+        for issue in issues
+    )
