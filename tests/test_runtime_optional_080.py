@@ -10,7 +10,7 @@ import pytest
 from ross_studio.analysis_backend import RossAnalysisBackend
 from ross_studio.analysis_pipeline import AnalysisPipelineService, AnalysisPolicy
 from ross_studio.legacy_import import load_irdin_project
-from ross_studio.models import load_reference_project_model
+from ross_studio.models import ProjectModel, load_reference_project_model
 from ross_studio.ross_backend import RossModelBuilder
 
 
@@ -65,8 +65,9 @@ def test_real_ross_23_strict_builds_op_w60_with_inserted_nodes_and_legacy_masses
 def test_real_ross_23_runs_complete_op_w60_scientific_pipeline() -> None:
     rs = pytest.importorskip("ross")
     project = load_irdin_project(FIXTURE)
+    backend = RossAnalysisBackend(rs)
     service = AnalysisPipelineService(
-        backend=RossAnalysisBackend(rs),
+        backend=backend,
         policy=AnalysisPolicy(
             modal_num_modes=12,
             campbell_frequencies=6,
@@ -104,14 +105,38 @@ def test_real_ross_23_runs_complete_op_w60_scientific_pipeline() -> None:
     assert "BEARING_KC_ENVELOPE" in audit_codes
     assert "CRITICAL_METHOD" in audit_codes
     assert "UNBALANCE_INPUT_UNITS" in audit_codes
+    assert any(note.code == "ROSS_230_ORBIT_COMPAT" for note in backend.compatibility_notes)
     completed = [event.stage for event in events if event.state == "completed"]
     assert completed == list(AnalysisPipelineService.STAGES)
+
+    # Push the actual numerical object through the Qt Results page and every
+    # implemented result tab. This is the end-to-end GUI handoff gate: no mock
+    # CAMPBELL_MODES or canned response values are involved.
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+    from ross_studio.pages.results import AnalysisResultsPage
+
+    app = QApplication.instance() or QApplication([])
+    result_page = AnalysisResultsPage(ProjectModel.from_engineering(project))
+    result_page.set_results(result)
+    assert result_page.result is result
+    assert "ROSS pipeline PASS" in result_page.result_state.text()
+    for result_key in ("static", "modal", "critical", "campbell", "unbalance"):
+        result_page._select_analysis(result_key)
+        assert result_page.table.rowCount() >= 1
+    result_page.close()
+    app.processEvents()
 
     artifact_dir = Path("artifacts")
     artifact_dir.mkdir(exist_ok=True)
     summary = {
         "project": project.name,
         "ross_version": getattr(rs, "__version__", "unknown"),
+        "ross_compatibility": [
+            {"code": note.code, "message": note.message}
+            for note in backend.compatibility_notes
+        ],
         "topology": {
             "physical_sections": project.physical_section_count,
             "shaft_elements": len(result.build.shaft_plan),
@@ -166,6 +191,7 @@ def test_real_ross_23_runs_complete_op_w60_scientific_pipeline() -> None:
             for audit in result.audits
         ],
         "stage_elapsed_s": result.stage_elapsed_s,
+        "gui_results_handoff": "PASS",
     }
     (artifact_dir / "op_w60_pipeline_summary.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False),
