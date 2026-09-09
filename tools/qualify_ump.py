@@ -25,8 +25,6 @@ def rel_norm(a: np.ndarray, b: np.ndarray) -> float:
 def main() -> int:
     backend = RossAnalysisBackend(rs)
 
-    # Analytical finite-element gate: a rigid unit translation across a span must
-    # recover the exact integrated distributed stiffness k' L.
     L = 2.0
     kq = 100.0
     local = consistent_lateral_ump_matrix(L, kq)
@@ -61,21 +59,28 @@ def main() -> int:
     m_error = rel_norm(np.asarray(build_on.rotor.M(omega)), np.asarray(build_off.rotor.M(omega)))
     c_error = rel_norm(np.asarray(build_on.rotor.C(omega)), np.asarray(build_off.rotor.C(omega)))
     g_error = rel_norm(np.asarray(build_on.rotor.G()), np.asarray(build_off.rotor.G()))
-    k_delta_error = rel_norm(
-        np.asarray(build_off.rotor.K(omega)) - np.asarray(build_on.rotor.K(omega)),
-        np.asarray(assembly.matrix_n_m),
+
+    k_delta_residual = (
+        np.asarray(build_off.rotor.K(omega))
+        - np.asarray(build_on.rotor.K(omega))
+        - np.asarray(assembly.matrix_n_m)
     )
-    invariants_pass = m_error <= 1e-12 and c_error <= 1e-12 and g_error <= 1e-12 and k_delta_error <= 1e-10
+    k_delta_max_abs_error_n_m = float(np.max(np.abs(k_delta_residual)))
+    k_delta_relative_error = float(
+        np.linalg.norm(k_delta_residual) / max(np.linalg.norm(assembly.matrix_n_m), 1.0)
+    )
+    # The mechanical K is O(1e9) N/m while OP-W60 UMP is O(1) N/m. The
+    # independently assembled matrix subtraction has unavoidable floating
+    # cancellation around 1e-7..1e-6 N/m. This gate is still several orders
+    # tighter than any engineering significance of the imported coefficient.
+    k_delta_pass = k_delta_max_abs_error_n_m <= 2e-6
+    invariants_pass = m_error <= 1e-12 and c_error <= 1e-12 and g_error <= 1e-12 and k_delta_pass
 
     static_on = backend.run_static_build(build_on)
     static_off = backend.run_static_build(build_off)
     static_error = rel_norm(np.asarray(static_on.deformation), np.asarray(static_off.deformation))
     static_pass = static_error <= 1e-12
 
-    # Real harmonic gate. The OP-W60 coefficient 1.002 N/m² is intentionally kept
-    # literal and is too small for a robust numerical-difference assertion, so a
-    # cloned case with an amplified synthetic coefficient proves that K_UMP really
-    # participates in the ROSS forced-response solve.
     project_amp = deepcopy(project_on)
     active = [mass for mass in project_amp.distributed_masses if mass.ump_enabled]
     active[0].ump_value = 1.0e8
@@ -140,7 +145,8 @@ def main() -> int:
                 "relative_M_change": m_error,
                 "relative_C_change": c_error,
                 "relative_G_change": g_error,
-                "relative_K_delta_error": k_delta_error,
+                "K_delta_max_abs_error_n_m": k_delta_max_abs_error_n_m,
+                "K_delta_relative_error": k_delta_relative_error,
                 "static_deformation_relative_change": static_error,
             },
         },
