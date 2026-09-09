@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -104,6 +106,71 @@ def test_real_ross_23_runs_complete_op_w60_scientific_pipeline() -> None:
     assert "UNBALANCE_INPUT_UNITS" in audit_codes
     completed = [event.stage for event in events if event.state == "completed"]
     assert completed == list(AnalysisPipelineService.STAGES)
+
+    artifact_dir = Path("artifacts")
+    artifact_dir.mkdir(exist_ok=True)
+    summary = {
+        "project": project.name,
+        "ross_version": getattr(rs, "__version__", "unknown"),
+        "topology": {
+            "physical_sections": project.physical_section_count,
+            "shaft_elements": len(result.build.shaft_plan),
+            "shaft_nodes": len(result.build.node_positions_mm),
+            "support_link_nodes": result.build.support_link_nodes,
+        },
+        "speed_envelope_rpm": [float(result.speed_rpm[0]), float(result.speed_rpm[-1])],
+        "static": {
+            "max_abs_deformation_m": float(np.max(np.abs(np.asarray(result.static.deformation, dtype=float)))),
+        },
+        "modal_rated": [
+            {
+                "mode": mode.mode,
+                "wn_hz": mode.wn_hz,
+                "wd_hz": mode.wd_hz,
+                "damping_ratio": mode.damping_ratio,
+                "log_dec": mode.log_dec,
+                "whirl": mode.whirl,
+            }
+            for mode in result.modal_modes
+        ],
+        "critical_speeds": [
+            {
+                "mode": critical.mode,
+                "speed_rpm": critical.speed_rpm,
+                "frequency_hz": critical.frequency_hz,
+                "damping_ratio": critical.damping_ratio,
+                "log_dec": critical.log_dec,
+                "whirl": critical.whirl,
+                "method": critical.method,
+            }
+            for critical in result.critical_speeds
+        ],
+        "probes": [
+            {
+                "name": probe.name,
+                "node": probe.node,
+                "position_mm": probe.position_mm,
+                "coordinate": probe.coordinate,
+                "orientation_deg": probe.orientation_deg,
+                "peak_speed_rpm": probe.peak_speed_rpm,
+                "peak_amplitude_m": probe.peak_amplitude_m,
+                "peak_phase_deg": probe.peak_phase_deg,
+                "rated_speed_rpm": probe.rated_speed_rpm,
+                "rated_amplitude_m": probe.rated_amplitude_m,
+                "rated_phase_deg": probe.rated_phase_deg,
+            }
+            for probe in result.probe_responses
+        ],
+        "audits": [
+            {"severity": audit.severity, "code": audit.code, "message": audit.message}
+            for audit in result.audits
+        ],
+        "stage_elapsed_s": result.stage_elapsed_s,
+    }
+    (artifact_dir / "op_w60_pipeline_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def test_qt_engineering_routes_and_bearing_groups() -> None:
