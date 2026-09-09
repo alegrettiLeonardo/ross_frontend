@@ -8,6 +8,7 @@ from ross_studio.legacy_import import load_irdin_project
 from ross_studio.models import BearingModel, load_reference_project_model
 from ross_studio.ross_backend import RossModelBuilder
 from ross_studio.services import BearingCatalogService, EngineeringValidationService, RossCapabilityRegistry
+from ross_studio.topology import NodeInsertionService
 
 FIXTURE = Path(__file__).parents[1] / "src" / "ross_studio" / "resources" / "OP-W60-500-60Hz-IC611-P3.txt"
 
@@ -70,32 +71,55 @@ def test_reference_view_model_uses_same_importer() -> None:
     assert view.name == "OP-W60-500-60Hz-IC611-P3"
     assert view.engineering is not None
     assert view.physical_sections == 15
-    assert view.ross_shaft_elements == 22
+    assert view.ross_shaft_elements == 27
     bearing = BearingModel.from_project(view.engineering)
     assert bearing.name == "dianteiro -quente"
     assert len(bearing.coefficients) == 11
 
 
-def test_physical_to_fem_topology_is_explicit() -> None:
+def test_node_insertion_is_explicit_and_deterministic() -> None:
     project = load_irdin_project(FIXTURE)
+    plan = NodeInsertionService.plan(project)
+
     assert project.physical_section_count == 15
-    assert project.ross_shaft_element_count == 22
-    split = project.topology_split_positions_mm()
-    assert 467.8 in split
-    assert 2202.2 in split
-    assert 918.0 in split
-    assert 1633.0 in split
-    assert 105.0 not in split
+    assert project.ross_shaft_element_count == 27
+    assert plan.shaft_element_count == 27
+    assert len(plan.positions_mm) == 28
+
+    for x in (467.8, 2202.2, 918.0, 1633.0, 105.0, 737.5, 1275.5, 1932.5, 2550.2):
+        assert plan.node_for(x) is not None
+
+    centers = {
+        item.position_mm
+        for item in plan.insertions
+        if any(reason.startswith("legacy-mass-center:") for reason in item.reasons)
+    }
+    assert centers == {737.5, 1275.5, 1932.5, 2550.2}
 
 
-def test_positions_are_not_silently_snapped() -> None:
+def test_positions_are_never_silently_snapped() -> None:
     project = load_irdin_project(FIXTURE)
     builder = RossModelBuilder(FakeRoss)
+    assert builder.map_position(project, 105.0).exact
+    assert builder.map_position(project, 737.5).exact
     assert builder.map_position(project, 918.0).exact
-    assert builder.map_position(project, 1633.0).exact
     mapping = builder.map_position(project, 1000.123)
     assert not mapping.exact
     assert mapping.node is None
+
+
+def test_legacy_mass_inertia_realization_uses_finite_hollow_cylinder() -> None:
+    project = load_irdin_project(FIXTURE)
+    expected = [
+        (0.19483703125, 0.3759140625),
+        (43.397426583333335, 25.176051875),
+        (0.19483703125, 0.3759140625),
+        (0.5248847252083333, 1.04949734375),
+    ]
+    for mass, (expected_id, expected_ip) in zip(project.distributed_masses, expected):
+        id_kg_m2, ip_kg_m2 = mass.equivalent_disk_inertias_kg_m2()
+        assert id_kg_m2 == pytest.approx(expected_id)
+        assert ip_kg_m2 == pytest.approx(expected_ip)
 
 
 def test_bearing_tables_are_preserved() -> None:
@@ -118,33 +142,46 @@ def test_catalog_separates_class_existence_from_adapter_readiness() -> None:
     assert amb["status"] == AdapterStatus.BLOCKED.value
 
 
-def test_readiness_flags_unqualified_realizations_without_destroying_data() -> None:
+def test_readiness_accepts_mass_and_node_realization_for_op_w60() -> None:
     project = load_irdin_project(FIXTURE)
     issues = EngineeringValidationService().validate(project)
     codes = {issue.code for issue in issues}
-    assert "DISTRIBUTED_MASS_REALIZATION" in codes
-    assert "POINT_MASS_NODE_MAPPING" in codes
+    assert "DISTRIBUTED_MASS_REALIZATION" not in codes
+    assert "POINT_MASS_NODE_MAPPING" not in codes
+    assert "NODE_INSERTION_FAILED" not in codes
+    assert "UMP_LOAD_PENDING" in codes
     assert all(issue.severity != "error" for issue in issues)
 
 
-def test_flexible_supports_are_assembled_as_linked_nodes() -> None:
+def test_strict_op_w60_build_closes_all_structural_node_mapping() -> None:
     project = load_irdin_project(FIXTURE)
-    result = RossModelBuilder(FakeRossAssembly).build(project, strict=False)
+    result = RossModelBuilder(FakeRossAssembly).build(project, strict=True)
 
-    assert len(result.shaft_plan) == 22
-    assert result.support_link_nodes == {"Support 1": 23, "Support 2": 24}
+    assert len(result.shaft_plan) == 27
+    assert len(result.node_positions_mm) == 28
+    assert result.unresolved_positions_mm == []
+    assert result.support_link_nodes == {"Support 1": 28, "Support 2": 29}
     assert len(result.rotor.bearing_elements) == 4
-    assert len(result.rotor.point_mass_elements) == 2
+    assert len(result.rotor.disk_elements) == 4
+    assert len(result.rotor.point_mass_elements) == 3
+    assert len(result.equivalent_disks) == 4
 
-    rotor_bearing_1, support_1, rotor_bearing_2, support_2 = result.rotor.bearing_elements
-    assert rotor_bearing_1.kwargs["n_link"] == 23
-    assert rotor_bearing_2.kwargs["n_link"] == 24
-    assert support_1.kwargs["n"] == 23
-    assert support_2.kwargs["n"] == 24
-    assert support_1.kwargs["kxx"] == pytest.approx(43.68e7)
-    assert support_1.kwargs["kyy"] == pytest.approx(90.34e7)
-    assert result.rotor.point_mass_elements[0].kwargs["m"] == pytest.approx(175.0)
-    assert 105.0 in result.unresolved_positions_mm
+    assert [disk.position_mm for disk in result.equivalent_disks] == [737.5, 1275.5, 1932.5, 2550.2]
+    assert [disk.mass_kg for disk in result.equivalent_disks] == pytest.approx([12.9, 723.19, 12.9, 25.51])
+    assert result.equivalent_disks[1].id_kg_m2 == pytest.approx(43.397426583333335)
+    assert result.equivalent_disks[1].ip_kg_m2 == pytest.approx(25.176051875)
+
+    bearings_by_tag = {element.kwargs.get("tag"): element for element in result.rotor.bearing_elements}
+    assert bearings_by_tag["dianteiro -quente"].kwargs["n_link"] == 28
+    assert bearings_by_tag["traseiro -quente"].kwargs["n_link"] == 29
+    assert bearings_by_tag["Support 1 / ground"].kwargs["n"] == 28
+    assert bearings_by_tag["Support 2 / ground"].kwargs["n"] == 29
+
+    support_masses = [element for element in result.rotor.point_mass_elements if "Support" in element.kwargs.get("tag", "")]
+    physical_point_mass = [element for element in result.rotor.point_mass_elements if element.kwargs.get("tag") == "Point mass 1"]
+    assert len(support_masses) == 2
+    assert len(physical_point_mass) == 1
+    assert physical_point_mass[0].kwargs["n"] == NodeInsertionService.plan(project).node_for(105.0)
 
 
 def test_duplicate_support_for_same_bearing_is_blocked() -> None:
@@ -166,3 +203,10 @@ def test_cylindrical_bearing_with_flexible_support_is_blocked_for_ross_23() -> N
         issue.severity == "error" and issue.code == "CYLINDRICAL_SUPPORT_LINK_UNAVAILABLE"
         for issue in issues
     )
+
+
+def test_invalid_legacy_mass_geometry_blocks_strict_realization() -> None:
+    project = load_irdin_project(FIXTURE)
+    project.distributed_masses[0].id_mm = project.distributed_masses[0].od_mm
+    issues = EngineeringValidationService().validate(project)
+    assert any(issue.severity == "error" and issue.code == "DISTRIBUTED_MASS_GEOMETRY" for issue in issues)
