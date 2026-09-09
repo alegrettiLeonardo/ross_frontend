@@ -6,9 +6,10 @@ from typing import Any
 
 import numpy as np
 
-from .domain import EngineeringError
+from .domain import EngineeringError, LateralConvention, RotorProject
 from .ross_backend import RossBackend, RossBuildResult
 from .ross_compat import RossCompatibilityNote, install_ross_compatibility
+from .ross_conventions import rotordin_rotor_class
 
 
 @dataclass(slots=True, frozen=True)
@@ -42,8 +43,14 @@ class RossAnalysisBackend(RossBackend):
     """ROSS execution adapter that reuses one strict Rotor build across analyses.
 
     Engineering-domain values remain in their source units until this class crosses
-    into the ROSS API. In particular, legacy iRdin [Desbal] values are preserved as
-    g*mm and converted to kg*m only immediately before run_unbalance_response().
+    into the ROSS API. Legacy iRdin [Desbal] values are preserved as g*mm and
+    converted to kg*m only immediately before the ROSS unbalance execution.
+
+    Imported RotorDin projects also carry an explicit positive-rotation convention.
+    For those projects the ROSS rotor is rebuilt from the same already-qualified
+    elements using a thin subclass that changes only G sign and synchronous-force
+    handedness. M, K, C, bearing cross coefficients and all physical properties are
+    unchanged.
     """
 
     def __init__(self, ross_module: Any | None = None) -> None:
@@ -51,6 +58,26 @@ class RossAnalysisBackend(RossBackend):
         self.compatibility_notes: tuple[RossCompatibilityNote, ...] = install_ross_compatibility(
             self.builder._ross()
         )
+
+    def build_rotor(self, project: RotorProject, *, strict: bool = True) -> RossBuildResult:
+        build = super().build_rotor(project, strict=strict)
+        if project.lateral_convention == LateralConvention.ROSS_NATIVE:
+            setattr(build.rotor, "lateral_convention", LateralConvention.ROSS_NATIVE.value)
+            return build
+        if project.lateral_convention != LateralConvention.ROTORDIN_POSITIVE:
+            raise EngineeringError(f"Unsupported lateral convention {project.lateral_convention!r}.")
+
+        rs = self.builder._ross()
+        rotor_cls = rotordin_rotor_class(rs)
+        base = build.rotor
+        build.rotor = rotor_cls(
+            shaft_elements=list(base.shaft_elements),
+            disk_elements=list(base.disk_elements) or None,
+            bearing_elements=list(base.bearing_elements) or None,
+            point_mass_elements=list(base.point_mass_elements) or None,
+            tag=base.tag,
+        )
+        return build
 
     @staticmethod
     def run_static_build(build: RossBuildResult) -> Any:
