@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ross-studio"
+version = "0.2.0"
+description = "Rotordynamics Design Platform for Rotating Electrical Machines"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "PySide6>=6.7,<7",
+  "ross-rotordynamics==2.3.0",
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "pandas>=2.0",
+  "plotly==5.24.1",
+  "pint>=0.22",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-qt>=4.4"]
+
+[project.scripts]
+ross-studio = "ross_studio.app:launch"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ross_studio"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+addopts = "-q"
