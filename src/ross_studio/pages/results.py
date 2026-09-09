@@ -94,6 +94,7 @@ class AnalysisResultsPage(QWidget):
             ("modal", "Modal"),
             ("critical", "Critical Speed"),
             ("campbell", "Campbell"),
+            ("ump", "UMP"),
             ("unbalance", "Unbalance / Probes"),
         ]:
             button = QPushButton(text)
@@ -167,28 +168,18 @@ class AnalysisResultsPage(QWidget):
 
     def set_results(self, result: AnalysisPipelineResult) -> None:
         self.result = result
-        self.result_state.setText(f"ROSS pipeline PASS · {result.total_elapsed_s:.2f} s")
-        if result.first_critical_rpm is not None:
-            self.kpi_first.set_value(f"{result.first_critical_rpm:,.0f}")
-        else:
-            self.kpi_first.set_value("None")
-        if result.second_critical_rpm is not None:
-            self.kpi_second.set_value(f"{result.second_critical_rpm:,.0f}")
-        else:
-            self.kpi_second.set_value("None")
-        if result.max_probe_amplitude_um is not None:
-            self.kpi_response.set_value(f"{result.max_probe_amplitude_um:.4g}")
-        else:
-            self.kpi_response.set_value("—")
-        if result.min_modal_damping_ratio is not None:
-            self.kpi_damping.set_value(f"{100.0 * result.min_modal_damping_ratio:.3f}")
-        else:
-            self.kpi_damping.set_value("—")
+        ump_state = " · UMP active" if result.ump_assembly is not None and result.ump_assembly.active else ""
+        self.result_state.setText(f"ROSS pipeline PASS · {result.total_elapsed_s:.2f} s{ump_state}")
+        self.kpi_first.set_value(f"{result.first_critical_rpm:,.0f}" if result.first_critical_rpm is not None else "None")
+        self.kpi_second.set_value(f"{result.second_critical_rpm:,.0f}" if result.second_critical_rpm is not None else "None")
+        self.kpi_response.set_value(f"{result.max_probe_amplitude_um:.4g}" if result.max_probe_amplitude_um is not None else "—")
+        self.kpi_damping.set_value(f"{100.0 * result.min_modal_damping_ratio:.3f}" if result.min_modal_damping_ratio is not None else "—")
 
         self.campbell_chart.set_result(result)
         warnings = [audit for audit in result.audits if audit.severity == "warning"]
+        ump_records = [audit for audit in result.audits if audit.code.startswith("UMP_")]
         self.audit_summary.setText(
-            f"{len(result.audits)} audit record(s), {len(warnings)} warning(s). "
+            f"{len(result.audits)} audit record(s), {len(warnings)} warning(s), {len(ump_records)} UMP audit record(s). "
             + (warnings[0].message if warnings else "All active numerical gates passed.")
         )
         self._select_analysis("campbell")
@@ -245,6 +236,28 @@ class AnalysisResultsPage(QWidget):
             rows = [[mode + 1, f"{speed[idx]:.1f}", f"{wd[idx, mode]:.3f}"] for mode in range(wd.shape[1])]
             self._set_table("Campbell branches near rated speed", ["Branch", "Speed (rpm)", "Wd (Hz)"], rows)
             self.chart_header.setText("Campbell Diagram — real ROSS result")
+        elif key == "ump":
+            assembly = result.ump_assembly
+            if assembly is None or not assembly.active:
+                rows = [["—", "No active UMP", "—", "—", "—", "—"]]
+            else:
+                rows = [
+                    [
+                        span.name,
+                        f"{span.start_mm:g}",
+                        f"{span.end_mm:g}",
+                        f"{span.stiffness_per_length_n_m2:.9g}",
+                        f"{span.integrated_stiffness_n_m:.9g}",
+                        ", ".join(str(index) for index in span.shaft_element_indices),
+                    ]
+                    for span in assembly.spans
+                ]
+            self._set_table(
+                "UMP — electromagnetic negative stiffness",
+                ["Span", "Start (mm)", "End (mm)", "k' (N/m²)", "Integrated k (N/m)", "Shaft elements"],
+                rows,
+            )
+            self.chart_header.setText("UMP active in Modal / Campbell / Harmonic Response: K_eff = K - K_UMP")
         elif key == "unbalance":
             rows = [
                 [
@@ -265,13 +278,15 @@ class AnalysisResultsPage(QWidget):
                 ["Probe", "Node", "x (mm)", "Coord", "Angle", "Peak (µm)", "Peak rpm", "Rated (µm)", "Rated phase"],
                 rows,
             )
-            self.chart_header.setText("Campbell context — unbalance sweep uses the same qualified K/C envelope")
+            self.chart_header.setText("Harmonic response uses the same qualified K/C envelope and active UMP stiffness")
         elif key == "static":
             deformation = np.asarray(result.static.deformation, dtype=float)
             bearing_forces = getattr(result.static, "bearing_forces", {})
             rows = [["Max |deflection|", f"{np.max(np.abs(deformation))*1e6:.6g}", "µm"]]
             for name, force in bearing_forces.items():
                 rows.append([f"Bearing reaction · {name}", f"{float(force):.6g}", "N"])
+            if result.ump_assembly is not None and result.ump_assembly.active:
+                rows.append(["UMP in gravity static", "Excluded by energized-dynamic policy", "—"])
             self._set_table("Static / gravity", ["Quantity", "Value", "Unit"], rows)
             self.chart_header.setText("Campbell context — static results are listed in the table")
 
