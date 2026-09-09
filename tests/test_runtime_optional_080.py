@@ -27,8 +27,12 @@ def test_real_ross_23_builds_op_w60_support_topology() -> None:
     assert result.support_link_nodes == {"Support 1": 23, "Support 2": 24}
     assert len(result.rotor.bearing_elements) == 4
     assert len(result.rotor.point_mass_elements) == 2
-    assert result.rotor.bearing_elements[0].n_link == 23
-    assert result.rotor.bearing_elements[2].n_link == 24
+
+    bearings_by_tag = {bearing.tag: bearing for bearing in result.rotor.bearing_elements}
+    assert bearings_by_tag["dianteiro -quente"].n_link == 23
+    assert bearings_by_tag["traseiro -quente"].n_link == 24
+    assert bearings_by_tag["Support 1 / ground"].n == 23
+    assert bearings_by_tag["Support 2 / ground"].n == 24
 
 
 def test_qt_engineering_routes_and_bearing_groups() -> None:
