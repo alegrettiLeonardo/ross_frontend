@@ -24,7 +24,7 @@ def test_rotor_screen_contract_uses_op_w60_reference() -> None:
     assert project.speed_max_rpm == 4500
     assert project.total_length_mm == 2555.2
     assert project.physical_sections == 15
-    assert project.ross_shaft_elements == 22
+    assert project.ross_shaft_elements == 27
     assert project.disks == 4
     assert project.bearings == 2
     assert project.supports == 2
@@ -59,6 +59,7 @@ def test_required_screen_sources_exist() -> None:
         root / "solver_console.py",
         root / "domain.py",
         root / "services.py",
+        root / "topology.py",
         root / "ross_backend.py",
     ]
     assert all(path.is_file() for path in required)
