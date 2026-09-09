@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from ross_studio.models import BearingModel, CAMPBELL_MODES, load_reference_project_model
+import ross_studio.models as models
+from ross_studio.models import BearingModel, load_reference_project_model
 from ross_studio.theme import COLORS
 
 
@@ -43,10 +44,9 @@ def test_bearing_screen_contract_uses_imported_kc_table() -> None:
     assert bearing.coefficients[-1].rpm == 5000
 
 
-def test_campbell_screen_contract_values() -> None:
-    assert len(CAMPBELL_MODES) == 12
-    assert CAMPBELL_MODES[1].speed_rpm == 2840
-    assert CAMPBELL_MODES[5].speed_rpm == 6520
+def test_production_models_do_not_expose_canned_campbell_results() -> None:
+    assert not hasattr(models, "CAMPBELL_MODES")
+    assert not hasattr(models, "CampbellMode")
 
 
 def test_required_screen_sources_exist() -> None:
@@ -61,6 +61,10 @@ def test_required_screen_sources_exist() -> None:
         root / "services.py",
         root / "topology.py",
         root / "ross_backend.py",
+        root / "analysis_backend.py",
+        root / "analysis_pipeline.py",
+        root / "analysis_charts.py",
+        root / "ross_compat.py",
     ]
     assert all(path.is_file() for path in required)
 
