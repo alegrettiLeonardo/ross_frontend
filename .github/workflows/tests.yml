@@ -33,6 +33,8 @@ jobs:
         run: python tools/correlate_op_w60_rotordin.py
       - name: Isolate mesh and bearing-interpolation effects
         run: python tools/isolate_op_w60_response_differences.py
+      - name: Isolate cross-coupling gyro phasor and RANUN conventions
+        run: python tools/isolate_op_w60_conventions.py
       - name: Publish OP-W60 qualification and correlation
         if: always()
         uses: actions/upload-artifact@v4
@@ -43,4 +45,5 @@ jobs:
             artifacts/op_w60_ross_vs_rotordin_correlation.json
             artifacts/op_w60_ross_vs_rotordin_correlation.csv
             artifacts/op_w60_response_ab_isolation.json
+            artifacts/op_w60_convention_isolation.json
           if-no-files-found: ignore
