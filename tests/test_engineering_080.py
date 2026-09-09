@@ -9,6 +9,7 @@ from ross_studio.models import BearingModel, load_reference_project_model
 from ross_studio.ross_backend import RossModelBuilder
 from ross_studio.services import BearingCatalogService, EngineeringValidationService, RossCapabilityRegistry
 from ross_studio.topology import NodeInsertionService
+from ross_studio.ump import project_ump_specs
 
 FIXTURE = Path(__file__).parents[1] / "src" / "ross_studio" / "resources" / "OP-W60-500-60Hz-IC611-P3.txt"
 
@@ -142,14 +143,19 @@ def test_catalog_separates_class_existence_from_adapter_readiness() -> None:
     assert amb["status"] == AdapterStatus.BLOCKED.value
 
 
-def test_readiness_accepts_mass_and_node_realization_for_op_w60() -> None:
+def test_readiness_accepts_mass_node_and_ump_realization_for_op_w60() -> None:
     project = load_irdin_project(FIXTURE)
     issues = EngineeringValidationService().validate(project)
     codes = {issue.code for issue in issues}
     assert "DISTRIBUTED_MASS_REALIZATION" not in codes
     assert "POINT_MASS_NODE_MAPPING" not in codes
     assert "NODE_INSERTION_FAILED" not in codes
-    assert "UMP_LOAD_PENDING" in codes
+    assert "UMP_LOAD_PENDING" not in codes
+    assert "UMP_INPUT_INVALID" not in codes
+    assert "UMP_SPAN_OUTSIDE_SHAFT" not in codes
+    specs = project_ump_specs(project)
+    assert len(specs) == 1
+    assert specs[0].stiffness_per_length_n_m2 == pytest.approx(1.002)
     assert all(issue.severity != "error" for issue in issues)
 
 
@@ -195,7 +201,6 @@ def test_duplicate_support_for_same_bearing_is_blocked() -> None:
     duplicate = deepcopy(project.supports[0])
     duplicate.name = "Duplicate support"
     project.supports.append(duplicate)
-
     issues = EngineeringValidationService().validate(project)
     assert any(issue.severity == "error" and issue.code == "DUPLICATE_SUPPORT_LINK" for issue in issues)
 
@@ -203,12 +208,8 @@ def test_duplicate_support_for_same_bearing_is_blocked() -> None:
 def test_cylindrical_bearing_with_flexible_support_is_blocked_for_ross_23() -> None:
     project = load_irdin_project(FIXTURE)
     project.bearings[0].ross_class = "CylindricalBearing"
-
     issues = EngineeringValidationService().validate(project)
-    assert any(
-        issue.severity == "error" and issue.code == "CYLINDRICAL_SUPPORT_LINK_UNAVAILABLE"
-        for issue in issues
-    )
+    assert any(issue.severity == "error" and issue.code == "CYLINDRICAL_SUPPORT_LINK_UNAVAILABLE" for issue in issues)
 
 
 def test_invalid_legacy_mass_geometry_blocks_strict_realization() -> None:
@@ -223,7 +224,4 @@ def test_directional_shaft_point_mass_is_not_silently_reduced_to_scalar() -> Non
     project.point_masses[0].mx_kg = 34.0
     project.point_masses[0].my_kg = 20.0
     issues = EngineeringValidationService().validate(project)
-    assert any(
-        issue.severity == "error" and issue.code == "DIRECTIONAL_SHAFT_POINT_MASS_UNAVAILABLE"
-        for issue in issues
-    )
+    assert any(issue.severity == "error" and issue.code == "DIRECTIONAL_SHAFT_POINT_MASS_UNAVAILABLE" for issue in issues)
