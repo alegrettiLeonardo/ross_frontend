@@ -123,6 +123,30 @@ class DistributedMassSpec:
     def center_mm(self) -> float:
         return self.start_mm + 0.5 * self.length_mm
 
+    def equivalent_disk_inertias_kg_m2(self) -> tuple[float, float]:
+        """Return (Id, Ip) for the finite hollow-cylinder body represented by `[Massas]`.
+
+        The legacy component keeps its physical mass, axial length, OD and ID.  ROSS
+        represents the rigid body at an explicit center node as ``DiskElement``.  The
+        equivalent inertias are therefore calculated from the original finite cylinder,
+        rather than guessed or copied from a nearby shaft station.
+        """
+        if self.mass_kg < 0:
+            raise EngineeringError(f"{self.name}: mass cannot be negative.")
+        if self.length_mm <= 0:
+            raise EngineeringError(f"{self.name}: axial length must be positive for equivalent-disk realization.")
+        if self.od_mm <= 0:
+            raise EngineeringError(f"{self.name}: OD must be positive for equivalent-disk realization.")
+        if self.id_mm < 0 or self.id_mm >= self.od_mm:
+            raise EngineeringError(f"{self.name}: ID must satisfy 0 <= ID < OD for equivalent-disk realization.")
+
+        ro = self.od_mm / 2000.0
+        ri = self.id_mm / 2000.0
+        length_m = self.length_mm / 1000.0
+        ip = 0.5 * self.mass_kg * (ro**2 + ri**2)
+        id_ = (self.mass_kg / 12.0) * (3.0 * (ro**2 + ri**2) + length_m**2)
+        return id_, ip
+
 
 @dataclass(slots=True)
 class PointMassSpec:
@@ -257,15 +281,10 @@ class RotorProject:
         return values
 
     def topology_split_positions_mm(self) -> list[float]:
-        """Build 0.8 shaft topology without silently snapping point entities."""
-        length = self.total_length_mm
-        values = set(self.section_boundaries_mm())
-        for bearing in self.bearings:
-            values.add(round(bearing.position_mm, 10))
-        for mass in self.distributed_masses:
-            values.add(round(mass.start_mm, 10))
-            values.add(round(mass.end_mm, 10))
-        return sorted(x for x in values if -1e-9 <= x <= length + 1e-9)
+        """Return the deterministic FE topology after explicit physical node insertion."""
+        from .topology import NodeInsertionService
+
+        return list(NodeInsertionService.plan(self).positions_mm)
 
     @property
     def ross_shaft_element_count(self) -> int:
