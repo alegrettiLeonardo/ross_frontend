@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import Any
 
+from .concentrated import validate_concentrated_spec
 from .domain import AdapterStatus, BearingGroup, EngineeringError, RotorProject
 from .topology import NodeInsertionService
 from .ump import project_ump_specs
@@ -148,13 +149,10 @@ class EngineeringValidationService:
                 ))
 
         for mass in project.point_masses:
-            if any(value is not None for value in (mass.mx_kg, mass.my_kg, mass.mz_kg)):
-                issues.append(ValidationIssue(
-                    "error",
-                    "DIRECTIONAL_SHAFT_POINT_MASS_UNAVAILABLE",
-                    f"{mass.name} defines directional point-mass components. The qualified ROSS 2.3 shaft-node adapter "
-                    "supports scalar isotropic point mass only; directional masses require a separate adapter.",
-                ))
+            try:
+                validate_concentrated_spec(mass)
+            except EngineeringError as exc:
+                issues.append(ValidationIssue("error", "CONCENTRATED_MASS_INERTIA_INVALID", str(exc)))
 
         plan = NodeInsertionService.plan(project)
         node_positions = set(plan.positions_mm)
