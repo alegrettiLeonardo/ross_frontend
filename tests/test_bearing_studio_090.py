@@ -132,3 +132,26 @@ def test_thd_and_amb_are_not_silently_enabled_by_general_service() -> None:
     for ross_class in ("PlainJournal", "TiltingPad", "ThrustPad", "SqueezeFilmDamper", "MagneticBearingElement"):
         with pytest.raises(Exception, match="separately gated"):
             service.calculate(project, 0, ross_class, {})
+
+
+def test_qt_bearing_studio_direct_kc_calculate_preview_apply(qtbot) -> None:
+    pytest.importorskip("ross")
+    from ross_studio.app import RossStudioWindow
+
+    window = RossStudioWindow()
+    qtbot.addWidget(window)
+    window._open_bearing_group("General / Parametric")
+    assert window._selected_bearing_class() == "BearingElement"
+    original = deepcopy(window.project.engineering.bearings[0].coefficients)
+
+    window._calculate_bearing()
+    assert window.bearing_calculation is not None
+    assert window.bearing_calculation.source_model == "BearingElement"
+    assert window.bearing_page.apply_button.isEnabled()
+    assert len(window.bearing.coefficients) == len(original)
+
+    window._apply_bearing()
+    assert window.bearing_calculation is None
+    assert window.project.engineering.bearings[0].coefficients == original
+    assert window.project.engineering.bearings[0].metadata["input_mode"] == "speed-dependent K/C table"
+    assert not window.bearing_page.apply_button.isEnabled()
