@@ -57,6 +57,9 @@ def main() -> int:
     summary = {
         "project": project.name,
         "ross_version": getattr(rs, "__version__", "unknown"),
+        "lateral_convention": project.lateral_convention.value,
+        "probe_angle_contract": project.probe_angle_contract.value,
+        "ross_rotor_class": type(result.build.rotor).__name__,
         "qualification_policy": {
             "modal_num_modes_requested": service.policy.modal_num_modes,
             "campbell_frequencies": service.policy.campbell_frequencies,
