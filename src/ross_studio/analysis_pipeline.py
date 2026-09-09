@@ -7,8 +7,9 @@ from typing import Any, Callable
 
 import numpy as np
 
+from .analysis_backend import RossAnalysisBackend
 from .domain import EngineeringError, LoadSpec, ProbeSpec, RotorProject
-from .ross_backend import RossBackend, RossBuildResult
+from .ross_backend import RossBuildResult
 
 
 @dataclass(slots=True, frozen=True)
@@ -149,8 +150,8 @@ class AnalysisPipelineService:
         "Results",
     )
 
-    def __init__(self, backend: RossBackend | None = None, policy: AnalysisPolicy | None = None) -> None:
-        self.backend = backend or RossBackend()
+    def __init__(self, backend: RossAnalysisBackend | None = None, policy: AnalysisPolicy | None = None) -> None:
+        self.backend = backend or RossAnalysisBackend()
         self.policy = policy or AnalysisPolicy()
 
     @staticmethod
