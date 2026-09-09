@@ -149,6 +149,9 @@ def load_irdin_project(path: str | Path) -> RotorProject:
         ))
 
     for index, row in enumerate(_grid_rows(doc.get("desbal")), 1):
+        # iRdin stores residual unbalance in g*mm. Preserve the raw engineering
+        # value in the domain; SI normalization is intentionally deferred to the
+        # ROSS execution boundary (RossAnalysisBackend).
         project.loads.append(LoadSpec(
             name=f"Unbalance {index}",
             kind="unbalance",
@@ -156,8 +159,10 @@ def load_irdin_project(path: str | Path) -> RotorProject:
             phase_deg=_number(_cell(row, 1), 0.0),
             magnitude=_number(_cell(row, 2), 0.0),
             metadata={
-                "magnitude_unit": "kg*m",
-                "source": "iRdin [Desbal] raw value / RotorDin unbalance contract",
+                "magnitude_unit": "g*mm",
+                "source_unit": "g*mm",
+                "source": "iRdin [Desbal] raw residual-unbalance value",
+                "normalization_policy": "Convert to kg*m only at ROSS execution boundary",
             },
         ))
 
