@@ -29,10 +29,15 @@ jobs:
         run: python -m pytest -q -ra
       - name: Run production-resolution OP-W60 pipeline
         run: python tools/qualify_op_w60_pipeline.py
-      - name: Publish OP-W60 pipeline qualification
+      - name: Correlate ROSS against regenerated RotorDin golden
+        run: python tools/correlate_op_w60_rotordin.py
+      - name: Publish OP-W60 qualification and correlation
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: op-w60-pipeline-qualification
-          path: artifacts/op_w60_pipeline_summary.json
+          path: |
+            artifacts/op_w60_pipeline_summary.json
+            artifacts/op_w60_ross_vs_rotordin_correlation.json
+            artifacts/op_w60_ross_vs_rotordin_correlation.csv
           if-no-files-found: ignore
