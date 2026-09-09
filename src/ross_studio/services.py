@@ -134,6 +134,15 @@ class EngineeringValidationService:
                     "but electromagnetic UMP force assembly remains a separate analysis capability.",
                 ))
 
+        for mass in project.point_masses:
+            if any(value is not None for value in (mass.mx_kg, mass.my_kg, mass.mz_kg)):
+                issues.append(ValidationIssue(
+                    "error",
+                    "DIRECTIONAL_SHAFT_POINT_MASS_UNAVAILABLE",
+                    f"{mass.name} defines directional point-mass components. The qualified ROSS 2.3 shaft-node adapter "
+                    "supports scalar isotropic point mass only; directional masses require a separate adapter.",
+                ))
+
         plan = NodeInsertionService.plan(project)
         node_positions = set(plan.positions_mm)
         required_positions: list[tuple[str, float]] = []
