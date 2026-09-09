@@ -8,9 +8,10 @@ import pytest
 
 from ross_studio.analysis_backend import RossAnalysisBackend, RossUnbalanceInput
 from ross_studio.analysis_pipeline import AnalysisPipelineService, AnalysisPolicy
-from ross_studio.domain import ProbeSpec
+from ross_studio.domain import LateralConvention, ProbeAngleContract, ProbeSpec
 from ross_studio.legacy_import import load_irdin_project
 from ross_studio.ross_compat import _init_orbit_symmetric
+from ross_studio.ross_conventions import rotordin_rotor_class
 
 
 FIXTURE = Path(__file__).parents[1] / "src" / "ross_studio" / "resources" / "OP-W60-500-60Hz-IC611-P3.txt"
@@ -48,6 +49,12 @@ def test_legacy_probe_projection_matches_rotordin_vrotate_semantics() -> None:
     assert r2 == pytest.approx((2.0 + 2.0j) / root2)
 
 
+def test_legacy_import_declares_rotordin_positive_rotation_and_physical_degree_probes() -> None:
+    project = load_irdin_project(FIXTURE)
+    assert project.lateral_convention == LateralConvention.ROTORDIN_POSITIVE
+    assert project.probe_angle_contract == ProbeAngleContract.DEGREES
+
+
 def test_legacy_import_preserves_raw_desbal_as_g_mm() -> None:
     project = load_irdin_project(FIXTURE)
     loads = [load for load in project.loads if load.kind == "unbalance"]
@@ -55,6 +62,31 @@ def test_legacy_import_preserves_raw_desbal_as_g_mm() -> None:
     assert [load.magnitude for load in loads] == pytest.approx([4581.2, 4581.2])
     assert all(load.metadata["magnitude_unit"] == "g*mm" for load in loads)
     assert all(load.metadata["source_unit"] == "g*mm" for load in loads)
+
+
+def test_rotordin_positive_adapter_flips_only_gyro_and_circular_force_handedness() -> None:
+    class NativeRotor:
+        number_dof = 6
+
+        def G(self):
+            return np.array([[0.0, 2.0], [-2.0, 0.0]])
+
+        def _unbalance_force(self, node, magnitude, phase, omega):
+            values = np.zeros((12, len(omega)), dtype=complex)
+            start = self.number_dof * node
+            values[start, :] = magnitude
+            values[start + 1, :] = -1j * magnitude
+            return values
+
+    fake_ross = SimpleNamespace(Rotor=NativeRotor)
+    cls = rotordin_rotor_class(fake_ross)
+    rotor = cls()
+
+    assert rotor.lateral_convention == "ROTORDIN_POSITIVE"
+    assert rotor.G() == pytest.approx(np.array([[0.0, -2.0], [2.0, 0.0]]))
+    force = rotor._unbalance_force(1, 3.0, 0.0, np.array([10.0]))
+    assert force[6, 0] == pytest.approx(3.0 + 0.0j)
+    assert force[7, 0] == pytest.approx(0.0 + 3.0j)
 
 
 def test_unbalance_is_normalized_only_inside_ross_execution_boundary() -> None:
