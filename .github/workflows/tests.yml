@@ -29,6 +29,10 @@ jobs:
         run: python -m pytest -q -ra
       - name: Qualify UMP analytical and OP-W60 model
         run: python tools/qualify_ump.py
+      - name: Qualify Concent mass and principal inertias
+        run: python tools/qualify_concentrated.py
+      - name: Qualify Bearing Studio General models
+        run: python tools/qualify_bearing_studio.py
       - name: Run production-resolution OP-W60 pipeline
         run: python tools/qualify_op_w60_pipeline.py
       - name: Enforce ROSS against regenerated RotorDin golden
@@ -37,13 +41,15 @@ jobs:
         run: python tools/isolate_op_w60_response_differences.py
       - name: Isolate cross-coupling gyro phasor and RANUN conventions
         run: python tools/isolate_op_w60_conventions.py
-      - name: Publish OP-W60 and UMP qualification
+      - name: Publish OP-W60 engineering qualification
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: op-w60-pipeline-qualification
           path: |
             artifacts/ump_qualification.json
+            artifacts/concentrated_mass_qualification.json
+            artifacts/bearing_studio_qualification.json
             artifacts/op_w60_pipeline_summary.json
             artifacts/op_w60_ross_vs_rotordin_correlation.json
             artifacts/op_w60_ross_vs_rotordin_correlation.csv
