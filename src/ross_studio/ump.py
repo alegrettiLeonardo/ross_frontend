@@ -5,11 +5,76 @@ from typing import Any, TYPE_CHECKING
 
 import numpy as np
 
-from .domain import EngineeringError, UmpSpec
+from .domain import EngineeringError
 
 if TYPE_CHECKING:
     from .domain import RotorProject
     from .ross_backend import RossBuildResult
+
+
+@dataclass(slots=True, frozen=True)
+class UmpSpec:
+    """Physical linearized UMP input contract.
+
+    ``stiffness_per_length_n_m2`` is the distributed electromagnetic negative
+    stiffness k'_u in N/m², i.e. force per lateral displacement per axial length.
+
+    For a span with local displacement u(x), the linearized magnetic pull is
+
+        f_UMP(x) = k'_u * u(x)   [N/m]
+
+    and therefore the rotor equation uses ``K_effective = K - K_UMP``.
+    """
+
+    name: str
+    start_mm: float
+    length_mm: float
+    stiffness_per_length_n_m2: float
+    source: str = "engineering input"
+    source_value: float | None = None
+    source_unit: str = "N/m^2"
+
+    @property
+    def end_mm(self) -> float:
+        return self.start_mm + self.length_mm
+
+    def validate(self) -> None:
+        values = (self.start_mm, self.length_mm, self.stiffness_per_length_n_m2)
+        if not all(np.isfinite(value) for value in values):
+            raise EngineeringError(f"UMP {self.name!r} contains a non-finite input value.")
+        if self.start_mm < 0.0:
+            raise EngineeringError(f"UMP {self.name!r} start position cannot be negative.")
+        if self.length_mm <= 0.0:
+            raise EngineeringError(f"UMP {self.name!r} length must be positive.")
+        if self.stiffness_per_length_n_m2 < 0.0:
+            raise EngineeringError(f"UMP {self.name!r} negative-stiffness magnitude cannot be negative.")
+
+
+def project_ump_specs(project: "RotorProject") -> tuple[UmpSpec, ...]:
+    """Translate the current engineering-domain UMP fields into explicit specs.
+
+    The legacy iRdin format associates one global UMP coefficient with one or more
+    rows in ``[Massas]``.  The existing ``DistributedMassSpec`` keeps those raw
+    fields for round-trip compatibility; scientific execution uses only this
+    explicit physical contract.
+    """
+
+    specs: list[UmpSpec] = []
+    for mass in project.distributed_masses:
+        if not mass.ump_enabled:
+            continue
+        specs.append(
+            UmpSpec(
+                name=f"{mass.name} / UMP",
+                start_mm=float(mass.start_mm),
+                length_mm=float(mass.length_mm),
+                stiffness_per_length_n_m2=float(mass.ump_value),
+                source="legacy iRdin [Dados].ump_crg applied to [Massas] UMP span",
+                source_value=float(mass.ump_value),
+                source_unit="N/m^2",
+            )
+        )
+    return tuple(specs)
 
 
 @dataclass(slots=True, frozen=True)
@@ -22,6 +87,7 @@ class UMPSpanAssembly:
     stiffness_per_length_n_m2: float
     shaft_element_indices: tuple[int, ...]
     integrated_stiffness_n_m: float
+    source: str
 
 
 @dataclass(slots=True)
@@ -64,7 +130,8 @@ def consistent_lateral_ump_matrix(length_m: float, stiffness_per_length_n_m2: fl
 
     The x/beta and y/alpha sign patterns follow the ROSS 6-DOF shaft convention.
     This is also the intended translational part documented by RotorDin's UMP
-    assembly; the legacy source comment explicitly says the inertia term is zero.
+    assembly; the legacy source comment explicitly states that the inertia term is
+    zero for UMP.
     """
 
     L = float(length_m)
@@ -101,7 +168,7 @@ def consistent_lateral_ump_matrix(length_m: float, stiffness_per_length_n_m2: fl
 
 
 def assemble_ump(project: "RotorProject", build: "RossBuildResult") -> UMPAssembly:
-    """Assemble all UMP spans into the ROSS global lateral stiffness basis."""
+    """Assemble all active UMP spans into the ROSS global stiffness basis."""
 
     ndof_total = int(build.rotor.ndof)
     number_dof = int(build.rotor.number_dof)
@@ -113,14 +180,19 @@ def assemble_ump(project: "RotorProject", build: "RossBuildResult") -> UMPAssemb
     matrix = np.zeros((ndof_total, ndof_total), dtype=float)
     records: list[UMPSpanAssembly] = []
 
-    for spec in project.umps:
+    for spec in project_ump_specs(project):
         spec.validate()
+        if spec.end_mm > project.total_length_mm + 1e-7:
+            raise EngineeringError(
+                f"UMP span {spec.name!r} ends at {spec.end_mm:g} mm outside shaft length {project.total_length_mm:g} mm."
+            )
         if spec.stiffness_per_length_n_m2 <= 0.0:
             continue
 
         matched: list[int] = []
         for element in build.shaft_plan:
-            # NodeInsertionService must place UMP start/end exactly, therefore an
+            # NodeInsertionService places UMP start/end exactly because they are
+            # inherited from the associated legacy mass boundaries. Therefore an
             # element is either completely inside or completely outside the span.
             overlap = min(element.x1_mm, spec.end_mm) - max(element.x0_mm, spec.start_mm)
             if overlap <= 1e-9:
@@ -160,6 +232,7 @@ def assemble_ump(project: "RotorProject", build: "RossBuildResult") -> UMPAssemb
                 stiffness_per_length_n_m2=float(spec.stiffness_per_length_n_m2),
                 shaft_element_indices=tuple(matched),
                 integrated_stiffness_n_m=float(spec.stiffness_per_length_n_m2 * spec.length_mm / 1000.0),
+                source=spec.source,
             )
         )
 
@@ -204,7 +277,9 @@ __all__ = [
     "UMPAssembly",
     "UMPSpanAssembly",
     "UMPRotorMixin",
+    "UmpSpec",
     "assemble_ump",
     "consistent_lateral_ump_matrix",
+    "project_ump_specs",
     "ump_rotor_class",
 ]
