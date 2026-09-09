@@ -7,9 +7,9 @@ from pathlib import Path
 import numpy as np
 import ross as rs
 
+from ross_studio.analysis_backend import RossAnalysisBackend
 from ross_studio.bearing_studio_service import BearingStudioService
 from ross_studio.legacy_import import load_irdin_project
-from ross_studio.ross_backend import RossModelBuilder
 from ross_studio.services import EngineeringValidationService
 
 
@@ -28,6 +28,9 @@ def finite_kc(result) -> bool:
 
 
 def main() -> int:
+    # RossAnalysisBackend installs the qualified ROSS 2.3 post-processing
+    # compatibility shim and preserves the imported RotorDin-positive convention.
+    backend = RossAnalysisBackend(rs)
     service = BearingStudioService(rs)
     source = load_irdin_project(FIXTURE)
 
@@ -42,7 +45,7 @@ def main() -> int:
         "contact_angle_rad": float(np.pi / 6.0),
     })
     service.apply(ball_project, 0, ball)
-    ball_build = RossModelBuilder(rs).build(ball_project, strict=True)
+    ball_build = backend.build_rotor(ball_project, strict=True)
     ball_link_ok = ball_build.rotor.bearing_elements[0].n_link == 28
 
     roller_project = deepcopy(source)
@@ -53,7 +56,7 @@ def main() -> int:
         "contact_angle_rad": 0.1,
     })
     service.apply(roller_project, 0, roller)
-    roller_build = RossModelBuilder(rs).build(roller_project, strict=True)
+    roller_build = backend.build_rotor(roller_project, strict=True)
     roller_link_ok = roller_build.rotor.bearing_elements[0].n_link == 28
 
     cylindrical_project = deepcopy(source)
@@ -70,10 +73,11 @@ def main() -> int:
         issue.message for issue in EngineeringValidationService().validate(cylindrical_project)
         if issue.severity == "error"
     ]
-    cylindrical_build = RossModelBuilder(rs).build(cylindrical_project, strict=True)
+    cylindrical_build = backend.build_rotor(cylindrical_project, strict=True)
     cylindrical_link_ok = cylindrical_build.rotor.bearing_elements[0].n_link == 28
-    # Prove the equivalent table is executable in a real dynamic ROSS solve.
-    modal = cylindrical_build.rotor.run_modal(speed=3600.0 * 2.0 * np.pi / 60.0, num_modes=12)
+    # Prove that the hydrodynamically calculated equivalent table participates in
+    # a real dynamic solve through the same qualified backend used by the GUI.
+    modal = backend.run_modal_build(cylindrical_build, 3600.0, num_modes=12)
     modal_finite = bool(np.all(np.isfinite(np.asarray(modal.wd, dtype=float))))
 
     thd_blocked = True
@@ -109,6 +113,10 @@ def main() -> int:
     summary = {
         "status": "PASS" if passed else "FAIL",
         "ross_version": getattr(rs, "__version__", "unknown"),
+        "ross_compatibility": [
+            {"code": note.code, "message": note.message}
+            for note in backend.compatibility_notes
+        ],
         "gates": gates,
         "models": {
             "BearingElement": {
