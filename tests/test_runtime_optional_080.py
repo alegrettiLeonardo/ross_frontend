@@ -18,21 +18,33 @@ FIXTURE = os.path.join(
 )
 
 
-def test_real_ross_23_builds_op_w60_support_topology() -> None:
+def test_real_ross_23_strict_builds_op_w60_with_inserted_nodes_and_legacy_masses() -> None:
     rs = pytest.importorskip("ross")
     project = load_irdin_project(FIXTURE)
-    result = RossModelBuilder(rs).build(project, strict=False)
+    result = RossModelBuilder(rs).build(project, strict=True)
 
-    assert len(result.rotor.shaft_elements) == 22
-    assert result.support_link_nodes == {"Support 1": 23, "Support 2": 24}
+    assert len(result.rotor.shaft_elements) == 27
+    assert len(result.node_positions_mm) == 28
+    assert result.unresolved_positions_mm == []
+    assert result.support_link_nodes == {"Support 1": 28, "Support 2": 29}
     assert len(result.rotor.bearing_elements) == 4
-    assert len(result.rotor.point_mass_elements) == 2
+    assert len(result.rotor.disk_elements) == 4
+    assert len(result.rotor.point_mass_elements) == 3
+    assert len(result.equivalent_disks) == 4
 
     bearings_by_tag = {bearing.tag: bearing for bearing in result.rotor.bearing_elements}
-    assert bearings_by_tag["dianteiro -quente"].n_link == 23
-    assert bearings_by_tag["traseiro -quente"].n_link == 24
-    assert bearings_by_tag["Support 1 / ground"].n == 23
-    assert bearings_by_tag["Support 2 / ground"].n == 24
+    assert bearings_by_tag["dianteiro -quente"].n_link == 28
+    assert bearings_by_tag["traseiro -quente"].n_link == 29
+    assert bearings_by_tag["Support 1 / ground"].n == 28
+    assert bearings_by_tag["Support 2 / ground"].n == 29
+
+    disk_by_tag = {disk.tag: disk for disk in result.rotor.disk_elements}
+    assert disk_by_tag["Rotor mass 2 / legacy equivalent"].m == pytest.approx(723.19)
+    assert disk_by_tag["Rotor mass 2 / legacy equivalent"].Id == pytest.approx(43.397426583333335)
+    assert disk_by_tag["Rotor mass 2 / legacy equivalent"].Ip == pytest.approx(25.176051875)
+
+    point_by_tag = {mass.tag: mass for mass in result.rotor.point_mass_elements}
+    assert point_by_tag["Point mass 1"].m == pytest.approx(project.point_masses[0].mass_kg)
 
 
 def test_qt_engineering_routes_and_bearing_groups() -> None:
@@ -80,4 +92,4 @@ def test_reference_model_is_loaded_without_hardcoded_ui_geometry() -> None:
     project = load_reference_project_model()
     assert project.engineering is not None
     assert project.physical_sections == project.engineering.physical_section_count == 15
-    assert project.ross_shaft_elements == project.engineering.ross_shaft_element_count == 22
+    assert project.ross_shaft_elements == project.engineering.ross_shaft_element_count == 27
