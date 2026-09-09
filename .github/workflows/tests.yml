@@ -29,8 +29,8 @@ jobs:
         run: python -m pytest -q -ra
       - name: Run production-resolution OP-W60 pipeline
         run: python tools/qualify_op_w60_pipeline.py
-      - name: Correlate ROSS against regenerated RotorDin golden
-        run: python tools/correlate_op_w60_rotordin.py
+      - name: Enforce ROSS against regenerated RotorDin golden
+        run: python tools/correlate_op_w60_rotordin.py --enforce
       - name: Isolate mesh and bearing-interpolation effects
         run: python tools/isolate_op_w60_response_differences.py
       - name: Isolate cross-coupling gyro phasor and RANUN conventions
