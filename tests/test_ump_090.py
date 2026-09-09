@@ -27,8 +27,6 @@ def test_consistent_ump_matrix_matches_rigid_translation_energy() -> None:
     qx[[0, 6]] = 1.0
     qy = np.zeros(12)
     qy[[1, 7]] = 1.0
-
-    # q^T K q = integral(k' * u^2 dx) = k' * L for unit rigid translation.
     assert qx @ ku @ qx == pytest.approx(k_per_length * length_m)
     assert qy @ ku @ qy == pytest.approx(k_per_length * length_m)
 
@@ -36,7 +34,6 @@ def test_consistent_ump_matrix_matches_rigid_translation_energy() -> None:
 def test_op_w60_import_exposes_one_physical_ump_span() -> None:
     project = load_irdin_project(FIXTURE)
     specs = project_ump_specs(project)
-
     assert len(specs) == 1
     spec = specs[0]
     assert spec.start_mm == pytest.approx(918.0)
@@ -68,24 +65,27 @@ def test_ump_changes_only_effective_dynamic_stiffness() -> None:
     assert np.allclose(build_on.rotor.M(omega), build_off.rotor.M(omega), rtol=1e-12, atol=1e-12)
     assert np.allclose(build_on.rotor.C(omega), build_off.rotor.C(omega), rtol=1e-12, atol=1e-12)
     assert np.allclose(build_on.rotor.G(), build_off.rotor.G(), rtol=1e-12, atol=1e-12)
+
+    # OP-W60 K entries are O(1e9) N/m while the imported UMP contribution is
+    # O(1) N/m. Subtracting two independently assembled full K matrices therefore
+    # incurs O(1e-7..1e-6) floating cancellation even when the UMP assembly is
+    # exact. The absolute tolerance is still < 3 ppm of the UMP span stiffness.
     assert np.allclose(
         build_off.rotor.K(omega) - build_on.rotor.K(omega),
         assembly.matrix_n_m,
-        rtol=1e-10,
-        atol=1e-8,
+        rtol=1e-6,
+        atol=2e-6,
     )
 
 
 def test_ump_is_excluded_from_gravity_static_solution() -> None:
     rs = pytest.importorskip("ross")
     backend = RossAnalysisBackend(rs)
-
     with_ump = load_irdin_project(FIXTURE)
     without_ump = load_irdin_project(FIXTURE)
     for mass in without_ump.distributed_masses:
         mass.ump_enabled = False
         mass.ump_value = 0.0
-
     static_on = backend.run_static_build(backend.build_rotor(with_ump, strict=True))
     static_off = backend.run_static_build(backend.build_rotor(without_ump, strict=True))
     assert np.allclose(static_on.deformation, static_off.deformation, rtol=1e-12, atol=1e-12)
@@ -100,8 +100,6 @@ def test_ump_participates_in_real_harmonic_response() -> None:
     for mass in baseline.distributed_masses:
         mass.ump_enabled = False
         mass.ump_value = 0.0
-    # Deliberately amplified synthetic coefficient so this test proves numerical
-    # participation rather than relying on the tiny legacy OP-W60 value 1.002.
     active = [mass for mass in excited.distributed_masses if mass.ump_enabled]
     assert len(active) == 1
     active[0].ump_value = 1.0e8
@@ -122,7 +120,6 @@ def test_ump_participates_in_real_harmonic_response() -> None:
 
     response_0 = backend.run_unbalance_build(build_0, inputs_0, [3600.0]).response.forced_resp
     response_u = backend.run_unbalance_build(build_u, inputs_u, [3600.0]).response.forced_resp
-
     assert np.all(np.isfinite(np.abs(response_u)))
     relative_change = np.linalg.norm(response_u - response_0) / np.linalg.norm(response_0)
     assert relative_change > 1e-4
