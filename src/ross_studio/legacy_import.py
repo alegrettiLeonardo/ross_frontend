@@ -9,10 +9,12 @@ from .domain import (
     BearingGroup,
     BearingSpec,
     DistributedMassSpec,
+    LateralConvention,
     LoadSpec,
     MaterialSpec,
     OperatingCase,
     PointMassSpec,
+    ProbeAngleContract,
     ProbeSpec,
     RotorProject,
     ShaftSection,
@@ -101,6 +103,15 @@ def load_irdin_project(path: str | Path) -> RotorProject:
         frame=data.get("carc", "").strip(),
         poles=max(1, _integer(data.get("polos"), 2)),
         description=component,
+        # Positive RPM in the RotorDin source uses the opposite gyroscopic/
+        # synchronous-force handedness from ROSS.  This is a convention map,
+        # not a fitted physical parameter.
+        lateral_convention=LateralConvention.ROTORDIN_POSITIVE,
+        # The iRdin/UI field is an angle in degrees.  The supplied migrated
+        # RotorDin frontend has a right-justified RANUN parser bug that makes
+        # its current golden interpret the raw 45 as radians; that behavior is
+        # retained only as an explicit diagnostic compatibility contract.
+        probe_angle_contract=ProbeAngleContract.DEGREES,
         materials={material.name: material},
         operating_cases=[OperatingCase(
             name="Legacy Campbell range",
