@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QHeaderView, QLabel, QPushBut
 from ..icons import engineering_icon
 from ..models import ProjectModel
 from ..topology import NodeInsertionService
+from ..ump import project_ump_specs
 from ..widgets import Card, ModelSummaryCard, ProjectInfoCard, QuickActionsCard, RotorSketch, configure_table, item
 
 
@@ -13,7 +14,18 @@ class RotorModelPage(QWidget):
     run_requested = Signal()
     validate_requested = Signal()
 
-    TAB_KEYS = {"shaft": 0, "disks": 1, "supports": 2, "seals": 3, "couplings": 4, "loads": 5, "probes": 6, "rotor": 0, "home": 0}
+    TAB_KEYS = {
+        "shaft": 0,
+        "disks": 1,
+        "supports": 2,
+        "seals": 3,
+        "couplings": 4,
+        "loads": 5,
+        "ump": 6,
+        "probes": 7,
+        "rotor": 0,
+        "home": 0,
+    }
 
     def __init__(self, project: ProjectModel, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -68,6 +80,7 @@ class RotorModelPage(QWidget):
         self.tabs.addTab(self._seals_tab(), "Seals")
         self.tabs.addTab(self._couplings_tab(), "Couplings")
         self.tabs.addTab(self._loads_tab(), "Loads")
+        self.tabs.addTab(self._ump_tab(), "UMP")
         self.tabs.addTab(self._probes_tab(), "Probes")
         center.addWidget(data_card, 7)
 
@@ -180,6 +193,30 @@ class RotorModelPage(QWidget):
         plan = None if eng is None else NodeInsertionService.plan(eng)
         rows = [] if eng is None else [[l.name, l.kind, f"{l.position_mm:g}", plan.node_for(l.position_mm), f"{l.magnitude:g}", f"{l.phase_deg:g}", "Exact inserted node" if plan.node_for(l.position_mm) is not None else "ERROR"] for l in eng.loads]
         return self._tab("Loads", ["Name", "Type", "Position (mm)", "Node", "Magnitude", "Phase (deg)", "Node mapping"], rows, stretch_col=0)
+
+    def _ump_tab(self) -> QWidget:
+        eng = self.project.engineering
+        rows: list[list[object]] = []
+        if eng is not None:
+            for spec in project_ump_specs(eng):
+                rows.append([
+                    spec.name,
+                    f"{spec.start_mm:g}",
+                    f"{spec.end_mm:g}",
+                    f"{spec.length_mm:g}",
+                    f"{spec.stiffness_per_length_n_m2:.9g}",
+                    f"{spec.stiffness_per_length_n_m2 * spec.length_mm / 1000.0:.9g}",
+                    spec.source_unit,
+                    spec.source,
+                ])
+        if not rows:
+            rows = [["—", "—", "—", "—", "0", "0", "N/m²", "No active UMP"]]
+        return self._tab(
+            "Unbalanced Magnetic Pull — linearized negative stiffness",
+            ["Name", "Start (mm)", "End (mm)", "Length (mm)", "k' UMP (N/m²)", "Integrated k (N/m)", "Source unit", "Source"],
+            rows,
+            stretch_col=7,
+        )
 
     def _probes_tab(self) -> QWidget:
         eng = self.project.engineering
