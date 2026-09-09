@@ -33,6 +33,8 @@ jobs:
         run: python tools/qualify_concentrated.py
       - name: Qualify Bearing Studio General models
         run: python tools/qualify_bearing_studio.py
+      - name: Qualify THD lateral bearing models
+        run: python tools/qualify_thd_bearing_studio.py
       - name: Run production-resolution OP-W60 pipeline
         run: python tools/qualify_op_w60_pipeline.py
       - name: Enforce ROSS against regenerated RotorDin golden
@@ -50,6 +52,7 @@ jobs:
             artifacts/ump_qualification.json
             artifacts/concentrated_mass_qualification.json
             artifacts/bearing_studio_qualification.json
+            artifacts/thd_bearing_studio_qualification.json
             artifacts/op_w60_pipeline_summary.json
             artifacts/op_w60_ross_vs_rotordin_correlation.json
             artifacts/op_w60_ross_vs_rotordin_correlation.csv
