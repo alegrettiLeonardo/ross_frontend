@@ -162,14 +162,23 @@ def test_strict_op_w60_build_closes_all_structural_node_mapping() -> None:
     assert result.unresolved_positions_mm == []
     assert result.support_link_nodes == {"Support 1": 28, "Support 2": 29}
     assert len(result.rotor.bearing_elements) == 4
-    assert len(result.rotor.disk_elements) == 4
-    assert len(result.rotor.point_mass_elements) == 3
+    assert len(result.rotor.disk_elements) == 5
+    assert len(result.rotor.point_mass_elements) == 2
     assert len(result.equivalent_disks) == 4
+    assert len(result.equivalent_point_masses) == 1
 
     assert [disk.position_mm for disk in result.equivalent_disks] == [737.5, 1275.5, 1932.5, 2550.2]
     assert [disk.mass_kg for disk in result.equivalent_disks] == pytest.approx([12.9, 723.19, 12.9, 25.51])
     assert result.equivalent_disks[1].id_kg_m2 == pytest.approx(43.397426583333335)
     assert result.equivalent_disks[1].ip_kg_m2 == pytest.approx(25.176051875)
+
+    point = result.equivalent_point_masses[0]
+    assert point.position_mm == 105.0
+    assert point.mass_kg == 34.0
+    assert point.node == NodeInsertionService.plan(project).node_for(105.0)
+    point_disk = [element for element in result.rotor.disk_elements if element.kwargs.get("tag") == "Point mass 1 / shaft point mass"]
+    assert len(point_disk) == 1
+    assert point_disk[0].args[1:] == (34.0, 0.0, 0.0)
 
     bearings_by_tag = {element.kwargs.get("tag"): element for element in result.rotor.bearing_elements}
     assert bearings_by_tag["dianteiro -quente"].kwargs["n_link"] == 28
@@ -178,10 +187,7 @@ def test_strict_op_w60_build_closes_all_structural_node_mapping() -> None:
     assert bearings_by_tag["Support 2 / ground"].kwargs["n"] == 29
 
     support_masses = [element for element in result.rotor.point_mass_elements if "Support" in element.kwargs.get("tag", "")]
-    physical_point_mass = [element for element in result.rotor.point_mass_elements if element.kwargs.get("tag") == "Point mass 1"]
     assert len(support_masses) == 2
-    assert len(physical_point_mass) == 1
-    assert physical_point_mass[0].kwargs["n"] == NodeInsertionService.plan(project).node_for(105.0)
 
 
 def test_duplicate_support_for_same_bearing_is_blocked() -> None:
