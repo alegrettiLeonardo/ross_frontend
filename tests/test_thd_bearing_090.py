@@ -25,51 +25,59 @@ def _finite_coefficients(result) -> None:
     assert np.all(np.isfinite(values))
 
 
-def test_thd_registry_enables_only_qualified_lateral_models() -> None:
+def test_thd_registry_stays_gated_until_dedicated_qualification_is_promoted() -> None:
     rs = pytest.importorskip("ross")
     registry = RossCapabilityRegistry(rs)
     catalog = BearingCatalogService(registry)
     rows = {row["class"]: row for row in catalog.entries(BearingGroup.THD)}
-    assert rows["PlainJournal"]["status"] == AdapterStatus.VALIDATED.value
-    assert rows["TiltingPad"]["status"] == AdapterStatus.VALIDATED.value
-    assert rows["SqueezeFilmDamper"]["status"] == AdapterStatus.VALIDATED.value
+    assert rows["PlainJournal"]["status"] == AdapterStatus.PLANNED.value
+    assert rows["TiltingPad"]["status"] == AdapterStatus.PLANNED.value
+    assert rows["SqueezeFilmDamper"]["status"] == AdapterStatus.PLANNED.value
     assert rows["ThrustPad"]["status"] == AdapterStatus.PLANNED.value
+    assert all(not row["can_execute"] for row in rows.values())
 
 
-def test_plain_journal_runs_native_ross_and_caches_solved_kc() -> None:
+def test_plain_journal_runs_native_ross_23_and_caches_solved_kc() -> None:
     rs = pytest.importorskip("ross")
+    assert rs.__version__ == "2.3.0"
     project = load_irdin_project(FIXTURE)
     service = THDBearingStudioService(rs)
     result = service.calculate(project, 0, "PlainJournal", {
         "speed_rpm": [900.0],
-        "pad_axial_length_m": 0.263144,
+        "axial_length_m": 0.263144,
         "journal_diameter_m": 0.4,
         "radial_clearance_m": 1.95e-4,
-        "n_pads": 2,
+        "elements_circumferential": 11,
+        "elements_axial": 3,
+        "n_pad": 2,
         "pad_arc_deg": 176.0,
         "preload": 0.0,
-        "oil_supply_temperature_c": 50.0,
+        "geometry": "circular",
+        "reference_temperature_c": 50.0,
         "fxs_load_n": 0.0,
         "fys_load_n": -112814.91,
+        "groove_factor": [0.52, 0.48],
         "lubricant": "ISOVG32",
         "oil_flow_l_min": 37.86,
-        "thermal_type": "adiabatic",
-        "total_ex_film": 20,
-        "total_ez_film": 10,
-        "total_ey_film": 10,
-        "total_ey_pad": 10,
+        "oil_supply_pressure_pa": 0.0,
+        "sommerfeld_type": 2,
+        "initial_guess": [0.1, -0.1],
+        "method": "perturbation",
+        "operating_type": "flooded",
     })
 
     assert result.source_model == "PlainJournal"
     assert result.application_class == "BearingElement"
     assert type(result.native_element).__name__ == "PlainJournal"
+    assert result.metadata["ross_api_contract"] == "2.3.0"
     assert len(result.coefficients) == 1
     _finite_coefficients(result)
     assert len(result.operating_points) == 1
     op = result.operating_points[0]
     assert op.rpm == pytest.approx(900.0)
-    assert op.max_pressure_pa is None or np.isfinite(op.max_pressure_pa)
-    assert op.max_temperature_k is None or np.isfinite(op.max_temperature_k)
+    assert op.max_pressure_pa is not None and op.max_pressure_pa > 0.0
+    assert op.max_temperature_c is not None and np.isfinite(op.max_temperature_c)
+    assert op.eccentricity_ratio is None or 0.0 <= op.eccentricity_ratio < 1.0
     assert op.min_film_thickness_m is None or op.min_film_thickness_m > 0.0
     assert result.metadata["solved_kc_cache"] == 1
 
@@ -82,8 +90,9 @@ def test_plain_journal_runs_native_ross_and_caches_solved_kc() -> None:
     assert build.rotor.bearing_elements[0].n_link == 28
 
 
-def test_tilting_pad_runs_native_ross_adiabatic_solution() -> None:
+def test_tilting_pad_runs_native_ross_23_adiabatic_solution() -> None:
     rs = pytest.importorskip("ross")
+    assert rs.__version__ == "2.3.0"
     project = load_irdin_project(FIXTURE)
     service = THDBearingStudioService(rs)
     result = service.calculate(project, 0, "TiltingPad", {
@@ -99,28 +108,31 @@ def test_tilting_pad_runs_native_ross_adiabatic_solution() -> None:
         "offset": 0.5,
         "lubricant": "ISOVG32",
         "oil_supply_temperature_c": 40.0,
-        "oil_flow_l_min": 10.0,
         "fxs_load_n": 884.05,
         "fys_load_n": -2670.4,
+        "equilibrium_type": "match_eccentricity",
+        "eccentricity_ratio": 0.35,
+        "attitude_angle_deg": 287.5,
         "thermal_type": "adiabatic",
-        "total_ex_film": 20,
-        "total_ez_film": 10,
-        "total_ey_film": 10,
-        "total_ey_pad": 10,
+        "nx": 10,
+        "nz": 10,
     })
 
     assert result.source_model == "TiltingPad"
     assert type(result.native_element).__name__ == "TiltingPad"
+    assert result.metadata["ross_api_contract"] == "2.3.0"
     assert len(result.coefficients) == 1
     _finite_coefficients(result)
     op = result.operating_points[0]
-    assert op.max_pressure_pa is None or op.max_pressure_pa >= 0.0
-    assert op.max_temperature_k is None or op.max_temperature_k > 0.0
+    assert op.max_pressure_pa is not None and op.max_pressure_pa >= 0.0
+    assert op.max_temperature_c is not None and np.isfinite(op.max_temperature_c)
+    assert op.min_film_thickness_m is None or op.min_film_thickness_m > 0.0
     assert op.eccentricity_ratio is None or 0.0 <= op.eccentricity_ratio < 1.0
 
 
-def test_squeeze_film_damper_runs_native_ross_and_has_exact_hmin() -> None:
+def test_squeeze_film_damper_runs_native_ross_23_and_has_exact_hmin() -> None:
     rs = pytest.importorskip("ross")
+    assert rs.__version__ == "2.3.0"
     project = load_irdin_project(FIXTURE)
     service = THDBearingStudioService(rs)
     result = service.calculate(project, 0, "SqueezeFilmDamper", {
@@ -136,16 +148,18 @@ def test_squeeze_film_damper_runs_native_ross_and_has_exact_hmin() -> None:
 
     assert result.source_model == "SqueezeFilmDamper"
     assert type(result.native_element).__name__ == "SqueezeFilmDamper"
+    assert result.metadata["ross_api_contract"] == "2.3.0"
     assert [p.rpm for p in result.coefficients] == [18600.0, 20000.0, 22000.0]
     _finite_coefficients(result)
     for op in result.operating_points:
-        assert op.max_pressure_pa is None or np.isfinite(op.max_pressure_pa)
+        assert op.max_pressure_pa is not None and np.isfinite(op.max_pressure_pa)
         assert op.min_film_thickness_m == pytest.approx(3.81e-5)
 
 
 def test_thrust_pad_and_amb_are_not_silently_reduced_to_lateral_kc() -> None:
+    rs = pytest.importorskip("ross")
     project = load_irdin_project(FIXTURE)
-    service = THDBearingStudioService()
+    service = THDBearingStudioService(rs)
     for ross_class in ("ThrustPad", "MagneticBearingElement"):
         with pytest.raises(Exception, match="independent scientific gates"):
             service.calculate(project, 0, ross_class, {})
