@@ -155,6 +155,10 @@ def load_irdin_project(path: str | Path) -> RotorProject:
             position_mm=_number(_cell(row, 0)),
             phase_deg=_number(_cell(row, 1), 0.0),
             magnitude=_number(_cell(row, 2), 0.0),
+            metadata={
+                "magnitude_unit": "kg*m",
+                "source": "iRdin [Desbal] raw value / RotorDin unbalance contract",
+            },
         ))
 
     for index, row in enumerate(_grid_rows(doc.get("respo")), 1):
