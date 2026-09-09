@@ -1,0 +1,57 @@
+{
+  "case": "OP-W60-500-60Hz-IC611-P3",
+  "source": {
+    "description": "RotorDin source supplied with the OP-W60 correlation campaign on 2026-09-09",
+    "source_archive_sha256": "893a91d9cb73ace2a1a15a3843a6fa43d1de3f6dd13f0aebbd6b662fd6591f02",
+    "direct_source_tree_sha256": "1f8077d8444593a7e5b17a482d20c27d9298bef38389c86ca2c88c285f61dca0",
+    "rebuilt_solver_sha256": "59ddb08468339c6e9fe0321175a78e6589ccd6ab92ed99f66b975984ec0ff627",
+    "compiler": "GNU Fortran 14.2",
+    "build": "python solver/build_solver.py --clean",
+    "solver_return_code": 0
+  },
+  "unbalance_contract": {
+    "irdin_raw_per_plane": 4581.2,
+    "irdin_source_unit": "g*mm",
+    "rotordin_solver_input_per_plane_kg_m": 0.0045812,
+    "conversion_factor": 1e-6,
+    "planes_mm": [918.0, 1633.0],
+    "phase_deg": [0.0, 0.0]
+  },
+  "response_grid": {
+    "min_rpm": 900.0,
+    "max_rpm": 4500.0,
+    "step_rpm": 50.0,
+    "points": 73
+  },
+  "model_audit": {
+    "status": "PASS",
+    "stations": 27,
+    "elements": 26,
+    "lateral_dof": 112,
+    "state_matrix_dim": 224,
+    "shaft_mass_kg": 524.0749,
+    "disk_mass_kg": 774.5,
+    "concentrated_mass_kg": 34.0,
+    "rotor_mass_kg": 1332.575,
+    "rotor_cg_m": 1.288392,
+    "bearings": 2,
+    "flex_supports": 2
+  },
+  "static_reference": {
+    "max_abs_deformation_um": 42.29399201,
+    "max_deformation_position_m": 1.328338742,
+    "bearing_reactions_z_n": [6887.553711, 6184.955566]
+  },
+  "campbell_reference": {
+    "critical_1x_rpm": [2737.380127, 3945.803223],
+    "critical_1x_hz": [45.62300110, 65.76338196]
+  },
+  "probes": [
+    {"position_mm": 467.8, "coordinate": 1, "orientation_raw": 45.0},
+    {"position_mm": 467.8, "coordinate": 2, "orientation_raw": 45.0},
+    {"position_mm": 2202.2, "coordinate": 1, "orientation_raw": 45.0},
+    {"position_mm": 2202.2, "coordinate": 2, "orientation_raw": 45.0}
+  ],
+  "known_legacy_contract_note": "The regenerated RotorDin output labels the raw probe orientation as radians because response_angle_unit defaults to R. A D-unit serialization experiment produced an identical response table in the supplied solver path. Individual oriented-channel phase is therefore not treated as qualified until this legacy response-angle contract is isolated. Orthogonal probe-pair resultant amplitude is invariant to this ambiguity and is the primary correlation metric.",
+  "golden_csv": "tests/golden/op_w60_rotordin_gmm_900_4500.csv"
+}
