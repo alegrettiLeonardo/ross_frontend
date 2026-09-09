@@ -27,10 +27,10 @@ class RossCapabilityRegistry:
         Capability(BearingGroup.GENERAL, "BallBearingElement", "Ball Bearing", AdapterStatus.VALIDATED),
         Capability(BearingGroup.GENERAL, "RollerBearingElement", "Roller Bearing", AdapterStatus.VALIDATED),
         Capability(BearingGroup.GENERAL, "CylindricalBearing", "Cylindrical Bearing", AdapterStatus.VALIDATED),
-        Capability(BearingGroup.THD, "PlainJournal", "Plain Journal", AdapterStatus.VALIDATED, "Native ROSS fluid-film calculation; solved K/C table is cached for rotor execution."),
-        Capability(BearingGroup.THD, "TiltingPad", "Tilting Pad", AdapterStatus.VALIDATED, "Native ROSS Reynolds/thermal calculation; solved K/C table is cached for rotor execution."),
+        Capability(BearingGroup.THD, "PlainJournal", "Plain Journal", AdapterStatus.PLANNED, "Native ROSS 2.3 THD adapter is implemented but remains gated until its dedicated CI qualification passes."),
+        Capability(BearingGroup.THD, "TiltingPad", "Tilting Pad", AdapterStatus.PLANNED, "Native ROSS 2.3 THD adapter is implemented but remains gated until its dedicated CI qualification passes."),
         Capability(BearingGroup.THD, "ThrustPad", "Thrust Pad", AdapterStatus.PLANNED, "Requires a qualified axial Kzz/Czz domain and rotor-result contract before execution is enabled."),
-        Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.VALIDATED, "Native ROSS squeeze-film calculation; solved K/C table is cached for rotor execution."),
+        Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.PLANNED, "Native ROSS 2.3 SFD adapter is implemented but remains gated until its dedicated CI qualification passes."),
         Capability(BearingGroup.AMB, "MagneticBearingElement", "Active Magnetic Bearing", AdapterStatus.BLOCKED, "Requires an explicit actuator/sensor/controller domain before execution is enabled."),
     )
 
