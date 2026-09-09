@@ -109,10 +109,21 @@ class THDBearingStudioService:
             raise EngineeringError("THD speeds must be positive and strictly increasing.")
         return speeds
 
-    @staticmethod
-    def _matrix_kc(element: Any, omega: float) -> tuple[float, float, float, float, float, float, float, float]:
-        k = np.asarray(element.K(float(omega)), dtype=float)
-        c = np.asarray(element.C(float(omega)), dtype=float)
+    def _matrix_kc(self, element: Any, omega: float) -> tuple[float, float, float, float, float, float, float, float]:
+        """Evaluate the solved lateral K/C block without trusting instance name lookup.
+
+        ROSS 2.3 ``TiltingPad`` uses ``self.K`` internally for a numerical matrix,
+        which shadows the inherited ``BearingElement.K`` method on that instance.
+        Calling the base implementation unbound preserves ROSS' own coefficient
+        interpolation and avoids changing the native THD solution.
+        """
+        rs = self._ross()
+        k_member = getattr(element, "K", None)
+        c_member = getattr(element, "C", None)
+        k_raw = k_member(float(omega)) if callable(k_member) else rs.BearingElement.K(element, float(omega))
+        c_raw = c_member(float(omega)) if callable(c_member) else rs.BearingElement.C(element, float(omega))
+        k = np.asarray(k_raw, dtype=float)
+        c = np.asarray(c_raw, dtype=float)
         if k.shape[0] < 2 or k.shape[1] < 2 or c.shape[0] < 2 or c.shape[1] < 2:
             raise EngineeringError("ROSS THD calculation did not return a lateral 2x2 K/C block.")
         values = (
