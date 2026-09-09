@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import Any
 
-from .domain import AdapterStatus, BearingGroup, RotorProject
+from .domain import AdapterStatus, BearingGroup, EngineeringError, RotorProject
+from .topology import NodeInsertionService
 
 
 @dataclass(slots=True, frozen=True)
@@ -120,27 +121,36 @@ class EngineeringValidationService:
                         "ROSS 2.3 CylindricalBearing does not expose n_link; execution is blocked until a qualified equivalent adapter exists.",
                     ))
 
-        if project.distributed_masses:
-            issues.append(ValidationIssue(
-                "warning",
-                "DISTRIBUTED_MASS_REALIZATION",
-                "Distributed rotor masses are preserved in the domain and topology, but 0.8.0 does not silently lump them into DiskElement. "
-                "A qualified realization policy is required before production analysis.",
-            ))
+        for mass in project.distributed_masses:
+            try:
+                mass.equivalent_disk_inertias_kg_m2()
+            except EngineeringError as exc:
+                issues.append(ValidationIssue("error", "DISTRIBUTED_MASS_GEOMETRY", str(exc)))
+            if mass.ump_enabled:
+                issues.append(ValidationIssue(
+                    "warning",
+                    "UMP_LOAD_PENDING",
+                    f"{mass.name} carries legacy UMP metadata. Its rigid-body mass realization is qualified, "
+                    "but electromagnetic UMP force assembly remains a separate analysis capability.",
+                ))
 
-        node_positions = set(project.topology_split_positions_mm())
-        for load in project.loads:
-            if round(load.position_mm, 10) not in node_positions:
+        plan = NodeInsertionService.plan(project)
+        node_positions = set(plan.positions_mm)
+        required_positions: list[tuple[str, float]] = []
+        required_positions.extend((bearing.name, bearing.position_mm) for bearing in project.bearings)
+        required_positions.extend((mass.name, mass.center_mm) for mass in project.distributed_masses)
+        required_positions.extend((mass.name, mass.position_mm) for mass in project.point_masses)
+        required_positions.extend((disk.name, disk.position_mm) for disk in project.disks)
+        required_positions.extend((seal.name, seal.position_mm) for seal in project.seals)
+        required_positions.extend((coupling.name, coupling.position_mm) for coupling in project.couplings)
+        required_positions.extend((load.name, load.position_mm) for load in project.loads)
+        required_positions.extend((probe.name, probe.position_mm) for probe in project.probes)
+        for name, position in required_positions:
+            if round(position, 10) not in node_positions:
                 issues.append(ValidationIssue(
-                    "warning",
-                    "LOAD_NODE_MAPPING",
-                    f"{load.name} at {load.position_mm:g} mm is preserved axially and requires explicit node insertion/mapping before force assembly.",
+                    "error",
+                    "NODE_INSERTION_FAILED",
+                    f"{name} at {position:g} mm did not receive an exact FE node.",
                 ))
-        for mass in project.point_masses:
-            if round(mass.position_mm, 10) not in node_positions:
-                issues.append(ValidationIssue(
-                    "warning",
-                    "POINT_MASS_NODE_MAPPING",
-                    f"{mass.name} at {mass.position_mm:g} mm requires explicit node insertion/mapping.",
-                ))
+
         return issues
