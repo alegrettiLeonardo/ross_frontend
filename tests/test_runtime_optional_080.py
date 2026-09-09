@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+import numpy as np
 import pytest
 
 from ross_studio.legacy_import import load_irdin_project
@@ -28,9 +29,10 @@ def test_real_ross_23_strict_builds_op_w60_with_inserted_nodes_and_legacy_masses
     assert result.unresolved_positions_mm == []
     assert result.support_link_nodes == {"Support 1": 28, "Support 2": 29}
     assert len(result.rotor.bearing_elements) == 4
-    assert len(result.rotor.disk_elements) == 4
-    assert len(result.rotor.point_mass_elements) == 3
+    assert len(result.rotor.disk_elements) == 5
+    assert len(result.rotor.point_mass_elements) == 2
     assert len(result.equivalent_disks) == 4
+    assert len(result.equivalent_point_masses) == 1
 
     bearings_by_tag = {bearing.tag: bearing for bearing in result.rotor.bearing_elements}
     assert bearings_by_tag["dianteiro -quente"].n_link == 28
@@ -43,8 +45,17 @@ def test_real_ross_23_strict_builds_op_w60_with_inserted_nodes_and_legacy_masses
     assert disk_by_tag["Rotor mass 2 / legacy equivalent"].Id == pytest.approx(43.397426583333335)
     assert disk_by_tag["Rotor mass 2 / legacy equivalent"].Ip == pytest.approx(25.176051875)
 
-    point_by_tag = {mass.tag: mass for mass in result.rotor.point_mass_elements}
-    assert point_by_tag["Point mass 1"].m == pytest.approx(project.point_masses[0].mass_kg)
+    shaft_point_mass = disk_by_tag["Point mass 1 / shaft point mass"]
+    assert shaft_point_mass.m == pytest.approx(34.0)
+    assert shaft_point_mass.Id == 0.0
+    assert shaft_point_mass.Ip == 0.0
+    np.testing.assert_allclose(
+        shaft_point_mass.M(),
+        np.diag([34.0, 34.0, 34.0, 0.0, 0.0, 0.0]),
+    )
+
+    support_mass_by_tag = {mass.tag: mass for mass in result.rotor.point_mass_elements}
+    assert set(support_mass_by_tag) == {"Support 1 mass", "Support 2 mass"}
 
 
 def test_qt_engineering_routes_and_bearing_groups() -> None:
