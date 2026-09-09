@@ -31,22 +31,26 @@ def main() -> int:
     result = service.run(project, progress=progress)
     case = project.operating_cases[0]
     rated_omega = float(case.rated_speed_rpm) * 2.0 * pi / 60.0
+
+    unbalance_loads = [load for load in project.loads if load.kind.strip().casefold() == "unbalance"]
+    load_by_node = {
+        result.build.node_insertion_plan.node_for(load.position_mm): load
+        for load in unbalance_loads
+    }
     unbalance_input = []
-    for load in project.loads:
-        if load.kind.strip().casefold() != "unbalance":
-            continue
-        magnitude_kg_m = service._unbalance_kg_m(load)
-        node = result.build.node_insertion_plan.node_for(load.position_mm)
+    for applied in result.unbalance_inputs:
+        load = load_by_node[applied.node]
         unbalance_input.append(
             {
                 "name": load.name,
-                "node": node,
+                "node": applied.node,
                 "position_mm": load.position_mm,
-                "raw_magnitude": load.magnitude,
-                "raw_unit": load.metadata.get("magnitude_unit", "kg*m"),
-                "magnitude_kg_m": magnitude_kg_m,
+                "raw_magnitude": applied.raw_magnitude,
+                "raw_unit": applied.source_unit,
+                "normalization_factor_to_kg_m": applied.magnitude_kg_m / applied.raw_magnitude,
+                "magnitude_kg_m_sent_to_ross": applied.magnitude_kg_m,
                 "phase_deg": load.phase_deg,
-                "centrifugal_force_at_rated_n": magnitude_kg_m * rated_omega**2,
+                "centrifugal_force_at_rated_n": applied.magnitude_kg_m * rated_omega**2,
             }
         )
 
@@ -104,7 +108,13 @@ def main() -> int:
             }
             for critical in result.critical_speeds
         ],
-        "unbalance_input": unbalance_input,
+        "unbalance_contract": {
+            "domain_source_unit": "g*mm",
+            "ross_required_unit": "kg*m",
+            "conversion_location": "RossAnalysisBackend.run_unbalance_build",
+            "conversion_factor": 1e-6,
+            "inputs": unbalance_input,
+        },
         "probes": [
             {
                 "name": probe.name,
