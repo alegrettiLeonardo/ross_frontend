@@ -65,6 +65,8 @@ def test_required_screen_sources_exist() -> None:
         root / "analysis_pipeline.py",
         root / "analysis_charts.py",
         root / "ross_compat.py",
+        root / "ross_conventions.py",
+        root / "ump.py",
     ]
     assert all(path.is_file() for path in required)
 
