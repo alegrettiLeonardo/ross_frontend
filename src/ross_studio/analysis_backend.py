@@ -6,10 +6,17 @@ from typing import Any
 import numpy as np
 
 from .ross_backend import RossBackend, RossBuildResult
+from .ross_compat import RossCompatibilityNote, install_ross_compatibility
 
 
 class RossAnalysisBackend(RossBackend):
     """ROSS execution adapter that reuses one strict Rotor build across analyses."""
+
+    def __init__(self, ross_module: Any | None = None) -> None:
+        super().__init__(ross_module)
+        self.compatibility_notes: tuple[RossCompatibilityNote, ...] = install_ross_compatibility(
+            self.builder._ross()
+        )
 
     @staticmethod
     def run_static_build(build: RossBuildResult) -> Any:
