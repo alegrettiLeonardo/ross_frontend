@@ -140,8 +140,8 @@ class DistributedMassSpec:
     def equivalent_disk_inertias_kg_m2(self) -> tuple[float, float]:
         """Return (Id, Ip) for the finite hollow-cylinder body represented by `[Massas]`.
 
-        The legacy component keeps its physical mass, axial length, OD and ID.  ROSS
-        represents the rigid body at an explicit center node as ``DiskElement``.  The
+        The legacy component keeps its physical mass, axial length, OD and ID. ROSS
+        represents the rigid body at an explicit center node as ``DiskElement``. The
         equivalent inertias are therefore calculated from the original finite cylinder,
         rather than guessed or copied from a nearby shaft station.
         """
@@ -164,12 +164,19 @@ class DistributedMassSpec:
 
 @dataclass(slots=True)
 class PointMassSpec:
+    """Legacy ``[Concent]`` rigid concentrated body.
+
+    The source columns are ``position, mass, Ix, Iy, Iz``. ``Iy`` is the polar
+    inertia about the RotorDin shaft axis; after the coordinate adapter it becomes
+    the ROSS axial/torsional inertia and the gyroscopic alpha-beta coupling term.
+    """
+
     name: str
     position_mm: float
     mass_kg: float
-    mx_kg: float | None = None
-    my_kg: float | None = None
-    mz_kg: float | None = None
+    ix_kg_m2: float = 0.0
+    iy_kg_m2: float = 0.0
+    iz_kg_m2: float = 0.0
 
 
 @dataclass(slots=True)
@@ -346,9 +353,16 @@ class RotorProject:
             if mass.length_mm <= 0 or mass.mass_kg < 0:
                 raise EngineeringError(f"Distributed mass #{index} must have positive length and non-negative mass.")
         for index, mass in enumerate(self.point_masses, 1):
-            position_ok(mass.position_mm, f"Point mass #{index}")
+            position_ok(mass.position_mm, f"Concentrated mass #{index}")
+            if not all(
+                isfinite(value)
+                for value in (mass.mass_kg, mass.ix_kg_m2, mass.iy_kg_m2, mass.iz_kg_m2)
+            ):
+                raise EngineeringError(f"Concentrated mass #{index} contains a non-finite mass/inertia value.")
             if mass.mass_kg < 0:
-                raise EngineeringError(f"Point mass #{index} cannot have negative mass.")
+                raise EngineeringError(f"Concentrated mass #{index} cannot have negative mass.")
+            if min(mass.ix_kg_m2, mass.iy_kg_m2, mass.iz_kg_m2) < 0:
+                raise EngineeringError(f"Concentrated mass #{index}: Ix/Iy/Iz must be non-negative.")
         for index, disk in enumerate(self.disks, 1):
             position_ok(disk.position_mm, f"Disk #{index}")
             if min(disk.mass_kg, disk.id_kg_m2, disk.ip_kg_m2) < 0:
