@@ -1,16 +1,50 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from math import pi
 from typing import Any
 
 import numpy as np
 
+from .domain import EngineeringError
 from .ross_backend import RossBackend, RossBuildResult
 from .ross_compat import RossCompatibilityNote, install_ross_compatibility
 
 
+@dataclass(slots=True, frozen=True)
+class RossUnbalanceInput:
+    """Raw engineering unbalance passed to the ROSS execution boundary."""
+
+    node: int
+    raw_magnitude: float
+    source_unit: str
+    phase_rad: float
+
+
+@dataclass(slots=True, frozen=True)
+class RossAppliedUnbalance:
+    """Trace of the exact SI value delivered to ROSS."""
+
+    node: int
+    raw_magnitude: float
+    source_unit: str
+    magnitude_kg_m: float
+    phase_rad: float
+
+
+@dataclass(slots=True)
+class RossUnbalanceRun:
+    response: Any
+    applied_inputs: tuple[RossAppliedUnbalance, ...]
+
+
 class RossAnalysisBackend(RossBackend):
-    """ROSS execution adapter that reuses one strict Rotor build across analyses."""
+    """ROSS execution adapter that reuses one strict Rotor build across analyses.
+
+    Engineering-domain values remain in their source units until this class crosses
+    into the ROSS API. In particular, legacy iRdin [Desbal] values are preserved as
+    g*mm and converted to kg*m only immediately before run_unbalance_response().
+    """
 
     def __init__(self, ross_module: Any | None = None) -> None:
         super().__init__(ross_module)
@@ -38,20 +72,54 @@ class RossAnalysisBackend(RossBackend):
         return build.rotor.run_campbell(speed_range=speeds, frequencies=frequencies)
 
     @staticmethod
+    def _normalize_unbalance_kg_m(magnitude: float, source_unit: str) -> float:
+        unit = str(source_unit).replace(" ", "").lower()
+        factors = {
+            "kg*m": 1.0,
+            "kg.m": 1.0,
+            "kgm": 1.0,
+            "kg*mm": 1e-3,
+            "kg.mm": 1e-3,
+            "g*mm": 1e-6,
+            "g.mm": 1e-6,
+        }
+        if unit not in factors:
+            raise EngineeringError(f"Unsupported unbalance unit {source_unit!r} at the ROSS boundary.")
+        return float(magnitude) * factors[unit]
+
+    @classmethod
     def run_unbalance_build(
+        cls,
         build: RossBuildResult,
-        nodes: list[int],
-        magnitudes_kg_m: list[float],
-        phases_rad: list[float],
+        inputs: list[RossUnbalanceInput],
         speeds_rpm: list[float],
-    ) -> Any:
+    ) -> RossUnbalanceRun:
+        if not inputs:
+            raise EngineeringError("ROSS unbalance execution requires at least one input plane.")
+
+        applied = tuple(
+            RossAppliedUnbalance(
+                node=int(item.node),
+                raw_magnitude=float(item.raw_magnitude),
+                source_unit=str(item.source_unit),
+                magnitude_kg_m=cls._normalize_unbalance_kg_m(item.raw_magnitude, item.source_unit),
+                phase_rad=float(item.phase_rad),
+            )
+            for item in inputs
+        )
         frequency = np.asarray(speeds_rpm, dtype=float) * 2.0 * pi / 60.0
-        return build.rotor.run_unbalance_response(
-            node=nodes,
-            unbalance_magnitude=magnitudes_kg_m,
-            unbalance_phase=phases_rad,
+        response = build.rotor.run_unbalance_response(
+            node=[item.node for item in applied],
+            unbalance_magnitude=[item.magnitude_kg_m for item in applied],
+            unbalance_phase=[item.phase_rad for item in applied],
             frequency=frequency,
         )
+        return RossUnbalanceRun(response=response, applied_inputs=applied)
 
 
-__all__ = ["RossAnalysisBackend"]
+__all__ = [
+    "RossAnalysisBackend",
+    "RossAppliedUnbalance",
+    "RossUnbalanceInput",
+    "RossUnbalanceRun",
+]
