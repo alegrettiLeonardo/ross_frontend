@@ -166,28 +166,3 @@ class BearingModel:
             operating_rpm=round(project.operating_cases[0].rated_speed_rpm),
             coefficients=points,
         )
-
-
-@dataclass(slots=True)
-class CampbellMode:
-    mode: int
-    speed_rpm: int
-    freq_hz: float
-    damping_pct: float
-    whirl: str
-
-
-CAMPBELL_MODES: list[CampbellMode] = [
-    CampbellMode(1, 1050, 62.3, 0.42, "BW"),
-    CampbellMode(2, 2840, 153.6, 0.31, "FW"),
-    CampbellMode(3, 3120, 176.4, 0.28, "BW"),
-    CampbellMode(4, 4310, 238.7, 0.35, "FW"),
-    CampbellMode(5, 5020, 281.9, 0.33, "BW"),
-    CampbellMode(6, 6520, 332.8, 0.27, "FW"),
-    CampbellMode(7, 7140, 366.1, 0.29, "BW"),
-    CampbellMode(8, 7980, 401.5, 0.31, "FW"),
-    CampbellMode(9, 8760, 438.2, 0.36, "BW"),
-    CampbellMode(10, 9240, 468.9, 0.38, "FW"),
-    CampbellMode(11, 9680, 495.3, 0.41, "BW"),
-    CampbellMode(12, 10000, 520.7, 0.45, "FW"),
-]
