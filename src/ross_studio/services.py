@@ -6,6 +6,7 @@ from typing import Any
 
 from .domain import AdapterStatus, BearingGroup, EngineeringError, RotorProject
 from .topology import NodeInsertionService
+from .ump import project_ump_specs
 
 
 @dataclass(slots=True, frozen=True)
@@ -28,7 +29,7 @@ class RossCapabilityRegistry:
         Capability(BearingGroup.THD, "PlainJournal", "Plain Journal", AdapterStatus.PLANNED, "THD editor/adapter requires validated geometry, lubricant and thermal mapping."),
         Capability(BearingGroup.THD, "TiltingPad", "Tilting Pad", AdapterStatus.PLANNED, "THD editor exists visually but scientific parameter mapping is not qualified yet."),
         Capability(BearingGroup.THD, "ThrustPad", "Thrust Pad", AdapterStatus.PLANNED, "ROSS class exists; ROSS Studio thrust-domain adapter is not qualified."),
-        Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.PLANNED, "ROSS class exists; damper-domain adapter is pending qualification."),
+        Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.PLANNED, "ROSS class exists; ROSS Studio damper-domain adapter is pending qualification."),
         Capability(BearingGroup.AMB, "MagneticBearingElement", "Active Magnetic Bearing", AdapterStatus.BLOCKED, "Requires an explicit actuator/sensor/controller domain before execution is enabled."),
     )
 
@@ -107,7 +108,7 @@ class EngineeringValidationService:
                 "error",
                 "DUPLICATE_SUPPORT_LINK",
                 f"Bearing #{bearing_index + 1} has more than one flexible support. "
-                "ROSS Studio 0.8 requires one unambiguous support chain per bearing.",
+                "ROSS Studio requires one unambiguous support chain per bearing.",
             ))
 
         for support in project.supports:
@@ -126,12 +127,24 @@ class EngineeringValidationService:
                 mass.equivalent_disk_inertias_kg_m2()
             except EngineeringError as exc:
                 issues.append(ValidationIssue("error", "DISTRIBUTED_MASS_GEOMETRY", str(exc)))
-            if mass.ump_enabled:
+
+        for spec in project_ump_specs(project):
+            try:
+                spec.validate()
+            except EngineeringError as exc:
+                issues.append(ValidationIssue("error", "UMP_INPUT_INVALID", str(exc)))
+                continue
+            if spec.end_mm > project.total_length_mm + 1e-7:
+                issues.append(ValidationIssue(
+                    "error",
+                    "UMP_SPAN_OUTSIDE_SHAFT",
+                    f"{spec.name} ends at {spec.end_mm:g} mm beyond shaft length {project.total_length_mm:g} mm.",
+                ))
+            elif spec.stiffness_per_length_n_m2 == 0.0:
                 issues.append(ValidationIssue(
                     "warning",
-                    "UMP_LOAD_PENDING",
-                    f"{mass.name} carries legacy UMP metadata. Its rigid-body mass realization is qualified, "
-                    "but electromagnetic UMP force assembly remains a separate analysis capability.",
+                    "UMP_ZERO_STIFFNESS",
+                    f"{spec.name} is enabled but its distributed negative stiffness is zero N/m².",
                 ))
 
         for mass in project.point_masses:
