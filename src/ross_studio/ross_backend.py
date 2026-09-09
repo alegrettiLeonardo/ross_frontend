@@ -41,6 +41,7 @@ class RossBuildResult:
     shaft_plan: list[ShaftElementPlan]
     node_positions_mm: list[float]
     unresolved_positions_mm: list[float]
+    support_link_nodes: dict[str, int]
 
 
 class RossModelBuilder:
@@ -93,7 +94,7 @@ class RossModelBuilder:
         spec = project.materials[name]
         return rs.Material(name=spec.name, rho=spec.density_kg_m3, E=spec.young_pa, G_s=spec.shear_pa)
 
-    def _bearing(self, project: RotorProject, spec: BearingSpec) -> Any:
+    def _bearing(self, project: RotorProject, spec: BearingSpec, *, n_link: int | None = None) -> Any:
         rs = self._ross()
         mapping = self.map_position(project, spec.position_mm)
         if mapping.node is None:
@@ -104,44 +105,153 @@ class RossModelBuilder:
             missing = [key for key in required if key not in spec.metadata]
             if missing:
                 raise EngineeringError(f"Ball bearing {spec.name!r} is missing metadata: {', '.join(missing)}")
-            return rs.BallBearingElement(n=mapping.node, n_balls=int(spec.metadata["n_balls"]), d_balls=float(spec.metadata["d_balls_m"]), fs=float(spec.metadata["static_load_n"]), alpha=float(spec.metadata["contact_angle_rad"]), cxx=float(spec.metadata["cxx"]) if "cxx" in spec.metadata else None, cyy=float(spec.metadata["cyy"]) if "cyy" in spec.metadata else None, tag=spec.name)
+            return rs.BallBearingElement(
+                n=mapping.node,
+                n_balls=int(spec.metadata["n_balls"]),
+                d_balls=float(spec.metadata["d_balls_m"]),
+                fs=float(spec.metadata["static_load_n"]),
+                alpha=float(spec.metadata["contact_angle_rad"]),
+                cxx=float(spec.metadata["cxx"]) if "cxx" in spec.metadata else None,
+                cyy=float(spec.metadata["cyy"]) if "cyy" in spec.metadata else None,
+                tag=spec.name,
+                n_link=n_link,
+            )
 
         if spec.ross_class == "RollerBearingElement":
             required = ("n_rollers", "roller_length_m", "static_load_n", "contact_angle_rad")
             missing = [key for key in required if key not in spec.metadata]
             if missing:
                 raise EngineeringError(f"Roller bearing {spec.name!r} is missing metadata: {', '.join(missing)}")
-            return rs.RollerBearingElement(n=mapping.node, n_rollers=int(spec.metadata["n_rollers"]), l_rollers=float(spec.metadata["roller_length_m"]), fs=float(spec.metadata["static_load_n"]), alpha=float(spec.metadata["contact_angle_rad"]), cxx=float(spec.metadata["cxx"]) if "cxx" in spec.metadata else None, cyy=float(spec.metadata["cyy"]) if "cyy" in spec.metadata else None, tag=spec.name)
+            return rs.RollerBearingElement(
+                n=mapping.node,
+                n_rollers=int(spec.metadata["n_rollers"]),
+                l_rollers=float(spec.metadata["roller_length_m"]),
+                fs=float(spec.metadata["static_load_n"]),
+                alpha=float(spec.metadata["contact_angle_rad"]),
+                cxx=float(spec.metadata["cxx"]) if "cxx" in spec.metadata else None,
+                cyy=float(spec.metadata["cyy"]) if "cyy" in spec.metadata else None,
+                tag=spec.name,
+                n_link=n_link,
+            )
 
         if spec.ross_class == "CylindricalBearing":
-            required = ("speed_rpm", "weight_n", "bearing_length_m", "journal_diameter_m", "radial_clearance_m", "oil_viscosity_pa_s")
+            if n_link is not None:
+                raise EngineeringError(
+                    f"Cylindrical bearing {spec.name!r} cannot be linked to a flexible support with the "
+                    "ROSS 2.3 CylindricalBearing constructor. Use a qualified equivalent adapter before execution."
+                )
+            required = (
+                "speed_rpm",
+                "weight_n",
+                "bearing_length_m",
+                "journal_diameter_m",
+                "radial_clearance_m",
+                "oil_viscosity_pa_s",
+            )
             missing = [key for key in required if key not in spec.metadata]
             if missing:
                 raise EngineeringError(f"Cylindrical bearing {spec.name!r} is missing metadata: {', '.join(missing)}")
             speed = np.asarray(spec.metadata["speed_rpm"], dtype=float) * 2.0 * pi / 60.0
-            return rs.CylindricalBearing(n=mapping.node, speed=speed, weight=float(spec.metadata["weight_n"]), bearing_length=float(spec.metadata["bearing_length_m"]), journal_diameter=float(spec.metadata["journal_diameter_m"]), radial_clearance=float(spec.metadata["radial_clearance_m"]), oil_viscosity=float(spec.metadata["oil_viscosity_pa_s"]), tag=spec.name)
+            return rs.CylindricalBearing(
+                n=mapping.node,
+                speed=speed,
+                weight=float(spec.metadata["weight_n"]),
+                bearing_length=float(spec.metadata["bearing_length_m"]),
+                journal_diameter=float(spec.metadata["journal_diameter_m"]),
+                radial_clearance=float(spec.metadata["radial_clearance_m"]),
+                oil_viscosity=float(spec.metadata["oil_viscosity_pa_s"]),
+                tag=spec.name,
+            )
 
         if spec.ross_class != "BearingElement":
             raise EngineeringError(f"Bearing class {spec.ross_class} is not enabled in the qualified 0.8.0 builder.")
+        common = {"n": mapping.node, "tag": spec.name, "n_link": n_link}
         if spec.coefficients:
-            rpm = np.asarray([p.rpm for p in spec.coefficients], dtype=float)
+            rpm = np.asarray([point.rpm for point in spec.coefficients], dtype=float)
             frequency = rpm * 2.0 * pi / 60.0
-            return rs.BearingElement(n=mapping.node, kxx=np.asarray([p.kxx for p in spec.coefficients]), kyy=np.asarray([p.kyy for p in spec.coefficients]), kxy=np.asarray([p.kxy for p in spec.coefficients]), kyx=np.asarray([p.kyx for p in spec.coefficients]), cxx=np.asarray([p.cxx for p in spec.coefficients]), cyy=np.asarray([p.cyy for p in spec.coefficients]), cxy=np.asarray([p.cxy for p in spec.coefficients]), cyx=np.asarray([p.cyx for p in spec.coefficients]), frequency=frequency, tag=spec.name)
-        return rs.BearingElement(n=mapping.node, kxx=spec.kxx, kyy=spec.kyy or spec.kxx, kxy=spec.kxy, kyx=spec.kyx, cxx=spec.cxx, cyy=spec.cyy or spec.cxx, cxy=spec.cxy, cyx=spec.cyx, tag=spec.name)
+            return rs.BearingElement(
+                **common,
+                kxx=np.asarray([point.kxx for point in spec.coefficients]),
+                kyy=np.asarray([point.kyy for point in spec.coefficients]),
+                kxy=np.asarray([point.kxy for point in spec.coefficients]),
+                kyx=np.asarray([point.kyx for point in spec.coefficients]),
+                cxx=np.asarray([point.cxx for point in spec.coefficients]),
+                cyy=np.asarray([point.cyy for point in spec.coefficients]),
+                cxy=np.asarray([point.cxy for point in spec.coefficients]),
+                cyx=np.asarray([point.cyx for point in spec.coefficients]),
+                frequency=frequency,
+            )
+        return rs.BearingElement(
+            **common,
+            kxx=spec.kxx,
+            kyy=spec.kyy or spec.kxx,
+            kxy=spec.kxy,
+            kyx=spec.kyx,
+            cxx=spec.cxx,
+            cyy=spec.cyy or spec.cxx,
+            cxy=spec.cxy,
+            cyx=spec.cyx,
+        )
 
     def build(self, project: RotorProject, *, strict: bool = True) -> RossBuildResult:
         issues = EngineeringValidationService().validate(project)
-        if strict and any(i.severity == "error" for i in issues):
-            raise EngineeringError("; ".join(i.message for i in issues if i.severity == "error"))
+        if strict and any(issue.severity == "error" for issue in issues):
+            raise EngineeringError("; ".join(issue.message for issue in issues if issue.severity == "error"))
         if strict and project.distributed_masses:
-            raise EngineeringError("Distributed masses are preserved but do not yet have a qualified ROSS realization in 0.8.0; strict build is intentionally blocked.")
+            raise EngineeringError(
+                "Distributed masses are preserved but do not yet have a qualified ROSS realization in 0.8.0; "
+                "strict build is intentionally blocked."
+            )
 
         rs = self._ross()
         plan = self.shaft_plan(project)
+        node_positions = self.node_positions_mm(project)
         material_cache = {name: self._material(project, name) for name in project.materials}
-        shaft_elements = [rs.ShaftElement(L=e.length_mm / 1000.0, idl=e.id0_mm / 1000.0, odl=e.od0_mm / 1000.0, idr=e.id1_mm / 1000.0, odr=e.od1_mm / 1000.0, material=material_cache[e.material], n=e.n, tag=f"S{e.physical_section:02d}.{e.n:02d}") for e in plan]
-        bearings = [self._bearing(project, b) for b in project.bearings]
-        disks = []
+        shaft_elements = [
+            rs.ShaftElement(
+                L=element.length_mm / 1000.0,
+                idl=element.id0_mm / 1000.0,
+                odl=element.od0_mm / 1000.0,
+                idr=element.id1_mm / 1000.0,
+                odr=element.od1_mm / 1000.0,
+                material=material_cache[element.material],
+                n=element.n,
+                tag=f"S{element.physical_section:02d}.{element.n:02d}",
+            )
+            for element in plan
+        ]
+
+        support_by_bearing = {support.bearing_index: support for support in project.supports}
+        support_link_nodes: dict[str, int] = {}
+        bearings: list[Any] = []
+        point_masses: list[Any] = []
+        next_link_node = len(node_positions)
+        for bearing_index, bearing_spec in enumerate(project.bearings):
+            support = support_by_bearing.get(bearing_index)
+            link_node: int | None = None
+            if support is not None:
+                link_node = next_link_node
+                next_link_node += 1
+                support_link_nodes[support.name] = link_node
+            bearings.append(self._bearing(project, bearing_spec, n_link=link_node))
+            if support is not None and link_node is not None:
+                bearings.append(
+                    rs.BearingElement(
+                        n=link_node,
+                        kxx=support.kxx,
+                        kyy=support.kyy or support.kxx,
+                        kxy=support.kxy,
+                        kyx=support.kyx,
+                        cxx=support.cxx,
+                        cyy=support.cyy or support.cxx,
+                        cxy=support.cxy,
+                        cyx=support.cyx,
+                        tag=f"{support.name} / ground",
+                    )
+                )
+                point_masses.append(rs.PointMass(n=link_node, m=support.mass_kg, tag=f"{support.name} mass"))
+
+        disks: list[Any] = []
         unresolved: list[float] = []
         for disk in project.disks:
             mapping = self.map_position(project, disk.position_mm)
@@ -149,15 +259,28 @@ class RossModelBuilder:
                 unresolved.append(disk.position_mm)
                 continue
             disks.append(rs.DiskElement(mapping.node, disk.mass_kg, disk.id_kg_m2, disk.ip_kg_m2, tag=disk.name))
-        point_masses = []
+
         for mass in project.point_masses:
             mapping = self.map_position(project, mass.position_mm)
             if mapping.node is None:
                 unresolved.append(mass.position_mm)
                 continue
             point_masses.append(rs.PointMass(n=mapping.node, m=mass.mass_kg, tag=mass.name))
-        rotor = rs.Rotor(shaft_elements=shaft_elements, disk_elements=disks or None, bearing_elements=bearings or None, point_mass_elements=point_masses or None, tag=project.name)
-        return RossBuildResult(rotor, plan, self.node_positions_mm(project), sorted(set(unresolved)))
+
+        rotor = rs.Rotor(
+            shaft_elements=shaft_elements,
+            disk_elements=disks or None,
+            bearing_elements=bearings or None,
+            point_mass_elements=point_masses or None,
+            tag=project.name,
+        )
+        return RossBuildResult(
+            rotor=rotor,
+            shaft_plan=plan,
+            node_positions_mm=node_positions,
+            unresolved_positions_mm=sorted(set(unresolved)),
+            support_link_nodes=support_link_nodes,
+        )
 
 
 class RossBackend:
