@@ -229,20 +229,34 @@ def test_qt_engineering_routes_and_bearing_studio_2_workspace() -> None:
     assert window.stack.count() == 3
     assert not hasattr(window, "bearing_groups_page")
     assert window.bearing_page.bearing_selector.count() == len(window.project.engineering.bearings) == 2
+    assert window.bearing_page.group_selector.isHidden()
 
-    window._open_bearing_group("THD")
-    assert window.stack.currentWidget() is window.bearing_page
+    # 0.14.1 removes the redundant family-navigation step: every bearing model is
+    # directly discoverable, while scientific execution status remains independently gated.
     visible_classes = {
         window.bearing_page.type_metadata[key][1]
         for key, button in window.bearing_page.type_buttons.items()
         if not button.isHidden()
     }
-    assert visible_classes == {"PlainJournal", "TiltingPad", "ThrustPad", "SqueezeFilmDamper"}
+    assert visible_classes == {
+        "BearingElement",
+        "BallBearingElement",
+        "RollerBearingElement",
+        "CylindricalBearing",
+        "PlainJournal",
+        "TiltingPad",
+        "ThrustPad",
+        "SqueezeFilmDamper",
+        "MagneticBearingElement",
+    }
+
     for key, (_title, ross_class, _group) in window.bearing_page.type_metadata.items():
-        if ross_class in {"PlainJournal", "TiltingPad", "ThrustPad", "SqueezeFilmDamper"}:
-            window.bearing_page._select_type(key, announce=False)
+        window.bearing_page._select_type(key, announce=False)
+        if ross_class == "MagneticBearingElement":
+            assert not window.bearing_page.calculate_button.isEnabled()
+        else:
             assert window.bearing_page.calculate_button.isEnabled()
-            assert not window.bearing_page.apply_button.isEnabled()
+        assert not window.bearing_page.apply_button.isEnabled()
 
     window.close()
     app.processEvents()
