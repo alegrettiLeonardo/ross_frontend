@@ -29,7 +29,7 @@ def _write_payload(path: str | None, payload: dict[str, object]) -> None:
 def frozen_self_test_main(argv: list[str]) -> int:
     output_path = _option_value(argv, "--self-test-output")
     try:
-        from .frozen_selftest import run_frozen_self_test
+        from ross_studio.frozen_selftest import run_frozen_self_test
 
         result = run_frozen_self_test()
         payload: dict[str, object] = result.to_dict()
@@ -56,9 +56,9 @@ def main() -> int:
         return frozen_self_test_main(argv)
 
     # Keep the heavy Qt application import out of the packaging self-test bootstrap.
-    # This also gives the CI a clean way to prove the scientific runtime independently
-    # of a desktop display while still using the exact same frozen executable.
-    from .app import launch
+    # This gives CI a clean way to prove the scientific runtime independently of a
+    # desktop display while still executing the exact same frozen binary.
+    from ross_studio.app import launch
 
     return int(launch())
 
