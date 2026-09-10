@@ -89,7 +89,7 @@ class THDResultTab(QWidget):
                 self.summary.setText(prefix + "Native field contains no finite values.")
                 return
             lo, hi = float(finite.min()), float(finite.max())
-            self.summary.setText(prefix + f"Field maximum: {np.nanmax(field)*scale:.8g} {unit}. Selected pad scale: {lo:.8g}–{hi:.8g} {unit}. Rows: axial grid index; columns: circumferential grid index.")
+            self.summary.setText(prefix + f"Field maximum: {np.nanmax(field)*scale:.8g} {unit}. Selected pad scale: {lo:.8g}–{hi:.8g} {unit}. Rows and columns are native ROSS grid indices.")
             self._rows([str(i) for i in range(matrix.shape[1])], [[f"{v:.8g}" for v in row] for row in matrix])
             for r in range(matrix.shape[0]):
                 for c in range(matrix.shape[1]):
@@ -98,15 +98,43 @@ class THDResultTab(QWidget):
                         fraction = (value-lo)/(hi-lo) if hi > lo else 0.5
                         self.table.item(r, c).setBackground(QColor.fromHsvF((1-fraction)*0.62, 0.35, 1.))
         elif self.name == "Film Thickness":
+            if self.result.source_model == "ThrustPad":
+                self.summary.setText(
+                    prefix
+                    + f"h_min: {shown(op.min_film_thickness_m, 1e6)} µm · "
+                    + f"h_pivot: {shown(op.pivot_film_thickness_m, 1e6)} µm · "
+                    + f"h_max: {shown(op.max_film_thickness_m, 1e6)} µm. "
+                    + f"Per-speed full film distribution: {UNAVAILABLE}."
+                )
+                self._rows(
+                    ["rpm", "h_min (µm)", "h_pivot (µm)", "h_max (µm)"],
+                    [
+                        [
+                            f"{p.rpm:g}",
+                            shown(p.min_film_thickness_m, 1e6),
+                            shown(p.pivot_film_thickness_m, 1e6),
+                            shown(p.max_film_thickness_m, 1e6),
+                        ]
+                        for p in self.result.operating_points
+                    ],
+                )
+                return
             self.summary.setText(prefix + f"Minimum film thickness: {shown(op.min_film_thickness_m, 1e6)} µm. Distribution: {UNAVAILABLE}.")
             rows = [[f"{p.rpm:g}", shown(p.min_film_thickness_m, 1e6)] for p in self.result.operating_points]
             self._rows(["rpm", "h_min (µm)"], rows)
             if self.result.source_model == "TiltingPad":
-                # Audited ROSS 2.3 minH_list stores a selected pad pivot value.
                 values = self.result.native_element._results.minH_list
                 self._rows(["rpm", "Selected pad pivot film (µm)"], [[f"{p.rpm:g}", shown(float(values[i]), 1e6)] for i,p in enumerate(self.result.operating_points)])
                 self.summary.setText(prefix + f"Global h_min and distribution: {UNAVAILABLE}. ROSS minH_list contains selected-pad pivot film thickness; it is not h_min.")
         elif self.name == "Journal Position":
+            if self.result.source_model == "ThrustPad":
+                self._rows([], [])
+                self.summary.setText(
+                    prefix
+                    + "Journal eccentricity and attitude are lateral-bearing quantities and are not part of the axial ThrustPad contract. "
+                    + UNAVAILABLE
+                )
+                return
             self.summary.setText(prefix + "Native equilibrium by solved speed; missing quantities are explicitly unavailable.")
             self._rows(["rpm", "Eccentricity ratio (1)", "Attitude (deg)"], [[f"{p.rpm:g}", shown(p.eccentricity_ratio), shown(p.attitude_angle_rad, 180/np.pi)] for p in self.result.operating_points])
         else:
