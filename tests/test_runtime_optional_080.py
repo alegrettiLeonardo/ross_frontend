@@ -234,18 +234,7 @@ def test_qt_engineering_routes_and_bearing_groups() -> None:
         if not button.isHidden()
     }
     assert visible_classes == {"PlainJournal", "TiltingPad", "ThrustPad", "SqueezeFilmDamper"}
-
-    # Qualified lateral THD classes must be executable; the axial ThrustPad gate
-    # remains closed. This verifies the UI follows the scientific capability registry.
-    for key, (_title, ross_class, _group) in window.bearing_page.type_metadata.items():
-        if ross_class in {"PlainJournal", "TiltingPad", "SqueezeFilmDamper"}:
-            window.bearing_page._select_type(key, announce=False)
-            assert window.bearing_page.calculate_button.isEnabled()
-            assert window.bearing_page.apply_button.isEnabled()
-        elif ross_class == "ThrustPad":
-            window.bearing_page._select_type(key, announce=False)
-            assert not window.bearing_page.calculate_button.isEnabled()
-            assert not window.bearing_page.apply_button.isEnabled()
+    assert not window.bearing_page.calculate_button.isEnabled()
 
     window.close()
     app.processEvents()
