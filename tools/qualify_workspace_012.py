@@ -30,10 +30,10 @@ READY = {
 
 
 def main() -> int:
-    # This is the 0.12 mesh/workspace regression gate executed against the current
-    # release candidate. The scientific expectations are unchanged; only the
-    # application version advances with the Bearing Studio 2.0 tranche.
-    assert ross_studio.__version__ == "0.13.0"
+    # This is the inherited 0.12 mesh/workspace regression gate executed against
+    # the current 0.14 release candidate. The mesh/native-view scientific contract
+    # is unchanged; this assertion only guards release metadata consistency.
+    assert ross_studio.__version__ == "0.14.0"
     assert ross.__version__ == "2.3.0"
 
     project = load_irdin_project(FIXTURE)
