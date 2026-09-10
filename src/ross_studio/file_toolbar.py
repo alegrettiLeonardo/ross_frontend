@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QApplication, QMenuBar
+from PySide6.QtWidgets import QApplication, QMenu, QToolButton
 
 from .ui_shell import AppToolbar as _BaseAppToolbar
 from .ui_shell import QuickActionsCard as _BaseQuickActionsCard
@@ -14,14 +14,21 @@ def _dispatch(command: str) -> None:
 
 
 class AppToolbar(_BaseAppToolbar):
-    """ROSS Studio toolbar with a native desktop File command surface."""
+    """ROSS Studio toolbar with a desktop-style Arquivo command surface.
+
+    A QToolButton + QMenu is intentionally used instead of embedding QMenuBar in
+    the custom frameless toolbar. It renders the same project command surface while
+    remaining stable under the offscreen/frozen Qt qualification environment.
+    """
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.file_menu_bar = QMenuBar(self)
-        self.file_menu_bar.setObjectName("fileMenuBar")
-        self.file_menu_bar.setNativeMenuBar(False)
-        self.file_menu = self.file_menu_bar.addMenu("Arquivo")
+        self.file_menu_button = QToolButton(self)
+        self.file_menu_button.setObjectName("fileMenuButton")
+        self.file_menu_button.setText("Arquivo")
+        self.file_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.file_menu = QMenu("Arquivo", self.file_menu_button)
+        self.file_menu_button.setMenu(self.file_menu)
         self.file_actions: dict[str, QAction] = {}
 
         self._action("new", "Novo", QKeySequence.StandardKey.New)
@@ -38,7 +45,7 @@ class AppToolbar(_BaseAppToolbar):
 
         layout = self.layout()
         if layout is not None:
-            layout.insertWidget(0, self.file_menu_bar)
+            layout.insertWidget(0, self.file_menu_button)
 
         self.buttons["new"].clicked.connect(lambda: _dispatch("new"))
         self.buttons["open"].clicked.connect(lambda: _dispatch("open"))
@@ -47,9 +54,9 @@ class AppToolbar(_BaseAppToolbar):
     def _action(self, key: str, text: str, shortcut) -> QAction:
         action = QAction(text, self)
         action.setShortcut(shortcut)
-        action.setShortcutContext(action.shortcutContext())
         action.triggered.connect(lambda checked=False, command=key: _dispatch(command))
         self.file_menu.addAction(action)
+        self.addAction(action)
         self.file_actions[key] = action
         return action
 
