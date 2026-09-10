@@ -12,8 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import ross as rs
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
 
 from ross_studio.app import RossStudioWindow
 from ross_studio.analysis_backend import RossAnalysisBackend
@@ -39,7 +38,7 @@ def test_production_registry_promotes_qualified_thd_and_blocks_amb():
     ("TiltingPad", [3000., 3600.]),
     ("SqueezeFilmDamper", [900., 3600.]),
 ])
-def test_real_qt_thd_calculate_preview_apply_strict_modal(qtbot, monkeypatch, model, speeds):
+def test_real_qt_thd_inline_calculate_preview_apply_strict_modal(qtbot, monkeypatch, model, speeds):
     window = RossStudioWindow()
     qtbot.addWidget(window)
     window.show()
@@ -48,6 +47,8 @@ def test_real_qt_thd_calculate_preview_apply_strict_modal(qtbot, monkeypatch, mo
     qtbot.mouseClick(window.bearing_page.type_buttons[key], Qt.MouseButton.LeftButton)
     assert window._selected_bearing_class() == model
     assert window.bearing_page.calculate_button.isEnabled()
+    assert window.bearing_page.input_card.isVisible()
+    assert not window.bearing_page.result_card.isVisible()
     original = deepcopy(window.project.engineering)
     calls = []
     calculate = window.thd_bearing_service.calculate
@@ -68,16 +69,10 @@ def test_real_qt_thd_calculate_preview_apply_strict_modal(qtbot, monkeypatch, mo
     monkeypatch.setattr(window.thd_bearing_service, "apply", apply_real)
     monkeypatch.setattr(window.bearing_service, "calculate", wrong_service)
     monkeypatch.setattr(window.bearing_service, "apply", wrong_service)
-    entered = {}
 
-    def fill_real_dialog():
-        dialog = QApplication.activeModalWidget()
-        assert isinstance(dialog, THDBearingInputDialog)
-        dialog.fields["speed_rpm"].setText(", ".join(map(str, speeds)))
-        entered.update(dialog.values())
-        dialog.accept()
-
-    QTimer.singleShot(0, fill_real_dialog)
+    panel = window.bearing_page.input_panel
+    panel.fields["speed_rpm"].setText(", ".join(map(str, speeds)))
+    entered = panel.values()
     qtbot.mouseClick(window.bearing_page.calculate_button, Qt.MouseButton.LeftButton)
     result = window.bearing_calculation
     assert result is not None, window.status
@@ -96,6 +91,10 @@ def test_real_qt_thd_calculate_preview_apply_strict_modal(qtbot, monkeypatch, mo
     assert [p.rpm for p in window.bearing.coefficients] == speeds
     assert window.bearing_page.nominal_index == len(speeds)-1
     assert window.bearing_page.apply_button.isEnabled()
+    assert window.bearing_page.results_button.isEnabled()
+    assert not window.bearing_page.result_card.isVisible()  # Results remain below until requested/scrolling.
+    qtbot.mouseClick(window.bearing_page.results_button, Qt.MouseButton.LeftButton)
+    assert window.bearing_page.result_card.isVisible()
     for name, tab in window.bearing_page.result_tabs.items():
         assert tab.result is result
         tab.speed.setCurrentIndex(0)
@@ -137,6 +136,7 @@ def test_real_qt_thd_calculate_preview_apply_strict_modal(qtbot, monkeypatch, mo
         "n_link": 28, "modal_wn_rad_s": modal.wn.tolist(),
         "convergence": [convergence(result, i) for i in range(len(speeds))],
         "native_fields_retained_after_apply": window.bearing_field_result is result,
+        "input_mode": "inline Bearing Studio engineering panel",
     }
     out.write_text(json.dumps(payload, indent=2))
     window.close()
@@ -154,6 +154,8 @@ def test_general_preview_rejects_stale_project_and_preserves_rotor(qtbot):
 
 
 def test_input_units_and_all_fields_reach_scientific_boundary(qtbot):
+    # Keep the legacy dialog helper qualified because it shares the same engineering
+    # field contract, while production interaction now uses BearingInputPanel inline.
     window = RossStudioWindow()
     qtbot.addWidget(window)
     for model in THDBearingStudioService.SUPPORTED_CLASSES:
