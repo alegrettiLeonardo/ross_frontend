@@ -1,10 +1,10 @@
-"""Candidate desktop qualification uses real Qt, native ROSS and strict modal.
+"""Production THD desktop qualification uses real Qt, native ROSS and strict modal.
 
-Before release promotion only, a test-local catalog exposes the three candidates.
-Production capability gates remain closed until the complete CI has passed.
+The three lateral THD capabilities are enabled by the production registry. The
+end-to-end test therefore exercises the same capability gate seen by users; it
+does not patch PLANNED adapters into an executable state.
 """
 from copy import deepcopy
-from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -24,17 +24,21 @@ from ross_studio.thd_input_dialog import THDBearingInputDialog
 from ross_studio.thd_results import UNAVAILABLE, convergence, native_field
 
 
+def test_production_registry_promotes_only_qualified_lateral_thd():
+    registry = RossCapabilityRegistry(rs)
+    for model in THDBearingStudioService.SUPPORTED_CLASSES:
+        status, _reason = registry.effective_status(model)
+        assert status == AdapterStatus.VALIDATED
+    assert registry.effective_status("ThrustPad")[0] == AdapterStatus.PLANNED
+    assert registry.effective_status("MagneticBearingElement")[0] == AdapterStatus.BLOCKED
+
+
 @pytest.mark.parametrize("model,speeds", [
     ("PlainJournal", [900., 1000.]),
     ("TiltingPad", [3000., 3600.]),
     ("SqueezeFilmDamper", [900., 3600.]),
 ])
 def test_real_qt_thd_calculate_preview_apply_strict_modal(qtbot, monkeypatch, model, speeds):
-    monkeypatch.setattr(RossCapabilityRegistry, "_CAPABILITIES", tuple(
-        replace(c, adapter_status=AdapterStatus.VALIDATED)
-        if c.ross_class in THDBearingStudioService.SUPPORTED_CLASSES else c
-        for c in RossCapabilityRegistry._CAPABILITIES
-    ))
     window = RossStudioWindow()
     qtbot.addWidget(window)
     window.show()
@@ -42,6 +46,7 @@ def test_real_qt_thd_calculate_preview_apply_strict_modal(qtbot, monkeypatch, mo
     key = window._bearing_key_for_class(window.bearing_page, model)
     qtbot.mouseClick(window.bearing_page.type_buttons[key], Qt.MouseButton.LeftButton)
     assert window._selected_bearing_class() == model
+    assert window.bearing_page.calculate_button.isEnabled()
     original = deepcopy(window.project.engineering)
     calls = []
     calculate = window.thd_bearing_service.calculate
