@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QStackedWidget,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -21,7 +20,18 @@ from PySide6.QtWidgets import (
 from ..domain import EngineeringError
 from ..icons import engineering_icon
 from ..model_builder_service import MutationAudit, RotorModelMutationService
-from ..model_entity_dialogs import ProbeEditorDialog, ShaftSectionEditorDialog, SupportEditorDialog
+from ..model_entity_dialogs import (
+    CouplingEditorDialog,
+    DiskEditorDialog,
+    DistributedMassEditorDialog,
+    LoadEditorDialog,
+    MassTypeDialog,
+    PointMassEditorDialog,
+    ProbeEditorDialog,
+    SealEditorDialog,
+    ShaftSectionEditorDialog,
+    SupportEditorDialog,
+)
 from ..models import ProjectModel
 from ..ross_backend import RossModelBuilder
 from ..ross_native_view import RossNativeRotorView
@@ -68,6 +78,7 @@ class RotorModelPage(QWidget):
         self.editor_pages: dict[str, QWidget] = {}
         self.editor_action_buttons: dict[str, dict[str, QPushButton]] = {}
         self._table_ref_builders: dict[str, list[RotorEntityRef]] = {}
+        self._disk_row_targets: list[tuple[str, int]] = []
         self._mesh_edit_guard = False
         self._current_editor_key = "shaft"
 
@@ -177,7 +188,11 @@ class RotorModelPage(QWidget):
         top.addStretch(1)
         enabled = {
             "shaft": {"edit"},
+            "disks": {"add", "edit", "delete"},
             "supports": {"edit"},
+            "seals": {"add", "edit", "delete"},
+            "couplings": {"add", "edit", "delete"},
+            "loads": {"add", "edit", "delete"},
             "probes": {"add", "edit", "delete"},
         }.get(key, set())
         buttons: dict[str, QPushButton] = {}
@@ -196,12 +211,18 @@ class RotorModelPage(QWidget):
                     button.setToolTip(
                         "Shaft section insertion/deletion is blocked until the user chooses an explicit downstream absolute-coordinate remapping policy."
                     )
-                elif key == "disks":
-                    button.setToolTip("Disk/mass editing is the next Complete Rotor Model Builder sub-gate; current rows remain physically auditable.")
+                elif key == "supports" and action in {"add", "delete"}:
+                    button.setToolTip(
+                        "Flexible-support creation/deletion changes bearing ownership and remains Bearing Studio/topology controlled."
+                    )
                 elif key == "ump":
-                    button.setToolTip("UMP is derived from its qualified engineering source and is not edited as a detached duplicate here.")
+                    button.setToolTip(
+                        "UMP is derived from its qualified engineering source and is not edited as a detached duplicate here."
+                    )
+                elif action == "import":
+                    button.setToolTip("Import is intentionally gated until a schema-preserving transaction is qualified.")
                 else:
-                    button.setToolTip("This editor action is not yet qualified; no silent edit is performed.")
+                    button.setToolTip("This editor action is not qualified; no silent edit is performed.")
             if action == "add":
                 button.clicked.connect(lambda checked=False, k=key: self._add_entity(k))
             elif action == "edit":
@@ -280,8 +301,6 @@ class RotorModelPage(QWidget):
         table = self._readonly_table(headers, rows, stretch_col=8)
         self.segment_table = table
         self._table_ref_builders["shaft"] = refs
-        # Direct in-cell editing remains limited to FE count. Full local OD/ID editing
-        # is available through the qualified Edit dialog.
         for row in range(table.rowCount()):
             cell = table.item(row, 6)
             cell.setFlags(cell.flags() | Qt.ItemFlag.ItemIsEditable)
@@ -296,13 +315,14 @@ class RotorModelPage(QWidget):
         engineering = self.project.engineering
         rows: list[list[object]] = []
         refs: list[RotorEntityRef] = []
+        self._disk_row_targets = []
         if engineering is not None:
             plan = NodeInsertionService.plan(engineering)
             for index, mass in enumerate(engineering.distributed_masses):
                 id_kg_m2, ip_kg_m2 = mass.equivalent_disk_inertias_kg_m2()
                 rows.append([
                     mass.name,
-                    "Distributed rotor mass",
+                    "Distributed rotor mass [Massas]",
                     f"{mass.start_mm:g}",
                     f"{mass.center_mm:g}",
                     plan.node_for(mass.center_mm),
@@ -314,9 +334,9 @@ class RotorModelPage(QWidget):
                     "—",
                     "DiskElement equivalent",
                 ])
-                refs.append(RotorEntityRef("disks", index, mass.name, mass.center_mm))
-            offset = len(engineering.distributed_masses)
-            for local_index, disk in enumerate(engineering.disks):
+                refs.append(RotorEntityRef("disks", len(refs), mass.name, mass.center_mm))
+                self._disk_row_targets.append(("distributed_mass", index))
+            for index, disk in enumerate(engineering.disks):
                 rows.append([
                     disk.name,
                     "Rigid disk",
@@ -331,9 +351,9 @@ class RotorModelPage(QWidget):
                     "—",
                     "DiskElement",
                 ])
-                refs.append(RotorEntityRef("disks", offset + local_index, disk.name, disk.position_mm))
-            point_offset = offset + len(engineering.disks)
-            for local_index, mass in enumerate(engineering.point_masses):
+                refs.append(RotorEntityRef("disks", len(refs), disk.name, disk.position_mm))
+                self._disk_row_targets.append(("disk", index))
+            for index, mass in enumerate(engineering.point_masses):
                 rows.append([
                     mass.name,
                     "Concentrated mass [Concent]",
@@ -348,7 +368,8 @@ class RotorModelPage(QWidget):
                     f"{mass.iz_kg_m2:.6g}",
                     "qualified concentrated DiskElement",
                 ])
-                refs.append(RotorEntityRef("disks", point_offset + local_index, mass.name, mass.position_mm))
+                refs.append(RotorEntityRef("disks", len(refs), mass.name, mass.position_mm))
+                self._disk_row_targets.append(("point_mass", index))
         table = self._readonly_table(
             [
                 "Name", "Engineering body", "Start (mm)", "Center / x (mm)", "ROSS Node",
@@ -396,9 +417,17 @@ class RotorModelPage(QWidget):
         if engineering is not None:
             plan = NodeInsertionService.plan(engineering)
             for index, seal in enumerate(engineering.seals):
-                rows.append([seal.name, f"{seal.position_mm:g}", plan.node_for(seal.position_mm), f"{seal.kxx:.3e}", f"{seal.kyy:.3e}", f"{seal.cxx:.3e}", f"{seal.cyy:.3e}"])
+                rows.append([
+                    seal.name, f"{seal.position_mm:g}", plan.node_for(seal.position_mm),
+                    f"{seal.kxx:.3e}", f"{seal.kyy:.3e}", f"{seal.kxy:.3e}", f"{seal.kyx:.3e}",
+                    f"{seal.cxx:.3e}", f"{seal.cyy:.3e}", f"{seal.cxy:.3e}", f"{seal.cyx:.3e}",
+                ])
                 refs.append(RotorEntityRef("seals", index, seal.name, seal.position_mm))
-        table = self._readonly_table(["Name", "Position (mm)", "ROSS Node", "Kxx", "Kyy", "Cxx", "Cyy"], rows, stretch_col=0)
+        table = self._readonly_table(
+            ["Name", "Position (mm)", "ROSS Node", "Kxx", "Kyy", "Kxy", "Kyx", "Cxx", "Cyy", "Cxy", "Cyx"],
+            rows,
+            stretch_col=0,
+        )
         self._table_ref_builders["seals"] = refs
         return self._table_page("seals", table)
 
@@ -409,9 +438,30 @@ class RotorModelPage(QWidget):
         if engineering is not None:
             plan = NodeInsertionService.plan(engineering)
             for index, coupling in enumerate(engineering.couplings):
-                rows.append([coupling.name, f"{coupling.position_mm:g}", plan.node_for(coupling.position_mm), f"{coupling.left_mass_kg:g}", f"{coupling.right_mass_kg:g}", f"{coupling.kt_x_n_m:.3e}", f"{coupling.kr_x_n_m_rad:.3e}"])
+                rows.append([
+                    coupling.name,
+                    f"{coupling.position_mm:g}",
+                    plan.node_for(coupling.position_mm),
+                    f"{coupling.left_mass_kg:g}",
+                    f"{coupling.right_mass_kg:g}",
+                    f"{coupling.left_ip_kg_m2:.6g}",
+                    f"{coupling.right_ip_kg_m2:.6g}",
+                    f"{coupling.kt_x_n_m:.3e}",
+                    f"{coupling.kt_y_n_m:.3e}",
+                    f"{coupling.kt_z_n_m:.3e}",
+                    f"{coupling.kr_x_n_m_rad:.3e}",
+                    f"{coupling.kr_y_n_m_rad:.3e}",
+                    f"{coupling.kr_z_n_m_rad:.3e}",
+                ])
                 refs.append(RotorEntityRef("couplings", index, coupling.name, coupling.position_mm))
-        table = self._readonly_table(["Name", "Position (mm)", "ROSS Node", "Left mass", "Right mass", "Kt X", "Kr X"], rows, stretch_col=0)
+        table = self._readonly_table(
+            [
+                "Name", "Position (mm)", "ROSS Node", "Left mass", "Right mass", "Left Ip", "Right Ip",
+                "Kt X", "Kt Y", "Kt Z", "Kr X", "Kr Y", "Kr Z",
+            ],
+            rows,
+            stretch_col=0,
+        )
         self._table_ref_builders["couplings"] = refs
         return self._table_page("couplings", table)
 
@@ -423,9 +473,17 @@ class RotorModelPage(QWidget):
             plan = NodeInsertionService.plan(engineering)
             for index, load in enumerate(engineering.loads):
                 node = plan.node_for(load.position_mm)
-                rows.append([load.name, load.kind, f"{load.position_mm:g}", node, f"{load.magnitude:g}", f"{load.phase_deg:g}", "Exact inserted node" if node is not None else "ERROR"])
+                rows.append([
+                    load.name, load.kind, f"{load.position_mm:g}", node,
+                    f"{load.magnitude:g}", f"{load.phase_deg:g}",
+                    "Exact inserted node" if node is not None else "ERROR",
+                ])
                 refs.append(RotorEntityRef("loads", index, load.name, load.position_mm))
-        table = self._readonly_table(["Name", "Type", "Position (mm)", "ROSS Node", "Magnitude", "Phase (deg)", "Node mapping"], rows, stretch_col=0)
+        table = self._readonly_table(
+            ["Name", "Type", "Position (mm)", "ROSS Node", "Magnitude", "Phase (deg)", "Node mapping"],
+            rows,
+            stretch_col=0,
+        )
         self._table_ref_builders["loads"] = refs
         return self._table_page("loads", table)
 
@@ -463,15 +521,42 @@ class RotorModelPage(QWidget):
         if engineering is not None:
             plan = NodeInsertionService.plan(engineering)
             for index, probe in enumerate(engineering.probes):
-                rows.append([probe.name, f"{probe.position_mm:g}", plan.node_for(probe.position_mm), probe.coordinate, f"{probe.orientation_deg:g}"])
+                rows.append([
+                    probe.name, f"{probe.position_mm:g}", plan.node_for(probe.position_mm),
+                    probe.coordinate, f"{probe.orientation_deg:g}",
+                ])
                 refs.append(RotorEntityRef("probes", index, probe.name, probe.position_mm))
-        table = self._readonly_table(["Name", "Position (mm)", "ROSS Node", "Coordinate", "Orientation (deg)"], rows, stretch_col=0)
+        table = self._readonly_table(
+            ["Name", "Position (mm)", "ROSS Node", "Coordinate", "Orientation (deg)"],
+            rows,
+            stretch_col=0,
+        )
         self._table_ref_builders["probes"] = refs
         return self._table_page("probes", table)
 
     def _selected_row(self, key: str) -> int:
         table = self.editor_tables.get(key)
         return -1 if table is None else table.currentRow()
+
+    def _disk_target(self, row: int) -> tuple[str, int]:
+        if not 0 <= row < len(self._disk_row_targets):
+            raise EngineeringError(f"Disk/mass row {row} does not map to an engineering body.")
+        return self._disk_row_targets[row]
+
+    @staticmethod
+    def _disk_table_row(engineering, kind: str, index: int) -> int:
+        if kind == "distributed_mass":
+            return index
+        if kind == "disk":
+            return len(engineering.distributed_masses) + index
+        if kind == "point_mass":
+            return len(engineering.distributed_masses) + len(engineering.disks) + index
+        raise EngineeringError(f"Unsupported disk/mass kind {kind!r}.")
+
+    @staticmethod
+    def _require_name(record, label: str) -> None:
+        if not getattr(record, "name", "").strip():
+            raise EngineeringError(f"{label} name cannot be empty.")
 
     def _edit_entity(self, key: str) -> None:
         engineering = self.project.engineering
@@ -496,13 +581,51 @@ class RotorModelPage(QWidget):
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return
                 preview = self.model_builder.preview_update(engineering, "support", row, dialog.changes())
+            elif key == "disks":
+                kind, index = self._disk_target(row)
+                if kind == "distributed_mass":
+                    dialog = DistributedMassEditorDialog(
+                        engineering.distributed_masses[index], total_length_mm=engineering.total_length_mm, parent=self
+                    )
+                elif kind == "disk":
+                    dialog = DiskEditorDialog(engineering.disks[index], total_length_mm=engineering.total_length_mm, parent=self)
+                else:
+                    dialog = PointMassEditorDialog(
+                        engineering.point_masses[index], total_length_mm=engineering.total_length_mm, parent=self
+                    )
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self._require_name(dialog.record(), self.EDITOR_TITLES[key])
+                preview = self.model_builder.preview_update(engineering, kind, index, dialog.changes())
+            elif key == "seals":
+                dialog = SealEditorDialog(engineering.seals[row], total_length_mm=engineering.total_length_mm, parent=self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self._require_name(dialog.record(), "Seal")
+                preview = self.model_builder.preview_update(engineering, "seal", row, dialog.changes())
+            elif key == "couplings":
+                dialog = CouplingEditorDialog(engineering.couplings[row], total_length_mm=engineering.total_length_mm, parent=self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self._require_name(dialog.record(), "Coupling")
+                preview = self.model_builder.preview_update(engineering, "coupling", row, dialog.changes())
+            elif key == "loads":
+                dialog = LoadEditorDialog(engineering.loads[row], total_length_mm=engineering.total_length_mm, parent=self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                record = dialog.record()
+                self._require_name(record, "Load")
+                if not record.kind:
+                    raise EngineeringError("Load type cannot be empty.")
+                preview = self.model_builder.preview_update(engineering, "load", row, dialog.changes())
             elif key == "probes":
                 dialog = ProbeEditorDialog(engineering.probes[row], total_length_mm=engineering.total_length_mm, parent=self)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return
+                self._require_name(dialog.record(), "Probe")
                 preview = self.model_builder.preview_update(engineering, "probe", row, dialog.changes())
             else:
-                self.status_message.emit(f"{self.EDITOR_TITLES.get(key, key)} editing is not yet qualified")
+                self.status_message.emit(f"{self.EDITOR_TITLES.get(key, key)} editing is not qualified")
                 return
             audit = self.model_builder.commit(engineering, preview)
         except (EngineeringError, ValueError) as exc:
@@ -515,54 +638,137 @@ class RotorModelPage(QWidget):
         if engineering is None:
             self.status_message.emit("Model add rejected: engineering domain is not loaded")
             return
-        if key != "probes":
-            self.status_message.emit(f"Add is not yet qualified for {self.EDITOR_TITLES.get(key, key)}")
-            return
-        dialog = ProbeEditorDialog(total_length_mm=engineering.total_length_mm, parent=self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        record = dialog.record()
-        if not record.name:
-            self.status_message.emit("Probe add rejected: probe name cannot be empty")
-            return
         try:
-            preview = self.model_builder.preview_add(engineering, "probe", record)
-            audit = self.model_builder.commit(engineering, preview)
+            if key == "disks":
+                chooser = MassTypeDialog(self)
+                if chooser.exec() != QDialog.DialogCode.Accepted:
+                    return
+                kind = chooser.selected_kind()
+                if kind == "distributed_mass":
+                    dialog = DistributedMassEditorDialog(total_length_mm=engineering.total_length_mm, parent=self)
+                elif kind == "disk":
+                    dialog = DiskEditorDialog(total_length_mm=engineering.total_length_mm, parent=self)
+                elif kind == "point_mass":
+                    dialog = PointMassEditorDialog(total_length_mm=engineering.total_length_mm, parent=self)
+                else:
+                    raise EngineeringError(f"Unsupported disk/mass kind {kind!r}.")
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                record = dialog.record()
+                self._require_name(record, self.EDITOR_TITLES[key])
+                preview = self.model_builder.preview_add(engineering, kind, record)
+                audit = self.model_builder.commit(engineering, preview)
+                index = len(getattr(engineering, {
+                    "distributed_mass": "distributed_masses",
+                    "disk": "disks",
+                    "point_mass": "point_masses",
+                }[kind])) - 1
+                selected_row = self._disk_table_row(engineering, kind, index)
+            elif key == "seals":
+                dialog = SealEditorDialog(total_length_mm=engineering.total_length_mm, parent=self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                record = dialog.record()
+                self._require_name(record, "Seal")
+                preview = self.model_builder.preview_add(engineering, "seal", record)
+                audit = self.model_builder.commit(engineering, preview)
+                selected_row = len(engineering.seals) - 1
+            elif key == "couplings":
+                dialog = CouplingEditorDialog(total_length_mm=engineering.total_length_mm, parent=self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                record = dialog.record()
+                self._require_name(record, "Coupling")
+                preview = self.model_builder.preview_add(engineering, "coupling", record)
+                audit = self.model_builder.commit(engineering, preview)
+                selected_row = len(engineering.couplings) - 1
+            elif key == "loads":
+                dialog = LoadEditorDialog(total_length_mm=engineering.total_length_mm, parent=self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                record = dialog.record()
+                self._require_name(record, "Load")
+                if not record.kind:
+                    raise EngineeringError("Load type cannot be empty.")
+                preview = self.model_builder.preview_add(engineering, "load", record)
+                audit = self.model_builder.commit(engineering, preview)
+                selected_row = len(engineering.loads) - 1
+            elif key == "probes":
+                dialog = ProbeEditorDialog(total_length_mm=engineering.total_length_mm, parent=self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                record = dialog.record()
+                self._require_name(record, "Probe")
+                preview = self.model_builder.preview_add(engineering, "probe", record)
+                audit = self.model_builder.commit(engineering, preview)
+                selected_row = len(engineering.probes) - 1
+            else:
+                self.status_message.emit(f"Add is not qualified for {self.EDITOR_TITLES.get(key, key)}")
+                return
         except (EngineeringError, ValueError) as exc:
-            self.status_message.emit(f"Probe add rejected: {exc}")
+            self.status_message.emit(f"Model add rejected: {exc}")
             return
-        self._after_model_commit("probes", audit, selected_row=len(engineering.probes) - 1)
+        self._after_model_commit(key, audit, selected_row=selected_row)
 
     def _delete_entity(self, key: str) -> None:
         engineering = self.project.engineering
         if engineering is None:
             self.status_message.emit("Model delete rejected: engineering domain is not loaded")
             return
-        if key != "probes":
-            self.status_message.emit(f"Delete is not yet qualified for {self.EDITOR_TITLES.get(key, key)}")
-            return
         row = self._selected_row(key)
         if row < 0:
-            self.status_message.emit("Select a probe row before Delete")
+            self.status_message.emit(f"Select a {key} row before Delete")
             return
-        probe = engineering.probes[row]
-        answer = QMessageBox.question(
-            self,
-            "Delete Probe",
-            f"Delete {probe.name!r} at {probe.position_mm:g} mm? The rotor will be strict-Ross qualified again before commit.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
+
         try:
-            preview = self.model_builder.preview_delete(engineering, "probe", row)
+            if key == "disks":
+                kind, index = self._disk_target(row)
+                collection = getattr(engineering, {
+                    "distributed_mass": "distributed_masses",
+                    "disk": "disks",
+                    "point_mass": "point_masses",
+                }[kind])
+                record = collection[index]
+            elif key == "seals":
+                kind, index, record = "seal", row, engineering.seals[row]
+            elif key == "couplings":
+                kind, index, record = "coupling", row, engineering.couplings[row]
+            elif key == "loads":
+                kind, index, record = "load", row, engineering.loads[row]
+            elif key == "probes":
+                kind, index, record = "probe", row, engineering.probes[row]
+            else:
+                self.status_message.emit(f"Delete is not qualified for {self.EDITOR_TITLES.get(key, key)}")
+                return
+
+            position = getattr(record, "position_mm", getattr(record, "center_mm", None))
+            position_text = "" if position is None else f" at {position:g} mm"
+            answer = QMessageBox.question(
+                self,
+                f"Delete {self.EDITOR_TITLES.get(key, key)}",
+                f"Delete {record.name!r}{position_text}? The candidate model will be qualified again before commit.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            preview = self.model_builder.preview_delete(engineering, kind, index)
             audit = self.model_builder.commit(engineering, preview)
         except (EngineeringError, ValueError) as exc:
-            self.status_message.emit(f"Probe delete rejected: {exc}")
+            self.status_message.emit(f"Model delete rejected: {exc}")
             return
-        target_row = min(row, len(engineering.probes) - 1)
-        self._after_model_commit("probes", audit, selected_row=target_row)
+
+        if key == "disks":
+            target_row = min(row, len(self._disk_row_targets) - 2)
+        else:
+            collection = getattr(engineering, {
+                "seals": "seals",
+                "couplings": "couplings",
+                "loads": "loads",
+                "probes": "probes",
+            }[key])
+            target_row = min(row, len(collection) - 1)
+        self._after_model_commit(key, audit, selected_row=target_row)
 
     def _rebuild_editors(self, active_key: str, selected_row: int = -1) -> None:
         self._mesh_edit_guard = True
@@ -574,6 +780,7 @@ class RotorModelPage(QWidget):
         self.editor_pages.clear()
         self.editor_action_buttons.clear()
         self._table_ref_builders.clear()
+        self._disk_row_targets.clear()
         self._populate_editors()
         self._mesh_edit_guard = False
         self.select_editor(active_key)
