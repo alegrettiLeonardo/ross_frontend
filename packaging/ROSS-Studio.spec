@@ -1,22 +1,24 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 ROOT = Path(SPECPATH).parent
 SRC = ROOT / "src"
 ENTRY = SRC / "ross_studio" / "frozen_entry.py"
 
-# ROSS imports ccp through its labyrinth-seal module during top-level package
-# initialization. ccp loads Pint unit-definition/data files at runtime, so collecting
-# only Python modules is insufficient for a frozen executable. Keep both packages as
-# complete runtime units instead of chasing individual resource files one by one.
+# Keep ROSS as a complete runtime unit because several solver/result modules are
+# imported lazily. ROSS imports ccp through its labyrinth-seal module during
+# top-level initialization, but the Studio does not use ccp's optional Streamlit,
+# AI or compressor-application modules. Let PyInstaller follow the ccp modules
+# that are actually imported and add only ccp runtime data explicitly. This keeps
+# required Pint definitions such as ccp/config/new_units.txt while avoiding a
+# several-hundred-megabyte bundle of unrelated optional ccp applications.
 ross_datas, ross_binaries, ross_hiddenimports = collect_all("ross")
-ccp_datas, ccp_binaries, ccp_hiddenimports = collect_all("ccp")
+ccp_datas = collect_data_files("ccp", include_py_files=False)
 
 hiddenimports = list(dict.fromkeys([
     *ross_hiddenimports,
-    *ccp_hiddenimports,
     # Loaded lazily by RossNativeRotorView; explicit inclusion is required so the
     # packaged executable preserves the native Plotly/Qt audit view.
     "PySide6.QtWebEngineCore",
@@ -29,7 +31,7 @@ datas = [
     *ccp_datas,
     (str(SRC / "ross_studio" / "resources"), "ross_studio/resources"),
 ]
-binaries = [*ross_binaries, *ccp_binaries]
+binaries = [*ross_binaries]
 
 a = Analysis(
     [str(ENTRY)],
