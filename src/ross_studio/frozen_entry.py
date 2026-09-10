@@ -53,6 +53,22 @@ def frozen_self_test_main(argv: list[str]) -> int:
         return 2
 
 
+def frozen_project_io_main(argv: list[str]) -> int:
+    output_path = _option_value(argv, "--project-io-output")
+    try:
+        from ross_studio.frozen_project_io import run_frozen_project_io_test
+
+        result = run_frozen_project_io_test()
+        payload: dict[str, object] = result.to_dict()
+        payload["executable"] = str(Path(sys.executable).resolve())
+        payload["frozen"] = bool(getattr(sys, "frozen", False))
+        _write_payload(output_path, payload)
+        return 0
+    except Exception as exc:
+        _write_payload(output_path, _failure_payload(exc))
+        return 4
+
+
 def frozen_gui_smoke_main(argv: list[str]) -> int:
     output_path = _option_value(argv, "--gui-smoke-output")
     try:
@@ -73,10 +89,12 @@ def main() -> int:
     argv = list(sys.argv[1:])
     if "--self-test" in argv or "--self-test-output" in argv:
         return frozen_self_test_main(argv)
+    if "--project-io-self-test" in argv or "--project-io-output" in argv:
+        return frozen_project_io_main(argv)
     if "--gui-smoke" in argv or "--gui-smoke-output" in argv:
         return frozen_gui_smoke_main(argv)
 
-    # Keep heavy Qt imports out of the scientific packaging self-test bootstrap.
+    # Keep heavy Qt imports out of scientific and I/O packaging self-test bootstraps.
     # Normal desktop execution still enters the exact production application.
     from ross_studio.app import launch
 
