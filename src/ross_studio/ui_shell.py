@@ -323,7 +323,15 @@ def configure_table(table: QTableWidget, *, row_height: int = 32) -> None:
 
 
 def item(value: object, *, center: bool = True) -> QTableWidgetItem:
+    """Create a display item; editors must opt in to editability explicitly.
+
+    A scientific GUI must never present a cell as editable unless the edit is wired
+    back to the engineering domain. ROSS Studio therefore makes table items read-only
+    by default. Specific qualified editors (currently shaft FE count) re-enable the
+    ItemIsEditable flag on the exact field they commit transactionally.
+    """
     table_item = QTableWidgetItem(str(value))
+    table_item.setFlags(table_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
     if center:
         table_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
     return table_item
