@@ -7,7 +7,7 @@ from typing import Any
 from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMessageBox
 
 from .models import BearingModel, ProjectModel
-from .project_file_service import ProjectFileService, ProjectOpenError, ProjectOpenResult
+from .project_file_service import ProjectFileService, ProjectOpenResult
 from .project_io import new_project_model, project_fingerprint
 from .rotor_selection import WORKSPACE_SELECTION
 
@@ -79,8 +79,8 @@ class ProjectFileController:
         )
         self._set_status(
             "New project",
-            "Untitled project created; no rotor geometry was invented.",
-            units="Define the engineering model, then Save As (.rossproj)",
+            "Untitled project created; no rotor geometry, mass, support or bearing was invented.",
+            units="Define/import the engineering model, then Save As (.rossproj)",
         )
         return True
 
@@ -170,23 +170,27 @@ class ProjectFileController:
 
     def _replace_project(self, result: ProjectOpenResult, *, clean: bool) -> None:
         from .pages.bearing_studio import BearingStudioPage
+        from .pages.empty_bearing_studio import EmptyBearingStudioPage
         from .pages.results import AnalysisResultsPage
         from .pages.rotor_model import RotorModelPage
 
         window = self.window
         WORKSPACE_SELECTION.clear()
+        old_pages = []
         for page_name in ("rotor_page", "bearing_page", "results_page"):
             page = getattr(window, page_name, None)
             if page is not None:
                 window.stack.removeWidget(page)
-                page.deleteLater()
+                page.close()
+                old_pages.append(page)
 
         window.project = result.model
         window.bearing_index = 0
         engineering = result.model.engineering
+        has_bearing_station = bool(engineering is not None and engineering.bearings)
         window.bearing = (
             BearingModel.from_project(engineering, 0)
-            if engineering is not None and engineering.bearings
+            if has_bearing_station
             else BearingModel(name="No bearing station")
         )
         window.bearing_context = None
@@ -194,12 +198,15 @@ class ProjectFileController:
         window.bearing_calculation = None
 
         window.rotor_page = RotorModelPage(result.model)
-        window.bearing_page = BearingStudioPage(
-            result.model,
-            window.bearing,
-            catalog=window.catalog,
-            bearing_index=window.bearing_index,
-        )
+        if has_bearing_station:
+            window.bearing_page = BearingStudioPage(
+                result.model,
+                window.bearing,
+                catalog=window.catalog,
+                bearing_index=window.bearing_index,
+            )
+        else:
+            window.bearing_page = EmptyBearingStudioPage(result.model)
         window.results_page = AnalysisResultsPage(result.model)
         window.stack.addWidget(window.rotor_page)
         window.stack.addWidget(window.bearing_page)
@@ -208,12 +215,19 @@ class ProjectFileController:
         window.rotor_page.validate_requested.connect(window.validate_model)
         window._wire_bearing_page()
 
+        # Defer destruction only after the new page graph and signal connections are
+        # complete. Bound QObject slots then disconnect automatically and no global
+        # selection signal can observe a half-rebuilt workspace.
+        for page in old_pages:
+            page.deleteLater()
+
         self.state.native_path = result.native_path
         self.state.source_path = result.source_path
         self.state.source_format = result.source_format
         self.state.clean_fingerprint = project_fingerprint(result.model) if clean else ""
         self._update_identity()
         window.sidebar.set_active("rotor")
+        window.stack.setCurrentWidget(window.rotor_page)
 
     def _update_identity(self) -> None:
         window = self.window
