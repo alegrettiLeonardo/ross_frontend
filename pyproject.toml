@@ -20,9 +20,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-qt>=4.4"]
+package = ["pyinstaller>=6.16,<7"]
 
 [project.scripts]
-ross-studio = "ross_studio.app:launch"
+ross-studio = "ross_studio.frozen_entry:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ross_studio"]
