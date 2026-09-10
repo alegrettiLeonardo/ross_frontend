@@ -4,10 +4,12 @@ from collections import Counter
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QTableWidget,
@@ -18,7 +20,8 @@ from PySide6.QtWidgets import (
 
 from ..domain import EngineeringError
 from ..icons import engineering_icon
-from ..model_builder_service import RotorModelMutationService
+from ..model_builder_service import MutationAudit, RotorModelMutationService
+from ..model_entity_dialogs import ProbeEditorDialog, ShaftSectionEditorDialog, SupportEditorDialog
 from ..models import ProjectModel
 from ..ross_backend import RossModelBuilder
 from ..ross_native_view import RossNativeRotorView
@@ -33,10 +36,11 @@ from ..workspace_commands import WORKSPACE_COMMANDS
 class RotorModelPage(QWidget):
     """Single engineering model workspace controlled by the left navigation.
 
-    ROSS Studio 0.12 removes the duplicated horizontal model tabs. The left sidebar is
-    the only primary navigation. A shared selection model synchronizes the model-driven
-    sketch and the currently visible engineering table. ROSS Studio 0.14 routes every
-    enabled domain edit through the transactional strict-Ross model-builder service.
+    The left sidebar is the only primary model navigator. A shared selection model
+    synchronizes the model-driven sketch and engineering tables. ROSS Studio 0.14
+    routes every enabled domain edit through ``RotorModelMutationService`` so an
+    edit cannot reach the live project unless domain validation, exact-node mapping
+    and a strict ROSS assembly all succeed first.
     """
 
     run_requested = Signal()
@@ -62,8 +66,10 @@ class RotorModelPage(QWidget):
         self.model_builder = RotorModelMutationService()
         self.editor_tables: dict[str, QTableWidget] = {}
         self.editor_pages: dict[str, QWidget] = {}
+        self.editor_action_buttons: dict[str, dict[str, QPushButton]] = {}
         self._table_ref_builders: dict[str, list[RotorEntityRef]] = {}
         self._mesh_edit_guard = False
+        self._current_editor_key = "shaft"
 
         root = QHBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
@@ -119,21 +125,14 @@ class RotorModelPage(QWidget):
         self.workspace_title.setObjectName("cardHeader")
         heading_row.addWidget(self.workspace_title)
         heading_row.addStretch(1)
-        mesh_help = QLabel("Sidebar = model navigation · click sketch ↔ table selection")
+        mesh_help = QLabel("Sidebar = model navigation · click sketch ↔ table selection · edits are strict-Ross qualified")
         mesh_help.setObjectName("muted")
         heading_row.addWidget(mesh_help)
         data_layout.addLayout(heading_row)
 
         self.editor_stack = QStackedWidget()
         data_layout.addWidget(self.editor_stack, 1)
-        self._add_editor("shaft", self._segments_page())
-        self._add_editor("disks", self._disks_page())
-        self._add_editor("supports", self._supports_page())
-        self._add_editor("seals", self._seals_page())
-        self._add_editor("couplings", self._couplings_page())
-        self._add_editor("loads", self._loads_page())
-        self._add_editor("ump", self._ump_page())
-        self._add_editor("probes", self._probes_page())
+        self._populate_editors()
         center.addWidget(data_card, 7)
 
         right = QVBoxLayout()
@@ -158,22 +157,60 @@ class RotorModelPage(QWidget):
         WORKSPACE_COMMANDS.view_mode_requested.connect(self.set_view_mode)
         self.select_editor("shaft")
 
+    def _populate_editors(self) -> None:
+        self._add_editor("shaft", self._segments_page())
+        self._add_editor("disks", self._disks_page())
+        self._add_editor("supports", self._supports_page())
+        self._add_editor("seals", self._seals_page())
+        self._add_editor("couplings", self._couplings_page())
+        self._add_editor("loads", self._loads_page())
+        self._add_editor("ump", self._ump_page())
+        self._add_editor("probes", self._probes_page())
+
     def _add_editor(self, key: str, page: QWidget) -> None:
         self.editor_pages[key] = page
         self.editor_stack.addWidget(page)
 
-    @staticmethod
-    def _toolbar() -> QHBoxLayout:
-        """Show future model-builder actions without pretending they are functional."""
+    def _toolbar(self, key: str) -> QHBoxLayout:
+        """Expose only actions whose engineering transaction is implemented."""
         top = QHBoxLayout()
         top.addStretch(1)
-        for text, icon_name in (("Add", "plus"), ("Delete", "trash"), ("Import…", "import")):
+        enabled = {
+            "shaft": {"edit"},
+            "supports": {"edit"},
+            "probes": {"add", "edit", "delete"},
+        }.get(key, set())
+        buttons: dict[str, QPushButton] = {}
+        for action, text, icon_name in (
+            ("add", "Add", "plus"),
+            ("edit", "Edit", "gear"),
+            ("delete", "Delete", "trash"),
+            ("import", "Import…", "import"),
+        ):
             button = QPushButton(text)
             button.setObjectName("outlineButton")
             button.setIcon(engineering_icon(icon_name, 18))
-            button.setEnabled(False)
-            button.setToolTip("Enabled in the Complete Rotor Model Builder tranche; no silent edit is performed.")
+            button.setEnabled(action in enabled)
+            if action not in enabled:
+                if key == "shaft" and action in {"add", "delete"}:
+                    button.setToolTip(
+                        "Shaft section insertion/deletion is blocked until the user chooses an explicit downstream absolute-coordinate remapping policy."
+                    )
+                elif key == "disks":
+                    button.setToolTip("Disk/mass editing is the next Complete Rotor Model Builder sub-gate; current rows remain physically auditable.")
+                elif key == "ump":
+                    button.setToolTip("UMP is derived from its qualified engineering source and is not edited as a detached duplicate here.")
+                else:
+                    button.setToolTip("This editor action is not yet qualified; no silent edit is performed.")
+            if action == "add":
+                button.clicked.connect(lambda checked=False, k=key: self._add_entity(k))
+            elif action == "edit":
+                button.clicked.connect(lambda checked=False, k=key: self._edit_entity(k))
+            elif action == "delete":
+                button.clicked.connect(lambda checked=False, k=key: self._delete_entity(k))
+            buttons[action] = button
             top.addWidget(button)
+        self.editor_action_buttons[key] = buttons
         return top
 
     @staticmethod
@@ -197,7 +234,7 @@ class RotorModelPage(QWidget):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-        layout.addLayout(self._toolbar())
+        layout.addLayout(self._toolbar(key))
         layout.addWidget(table, 1)
         self.editor_tables[key] = table
         table.itemSelectionChanged.connect(lambda k=key: self._table_selection_changed(k))
@@ -243,7 +280,8 @@ class RotorModelPage(QWidget):
         table = self._readonly_table(headers, rows, stretch_col=8)
         self.segment_table = table
         self._table_ref_builders["shaft"] = refs
-        # Only the explicit FE-count column is presently an active domain editor.
+        # Direct in-cell editing remains limited to FE count. Full local OD/ID editing
+        # is available through the qualified Edit dialog.
         for row in range(table.rowCount()):
             cell = table.item(row, 6)
             cell.setFlags(cell.flags() | Qt.ItemFlag.ItemIsEditable)
@@ -273,7 +311,8 @@ class RotorModelPage(QWidget):
                     f"{mass.od_mm:g}",
                     f"{id_kg_m2:.6g}",
                     f"{ip_kg_m2:.6g}",
-                    "DiskElement",
+                    "—",
+                    "DiskElement equivalent",
                 ])
                 refs.append(RotorEntityRef("disks", index, mass.name, mass.center_mm))
             offset = len(engineering.distributed_masses)
@@ -289,11 +328,33 @@ class RotorModelPage(QWidget):
                     "—",
                     f"{disk.id_kg_m2:.6g}",
                     f"{disk.ip_kg_m2:.6g}",
+                    "—",
                     "DiskElement",
                 ])
                 refs.append(RotorEntityRef("disks", offset + local_index, disk.name, disk.position_mm))
+            point_offset = offset + len(engineering.disks)
+            for local_index, mass in enumerate(engineering.point_masses):
+                rows.append([
+                    mass.name,
+                    "Concentrated mass [Concent]",
+                    "—",
+                    f"{mass.position_mm:g}",
+                    plan.node_for(mass.position_mm),
+                    "—",
+                    f"{mass.mass_kg:g}",
+                    "—",
+                    f"{mass.ix_kg_m2:.6g}",
+                    f"{mass.iy_kg_m2:.6g}",
+                    f"{mass.iz_kg_m2:.6g}",
+                    "qualified concentrated DiskElement",
+                ])
+                refs.append(RotorEntityRef("disks", point_offset + local_index, mass.name, mass.position_mm))
         table = self._readonly_table(
-            ["Name", "Engineering body", "Start (mm)", "Center / x (mm)", "ROSS Node", "Length (mm)", "Mass (kg)", "OD (mm)", "Id (kg·m²)", "Ip (kg·m²)", "ROSS realization"],
+            [
+                "Name", "Engineering body", "Start (mm)", "Center / x (mm)", "ROSS Node",
+                "Length (mm)", "Mass (kg)", "OD (mm)", "Id / Ix (kg·m²)",
+                "Ip / Iy (kg·m²)", "Iz (kg·m²)", "ROSS realization",
+            ],
             rows,
             stretch_col=0,
         )
@@ -408,12 +469,137 @@ class RotorModelPage(QWidget):
         self._table_ref_builders["probes"] = refs
         return self._table_page("probes", table)
 
+    def _selected_row(self, key: str) -> int:
+        table = self.editor_tables.get(key)
+        return -1 if table is None else table.currentRow()
+
+    def _edit_entity(self, key: str) -> None:
+        engineering = self.project.engineering
+        if engineering is None:
+            self.status_message.emit("Model edit rejected: engineering domain is not loaded")
+            return
+        row = self._selected_row(key)
+        if row < 0:
+            self.status_message.emit(f"Select a {key} row before Edit")
+            return
+
+        try:
+            if key == "shaft":
+                dialog = ShaftSectionEditorDialog(engineering.shaft_sections[row], self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                preview = self.model_builder.preview_update(engineering, "shaft", row, dialog.changes())
+            elif key == "supports":
+                support = engineering.supports[row]
+                bearing_name = engineering.bearings[support.bearing_index].name
+                dialog = SupportEditorDialog(support, bearing_name, self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                preview = self.model_builder.preview_update(engineering, "support", row, dialog.changes())
+            elif key == "probes":
+                dialog = ProbeEditorDialog(engineering.probes[row], total_length_mm=engineering.total_length_mm, parent=self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                preview = self.model_builder.preview_update(engineering, "probe", row, dialog.changes())
+            else:
+                self.status_message.emit(f"{self.EDITOR_TITLES.get(key, key)} editing is not yet qualified")
+                return
+            audit = self.model_builder.commit(engineering, preview)
+        except (EngineeringError, ValueError) as exc:
+            self.status_message.emit(f"Model edit rejected: {exc}")
+            return
+        self._after_model_commit(key, audit, selected_row=row)
+
+    def _add_entity(self, key: str) -> None:
+        engineering = self.project.engineering
+        if engineering is None:
+            self.status_message.emit("Model add rejected: engineering domain is not loaded")
+            return
+        if key != "probes":
+            self.status_message.emit(f"Add is not yet qualified for {self.EDITOR_TITLES.get(key, key)}")
+            return
+        dialog = ProbeEditorDialog(total_length_mm=engineering.total_length_mm, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        record = dialog.record()
+        if not record.name:
+            self.status_message.emit("Probe add rejected: probe name cannot be empty")
+            return
+        try:
+            preview = self.model_builder.preview_add(engineering, "probe", record)
+            audit = self.model_builder.commit(engineering, preview)
+        except (EngineeringError, ValueError) as exc:
+            self.status_message.emit(f"Probe add rejected: {exc}")
+            return
+        self._after_model_commit("probes", audit, selected_row=len(engineering.probes) - 1)
+
+    def _delete_entity(self, key: str) -> None:
+        engineering = self.project.engineering
+        if engineering is None:
+            self.status_message.emit("Model delete rejected: engineering domain is not loaded")
+            return
+        if key != "probes":
+            self.status_message.emit(f"Delete is not yet qualified for {self.EDITOR_TITLES.get(key, key)}")
+            return
+        row = self._selected_row(key)
+        if row < 0:
+            self.status_message.emit("Select a probe row before Delete")
+            return
+        probe = engineering.probes[row]
+        answer = QMessageBox.question(
+            self,
+            "Delete Probe",
+            f"Delete {probe.name!r} at {probe.position_mm:g} mm? The rotor will be strict-Ross qualified again before commit.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            preview = self.model_builder.preview_delete(engineering, "probe", row)
+            audit = self.model_builder.commit(engineering, preview)
+        except (EngineeringError, ValueError) as exc:
+            self.status_message.emit(f"Probe delete rejected: {exc}")
+            return
+        target_row = min(row, len(engineering.probes) - 1)
+        self._after_model_commit("probes", audit, selected_row=target_row)
+
+    def _rebuild_editors(self, active_key: str, selected_row: int = -1) -> None:
+        self._mesh_edit_guard = True
+        while self.editor_stack.count():
+            widget = self.editor_stack.widget(0)
+            self.editor_stack.removeWidget(widget)
+            widget.deleteLater()
+        self.editor_tables.clear()
+        self.editor_pages.clear()
+        self.editor_action_buttons.clear()
+        self._table_ref_builders.clear()
+        self._populate_editors()
+        self._mesh_edit_guard = False
+        self.select_editor(active_key)
+        if selected_row >= 0:
+            self._select_table_row(active_key, selected_row)
+
+    def _after_model_commit(self, key: str, audit: MutationAudit, *, selected_row: int = -1) -> None:
+        self.project.touch()
+        self.physical_label.setText(f"Physical Sections  {self.project.physical_sections}")
+        self.fem_label.setText(f"ROSS ShaftElements  {self.project.ross_shaft_elements}")
+        self._rebuild_editors(key, selected_row)
+        self.sketch.update()
+        if self.native_view is not None:
+            self.native_view._loaded = False
+        self.status_message.emit(
+            f"{audit.entity_kind} {audit.operation} committed after strict ROSS qualification · "
+            f"{audit.shaft_elements} ShaftElements / {audit.shaft_nodes} shaft nodes"
+        )
+
     def select_editor(self, key: str) -> None:
         normalized = "shaft" if key in {"rotor", "home"} else key
         page = self.editor_pages.get(normalized)
         if page is None:
             normalized = "shaft"
             page = self.editor_pages[normalized]
+        self._current_editor_key = normalized
         self.editor_stack.setCurrentWidget(page)
         self.workspace_title.setText(self.EDITOR_TITLES[normalized])
 
@@ -493,18 +679,4 @@ class RotorModelPage(QWidget):
             self.status_message.emit(f"FE discretization rejected: {exc}")
             return
 
-        counts = self._effective_section_counts()
-        self._mesh_edit_guard = True
-        for index, current in enumerate(self.project.engineering.shaft_sections):
-            table.item(index, 7).setText(str(counts[current.section]))
-        self._mesh_edit_guard = False
-        self.project.touch()
-        self.fem_label.setText(f"ROSS ShaftElements  {self.project.ross_shaft_elements}")
-        self.sketch.update()
-        # A native ROSS plot is a snapshot of the strict rotor; require a fresh build.
-        if self.native_view is not None:
-            self.native_view._loaded = False
-        self.status_message.emit(
-            f"Section {section.section}: strict ROSS-qualified base mesh {section.fe_elements} element(s); "
-            f"effective rotor {audit.shaft_elements} ShaftElements / {audit.shaft_nodes} shaft nodes"
-        )
+        self._after_model_commit("shaft", audit, selected_row=row)
