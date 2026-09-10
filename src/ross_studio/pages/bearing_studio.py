@@ -13,10 +13,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..bearing_workspace import BearingStation, BearingWorkspaceService
+from ..bearing_workspace import BearingStation, BearingStationInventory, BearingWorkspaceService
 from ..domain import AdapterStatus, BearingGroup
 from ..icons import engineering_icon
 from ..models import BearingModel, ProjectModel
+from ..rotor_selection import RotorEntityRef, WORKSPACE_SELECTION
 from ..services import BearingCatalogService
 from ..widgets import BearingCoefficientChart, Card, ProjectInfoCard, SectionCard, configure_table, item
 from .thd_results import THDResultTab
@@ -28,7 +29,8 @@ class BearingStudioPage(QWidget):
     A physical bearing station is selected first. The ROSS calculation family/class
     is selected independently after that. The application service owns the
     Calculate -> Preview -> Apply transaction and receives the explicit station
-    index emitted by this page.
+    index emitted by this page. The station selector shares the same engineering
+    selection identity used by the rotor sketch.
     """
 
     status_message = Signal(str)
@@ -60,10 +62,16 @@ class BearingStudioPage(QWidget):
         self.catalog = catalog or BearingCatalogService()
         self.bearing_index = int(bearing_index)
         self.workspace = BearingWorkspaceService()
+        self.selection = WORKSPACE_SELECTION
         self.stations: tuple[BearingStation, ...] = (
             self.workspace.stations(project.engineering) if project.engineering is not None else ()
         )
         self.station = next((row for row in self.stations if row.index == self.bearing_index), None)
+        self.inventory: BearingStationInventory | None = (
+            self.workspace.inventory(project.engineering, self.bearing_index)
+            if project.engineering is not None and self.station is not None
+            else None
+        )
         try:
             self.current_group = BearingGroup(bearing.group)
         except ValueError:
@@ -183,15 +191,41 @@ class BearingStudioPage(QWidget):
         right_layout.addWidget(self._bearing_info_card(), 1)
         right_layout.addWidget(self._actions_card())
 
+        self.selection.selection_changed.connect(self._workspace_selection_changed)
         self.set_group(self.current_group.value, announce=False)
+        self._workspace_selection_changed(self.selection.current)
 
     def _bearing_combo_changed(self, row: int) -> None:
         index = self.bearing_selector.itemData(row)
         if index is None:
             return
         index = int(index)
+        station = next((candidate for candidate in self.stations if candidate.index == index), None)
+        if station is not None:
+            self.selection.select(RotorEntityRef("bearings", index, station.name, station.position_mm))
         if index != self.bearing_index:
             self.bearing_selected.emit(index)
+
+    def _workspace_selection_changed(self, ref: RotorEntityRef | None) -> None:
+        """Mirror rotor-sketch bearing selection into the physical station selector."""
+        engineering = self.project.engineering
+        if ref is None or ref.kind != "bearings" or engineering is None:
+            return
+        try:
+            anchor = self.workspace.anchor_index(engineering, ref.index)
+            station = self.workspace.station(engineering, anchor)
+        except Exception:
+            # Invalid/orphan axial elements are fail-closed by the domain service.
+            # The UI does not silently associate them with a nearest bearing.
+            return
+        row = self.bearing_selector.findData(anchor)
+        if row < 0:
+            return
+        if row != self.bearing_selector.currentIndex():
+            self.bearing_selector.setCurrentIndex(row)
+        elif ref.index != anchor:
+            # Canonicalize an axial auxiliary selection back to its radial station.
+            self.selection.select(RotorEntityRef("bearings", anchor, station.name, station.position_mm))
 
     def set_group(self, group: str, *, announce: bool = True) -> None:
         selected_group = BearingGroup(group)
@@ -375,26 +409,40 @@ class BearingStudioPage(QWidget):
         return page
 
     def _bearing_info_card(self) -> QWidget:
-        card = SectionCard("Selected Bearing")
+        card = SectionCard("Selected Bearing Station")
         grid = QGridLayout()
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(9)
         support = "Grounded / rigid" if self.station is None or not self.station.support_names else ", ".join(self.station.support_names)
         ross_node = "—" if self.station is None or self.station.ross_node is None else str(self.station.ross_node)
+        radial = "—"
+        axial = "None"
+        if self.inventory is not None:
+            anchor = self.inventory.radial_anchor
+            radial = f"#{anchor.element_index + 1} {anchor.source_model} → {anchor.ross_class}"
+            if self.inventory.axial_auxiliaries:
+                axial = "; ".join(
+                    f"#{element.element_index + 1} {element.source_model} → {element.ross_class}"
+                    for element in self.inventory.axial_auxiliaries
+                )
         rows = [
-            ("Index", str(self.bearing_index)),
+            ("Station Index", str(self.bearing_index + 1)),
             ("Bearing Name", self.bearing.name),
             ("Current Model", self.bearing.bearing_type),
             ("ROSS Class", self.bearing.ross_class),
             ("Node Position", self.bearing.node_position),
             ("ROSS Node", ross_node),
             ("Support", support),
+            ("Radial Element", radial),
+            ("Axial Elements", axial),
         ]
         for row, (key, value) in enumerate(rows):
             label = QLabel(key)
             label.setObjectName("muted")
             grid.addWidget(label, row, 0)
-            grid.addWidget(QLabel(value), row, 1)
+            field = QLabel(value)
+            field.setWordWrap(True)
+            grid.addWidget(field, row, 1)
         grid.setColumnStretch(1, 1)
         card.root.addLayout(grid)
         return card
