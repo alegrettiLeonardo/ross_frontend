@@ -3,11 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 
 from ross_studio.app import RossStudioWindow
 from ross_studio.dyrobes_import import DyrobesImportError, load_dyrobes_project
-from ross_studio.models import ProjectModel, load_reference_project_model
+from ross_studio.models import load_reference_project_model
 from ross_studio.project_file_controller import ProjectFileController
 from ross_studio.project_file_service import ProjectFileService, ProjectOpenError
 from ross_studio.project_io import load_project, new_project_model, save_project
@@ -131,7 +132,12 @@ def test_unknown_raw_dyrobes_layout_fails_closed_instead_of_guessing(tmp_path: P
         ProjectFileService().open_path(path)
 
 
-def test_arquivo_menu_and_toolbar_expose_required_commands_and_shortcuts(qtbot) -> None:
+def test_arquivo_menu_and_toolbar_expose_required_commands_and_shortcuts(qtbot, monkeypatch) -> None:
+    import ross_studio.file_toolbar as file_toolbar
+
+    calls: list[str] = []
+    monkeypatch.setattr(file_toolbar, "_dispatch", calls.append)
+
     window = RossStudioWindow()
     qtbot.addWidget(window)
     window.show()
@@ -144,9 +150,13 @@ def test_arquivo_menu_and_toolbar_expose_required_commands_and_shortcuts(qtbot) 
     assert toolbar.file_actions["import"].shortcut().toString() == "Ctrl+I"
     assert toolbar.file_actions["save"].shortcut() == QKeySequence(QKeySequence.StandardKey.Save)
     assert toolbar.file_actions["save_as"].shortcut() == QKeySequence(QKeySequence.StandardKey.SaveAs)
-    assert toolbar.buttons["new"].receivers(toolbar.buttons["new"].clicked) >= 1
-    assert toolbar.buttons["open"].receivers(toolbar.buttons["open"].clicked) >= 1
-    assert toolbar.buttons["save"].receivers(toolbar.buttons["save"].clicked) >= 1
+
+    qtbot.mouseClick(toolbar.buttons["new"], Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(toolbar.buttons["open"], Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(toolbar.buttons["save"], Qt.MouseButton.LeftButton)
+    toolbar.file_actions["import"].trigger()
+    toolbar.file_actions["save_as"].trigger()
+    assert calls == ["new", "open", "save", "import", "save_as"]
 
 
 def test_controller_open_path_rebuilds_workspace_and_updates_identity(qtbot) -> None:
