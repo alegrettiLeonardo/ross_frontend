@@ -158,6 +158,9 @@ def main() -> int:
     else:
         gates["thrust_not_silently_lateralized"] = False
 
+    # Qualification predicates may be produced by NumPy (np.bool_). Normalize
+    # reporting only; the scientific predicates and pass/fail thresholds are unchanged.
+    gates = {name: bool(value) for name, value in gates.items()}
     passed = all(gates.values())
     payload = {
         "status": "PASS" if passed else "FAIL",
