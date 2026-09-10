@@ -2,7 +2,12 @@
 
 Baseline: `612069bb9b4f3613be098a676dc4b5c8ed0af08a`; main CI run
 34420814483 succeeded, including all scientific gates and artifact publication.
-No ROSS upgrade: `ross-rotordynamics==2.3.0` remains pinned.
+Candidate pre-promotion CI run `34465849721` also succeeded with the complete
+THD desktop workflow enabled only for the qualification test. After that gate,
+PlainJournal, TiltingPad and SqueezeFilmDamper were promoted in the production
+registry and the test-only capability override was removed. The complete
+post-promotion CI is the release gate before merge. No ROSS upgrade:
+`ross-rotordynamics==2.3.0` remains pinned.
 
 ## Workflow
 
@@ -89,15 +94,16 @@ operating_condition, speed_rpm, ross_api_contract and solved_kc_cache.
 
 ## Gates
 
-`tests/test_thd_desktop_010.py` uses actual dialogs, clicked Qt buttons, worker
-execution, native ROSS, two speed stations per lateral class, preview field data,
-Apply, flexible support, strict builder and finite modal results. General and
-all pre-existing scientific tests remain active. The candidate catalog is
-exposed only inside the pre-promotion test fixture; production stays PLANNED
-until a complete candidate CI succeeds. Promotion must remove that test override
-and run the complete CI again using production capabilities.
+`tests/test_thd_desktop_010.py` uses the **production capability registry**,
+actual dialogs, clicked Qt buttons, worker execution, native ROSS, two speed
+stations per lateral class, preview field data, Apply, flexible support, strict
+builder and finite modal results. It also asserts that the three lateral classes
+are `VALIDATED`, while ThrustPad remains `PLANNED` and AMB remains `BLOCKED`.
+General and all pre-existing scientific tests remain active. There is no
+pre-promotion registry monkeypatch after capability promotion.
 
 The CI artifact includes `thd_desktop_qualification.json` and extends
 `thd_bearing_studio_qualification.json` with desktop gates, input contracts,
 convergence and field availability. All prior UMP, Concent, OP-W60, golden and
-isolation gates remain unchanged.
+isolation gates remain unchanged. A green complete CI on the promoted production
+registry is mandatory before merge into `main`.
