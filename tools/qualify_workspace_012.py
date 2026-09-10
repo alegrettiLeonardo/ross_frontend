@@ -30,7 +30,10 @@ READY = {
 
 
 def main() -> int:
-    assert ross_studio.__version__ == "0.12.0"
+    # This is the 0.12 mesh/workspace regression gate executed against the current
+    # release candidate. The scientific expectations are unchanged; only the
+    # application version advances with the Bearing Studio 2.0 tranche.
+    assert ross_studio.__version__ == "0.13.0"
     assert ross.__version__ == "2.3.0"
 
     project = load_irdin_project(FIXTURE)
@@ -54,8 +57,6 @@ def main() -> int:
     assert len(refined_shaft) == refined_plan.shaft_element_count
     assert all(element.x1_mm > element.x0_mm for element in refined_shaft)
 
-    # Build the native ROSS view from an unmodified qualified OP-W60 rotor so this
-    # gate proves the plotting API reflects the same 27-element strict baseline.
     native_project = load_irdin_project(FIXTURE)
     native = RossRotorPlotService().build_figure(native_project)
     assert native.shaft_elements == 27
@@ -76,6 +77,7 @@ def main() -> int:
 
     payload = {
         "status": "PASS",
+        "gate_origin": "0.12.0 mesh/workspace regression",
         "ross_studio_version": ross_studio.__version__,
         "ross_version": ross.__version__,
         "reference_case": project.name,
