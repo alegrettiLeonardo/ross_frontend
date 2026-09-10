@@ -7,24 +7,34 @@ ROOT = Path(SPECPATH).parent
 SRC = ROOT / "src"
 ENTRY = SRC / "ross_studio" / "frozen_entry.py"
 
+# ROSS imports ccp through its labyrinth-seal module during top-level package
+# initialization. ccp loads Pint unit-definition/data files at runtime, so collecting
+# only Python modules is insufficient for a frozen executable. Keep both packages as
+# complete runtime units instead of chasing individual resource files one by one.
 ross_datas, ross_binaries, ross_hiddenimports = collect_all("ross")
+ccp_datas, ccp_binaries, ccp_hiddenimports = collect_all("ccp")
 
-hiddenimports = list(ross_hiddenimports) + [
+hiddenimports = list(dict.fromkeys([
+    *ross_hiddenimports,
+    *ccp_hiddenimports,
     # Loaded lazily by RossNativeRotorView; explicit inclusion is required so the
     # packaged executable preserves the native Plotly/Qt audit view.
     "PySide6.QtWebEngineCore",
     "PySide6.QtWebEngineWidgets",
     "PySide6.QtWebChannel",
-]
+]))
 
-datas = list(ross_datas) + [
+datas = [
+    *ross_datas,
+    *ccp_datas,
     (str(SRC / "ross_studio" / "resources"), "ross_studio/resources"),
 ]
+binaries = [*ross_binaries, *ccp_binaries]
 
 a = Analysis(
     [str(ENTRY)],
     pathex=[str(SRC)],
-    binaries=list(ross_binaries),
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
