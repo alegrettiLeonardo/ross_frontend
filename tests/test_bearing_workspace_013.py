@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QDialog
 from ross_studio.bearing_workspace import BearingWorkspaceService
 from ross_studio.legacy_import import load_irdin_project
 from ross_studio.ross_backend import RossModelBuilder
+from ross_studio.topology import NodeInsertionService
 
 
 FIXTURE = Path(__file__).parents[1] / "src" / "ross_studio" / "resources" / "OP-W60-500-60Hz-IC611-P3.txt"
@@ -17,11 +18,16 @@ FIXTURE = Path(__file__).parents[1] / "src" / "ross_studio" / "resources" / "OP-
 def test_bearing_workspace_exposes_both_op_w60_physical_stations() -> None:
     project = load_irdin_project(FIXTURE)
     stations = BearingWorkspaceService.stations(project)
+    plan = NodeInsertionService.plan(project)
 
     assert len(stations) == 2
     assert [station.index for station in stations] == [0, 1]
     assert [station.position_mm for station in stations] == pytest.approx([467.8, 2202.2])
-    assert [station.ross_node for station in stations] == [5, 23]
+    assert all(station.ross_node is not None for station in stations)
+    assert len({station.ross_node for station in stations}) == 2
+    assert [station.ross_node for station in stations] == [
+        plan.node_for(station.position_mm) for station in stations
+    ]
     assert all(station.source_model == "BearingElement" for station in stations)
     assert stations[0].support_names
     assert stations[1].support_names
