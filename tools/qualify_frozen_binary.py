@@ -48,7 +48,7 @@ def executable_path(dist_root: Path) -> Path:
 def _run_json_gate(exe: Path, args: list[str], output: Path, label: str) -> dict[str, object]:
     output = output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run([str(exe), *args, str(output)], check=False, timeout=240)
+    proc = subprocess.run([str(exe), *args, str(output)], check=False, timeout=300)
     if not output.is_file():
         raise SystemExit(f"Frozen executable returned {proc.returncode} without producing {output} for {label}")
     payload = json.loads(output.read_text(encoding="utf-8"))
@@ -84,6 +84,30 @@ def main() -> int:
     assert set(self_payload["executable_classes"]) == EXPECTED_EXECUTABLE, self_payload
     assert self_payload["blocked_classes"] == ["MagneticBearingElement"], self_payload
     assert self_payload["validation_errors"] == [], self_payload
+
+    io_output = output.with_name(output.stem + "_project_io" + output.suffix)
+    io_payload = _run_json_gate(
+        exe,
+        ["--project-io-self-test", "--project-io-output"],
+        io_output,
+        "project file I/O",
+    )
+    assert io_payload["ross_version"] == "2.3.0", io_payload
+    assert io_payload["ross_studio_version"] == "0.14.2", io_payload
+    assert io_payload["irdin_sections"] == 15, io_payload
+    assert io_payload["irdin_shaft_elements"] == 27, io_payload
+    assert io_payload["irdin_bearings"] == 2, io_payload
+    assert io_payload["irdin_supports"] == 2, io_payload
+    assert io_payload["native_roundtrip_equal"] is True, io_payload
+    assert io_payload["blank_roundtrip_empty"] is True, io_payload
+    assert io_payload["dyrobes_model_summary_sections"] == 4, io_payload
+    assert io_payload["dyrobes_model_summary_base_elements"] == 8, io_payload
+    assert io_payload["dyrobes_model_summary_disks"] == 1, io_payload
+    # This gate distinguishes the public labelled Model Summary corpus from raw
+    # vendor .rot files. Raw layouts remain fail-closed until representative files
+    # with provenance are supplied; a frozen build must never silently promote them.
+    assert io_payload["dyrobes_raw_vendor_cases"] == 0, io_payload
+    assert io_payload["dyrobes_raw_vendor_gate"] == "WAITING_FOR_REPRESENTATIVE_FILES", io_payload
 
     gui_output = output.with_name(output.stem + "_gui" + output.suffix)
     gui_payload = _run_json_gate(
@@ -122,6 +146,7 @@ def main() -> int:
         "platform": platform.system(),
         "executable": str(exe),
         "scientific": self_payload,
+        "project_io": io_payload,
         "gui": gui_payload,
     }
     print(json.dumps(combined, indent=2, ensure_ascii=False))
