@@ -39,6 +39,8 @@ jobs:
         run: python tools/qualify_thrust_pad.py
       - name: Qualify interactive engineering workspace and FE mesh
         run: python tools/qualify_workspace_012.py
+      - name: Qualify Bearing Studio 2.0 station transaction isolation
+        run: python tools/qualify_bearing_workspace.py
       - name: Run production-resolution OP-W60 pipeline
         run: python tools/qualify_op_w60_pipeline.py
       - name: Enforce ROSS against regenerated RotorDin golden
@@ -61,6 +63,7 @@ jobs:
             artifacts/thrust_pad_qualification.json
             artifacts/thrust_pad_desktop_qualification.json
             artifacts/workspace_012_qualification.json
+            artifacts/bearing_workspace_qualification.json
             artifacts/op_w60_pipeline_summary.json
             artifacts/op_w60_ross_vs_rotordin_correlation.json
             artifacts/op_w60_ross_vs_rotordin_correlation.csv
