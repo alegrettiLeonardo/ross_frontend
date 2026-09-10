@@ -62,6 +62,7 @@ class ShaftSection:
     id_left_mm: float = 0.0
     id_right_mm: float | None = None
     material: str = "Steel"
+    fe_elements: int = 1
 
     @property
     def odr_mm(self) -> float:
@@ -80,6 +81,14 @@ class ShaftSection:
             raise EngineeringError(f"Shaft section {self.section}: inner diameter cannot be negative.")
         if self.id_left_mm >= self.od_left_mm or self.idr_mm >= self.odr_mm:
             raise EngineeringError(f"Shaft section {self.section}: inner diameter must be smaller than outer diameter.")
+        if isinstance(self.fe_elements, bool) or not isinstance(self.fe_elements, int) or self.fe_elements < 1:
+            raise EngineeringError(
+                f"Shaft section {self.section}: FE element count must be an integer >= 1; received {self.fe_elements!r}."
+            )
+        if self.fe_elements > 1000:
+            raise EngineeringError(
+                f"Shaft section {self.section}: FE element count {self.fe_elements} exceeds the 1000-element safety limit per physical section."
+            )
 
 
 @dataclass(slots=True, frozen=True)
@@ -295,6 +304,11 @@ class RotorProject:
     def physical_section_count(self) -> int:
         return len(self.shaft_sections)
 
+    @property
+    def requested_shaft_element_count(self) -> int:
+        """User-requested base mesh before exact node insertion for point entities."""
+        return sum(section.fe_elements for section in self.shaft_sections)
+
     def section_boundaries_mm(self) -> list[float]:
         values = [0.0]
         x = 0.0
@@ -304,7 +318,7 @@ class RotorProject:
         return values
 
     def topology_split_positions_mm(self) -> list[float]:
-        """Return the deterministic FE topology after explicit physical node insertion."""
+        """Return base FE mesh plus all exact physical node insertions."""
         from .topology import NodeInsertionService
 
         return list(NodeInsertionService.plan(self).positions_mm)
