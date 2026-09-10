@@ -8,7 +8,7 @@ from .topology import NodeInsertionService
 
 @dataclass(slots=True, frozen=True)
 class BearingStation:
-    """One selectable physical bearing station in the engineering model."""
+    """One selectable physical radial-bearing station in the engineering model."""
 
     index: int
     name: str
@@ -21,20 +21,28 @@ class BearingStation:
     @property
     def display_label(self) -> str:
         support = f" · support: {', '.join(self.support_names)}" if self.support_names else ""
-        return f"{self.name} · x={self.position_mm:g} mm · node {self.ross_node} · {self.source_model}{support}"
+        node = "unresolved" if self.ross_node is None else str(self.ross_node)
+        return f"{self.name} · x={self.position_mm:g} mm · node {node} · {self.source_model}{support}"
 
 
 class BearingWorkspaceService:
-    """Resolve bearing identity independently from the selected calculation class.
+    """Resolve physical bearing-station identity independently from model class.
 
-    Bearing Studio 2.0 treats the physical station as the first selection. The
-    selected ROSS calculation class is a second, independent choice. This avoids the
-    previous implicit ``bearing_index=0`` contract and makes Calculate/Preview/Apply
-    transactions traceable to one explicit DE/NDE (or future) bearing station.
+    Bearing Studio 2.0 treats the physical radial station as the first selection and
+    the ROSS calculation class as a second, independent choice. Axial ThrustPad
+    elements created by Apply are auxiliary elements at an existing station; they
+    must never appear as a new DE/NDE station or become an implicit editing anchor.
     """
 
     @staticmethod
-    def resolve_index(project: RotorProject, index: int) -> int:
+    def _is_station_anchor(bearing) -> bool:
+        # The qualified ThrustPad adapter stores an axial Kzz/Czz table and adds a
+        # separate BearingSpec at the selected radial station. That spec is physical
+        # rotor content, but not a new selectable shaft station.
+        return not bool(bearing.metadata.get("axial_coefficients"))
+
+    @classmethod
+    def resolve_index(cls, project: RotorProject, index: int) -> int:
         try:
             resolved = int(index)
         except (TypeError, ValueError) as exc:
@@ -42,6 +50,10 @@ class BearingWorkspaceService:
         if resolved < 0 or resolved >= len(project.bearings):
             raise EngineeringError(
                 f"Bearing index {resolved} is outside the project range 0..{max(len(project.bearings) - 1, 0)}."
+            )
+        if not cls._is_station_anchor(project.bearings[resolved]):
+            raise EngineeringError(
+                f"Bearing index {resolved} is an axial auxiliary element, not a selectable physical radial station."
             )
         return resolved
 
@@ -52,6 +64,8 @@ class BearingWorkspaceService:
         plan = NodeInsertionService.plan(project)
         rows: list[BearingStation] = []
         for index, bearing in enumerate(project.bearings):
+            if not cls._is_station_anchor(bearing):
+                continue
             support_names = tuple(
                 support.name for support in project.supports if support.bearing_index == index
             )
@@ -72,7 +86,10 @@ class BearingWorkspaceService:
     @classmethod
     def station(cls, project: RotorProject, index: int) -> BearingStation:
         resolved = cls.resolve_index(project, index)
-        return cls.stations(project)[resolved]
+        for station in cls.stations(project):
+            if station.index == resolved:
+                return station
+        raise EngineeringError(f"Bearing index {resolved} did not resolve to a physical station.")
 
 
 __all__ = ["BearingStation", "BearingWorkspaceService"]
