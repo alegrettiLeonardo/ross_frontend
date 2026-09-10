@@ -115,7 +115,15 @@ class EngineeringValidationService:
         for support in project.supports:
             if 0 <= support.bearing_index < len(project.bearings):
                 bearing = project.bearings[support.bearing_index]
-                if bearing.ross_class == "CylindricalBearing":
+                if bearing.metadata.get("axial_coefficients"):
+                    issues.append(ValidationIssue(
+                        "error",
+                        "AXIAL_SUPPORT_LINK_UNAVAILABLE",
+                        f"{bearing.name} contains axial Kzz/Czz but is attached to lateral flexible support {support.name}. "
+                        "ROSS Studio requires an explicit axial support Kzz/Czz contract before that link can be assembled; "
+                        "do not reuse lateral n_link stiffness for thrust dynamics.",
+                    ))
+                elif bearing.ross_class == "CylindricalBearing":
                     issues.append(ValidationIssue(
                         "error",
                         "CYLINDRICAL_SUPPORT_LINK_UNAVAILABLE",
