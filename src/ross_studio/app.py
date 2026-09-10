@@ -7,7 +7,6 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
-    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -19,7 +18,6 @@ from PySide6.QtWidgets import (
 )
 
 from .bearing_dispatch import BearingCalculationContext, BearingServiceDispatcher
-from .bearing_input_dialog import BearingInputDialog
 from .bearing_studio_service import BearingCalculationResult, BearingStudioService
 from .bearing_workspace import BearingWorkspaceService
 from .icons import engineering_icon
@@ -31,9 +29,7 @@ from .services import BearingCatalogService, EngineeringValidationService
 from .solver_console import SolverConsole
 from .thd_bearing_service import THDBearingCalculationResult, THDBearingStudioService
 from .thd_calculation_dialog import THDCalculationDialog
-from .thd_input_dialog import THDBearingInputDialog
 from .theme import APP_STYLESHEET
-from .thrust_pad_input_dialog import ThrustPadInputDialog
 from .thrust_pad_service import ThrustPadCalculationResult, ThrustPadStudioService
 from .widgets import AppToolbar, Sidebar, StatusBar
 
@@ -55,7 +51,7 @@ class TitleBar(QFrame):
         brand.setObjectName("brandLabel")
         layout.addWidget(brand)
         sep = QLabel("|")
-        sep.setStyleSheet("color:#9eb9cf;font-size:20px;")
+        sep.setStyleSheet("color:#c8dceb;font-size:20px;")
         layout.addWidget(sep)
         proj = QLabel(project.name)
         proj.setObjectName("projectTitle")
@@ -190,6 +186,7 @@ class RossStudioWindow(QMainWindow):
         self.bearing_context = None
         self.bearing_field_result = None
         self.bearing_page.apply_button.setEnabled(False)
+        self.bearing_page.set_results_available(False)
 
     def _select_bearing(self, index: int) -> None:
         engineering = self.project.engineering
@@ -205,8 +202,6 @@ class RossStudioWindow(QMainWindow):
         if resolved == self.bearing_index:
             return
 
-        # Changing the physical station invalidates every preview produced for the
-        # previous station. Nothing in the engineering model has been mutated yet.
         self.bearing_calculation = None
         self.bearing_context = None
         self.bearing_field_result = None
@@ -222,7 +217,7 @@ class RossStudioWindow(QMainWindow):
         self.status.set_status(
             "Bearing station selected",
             f"#{resolved + 1} {station.name} · x={station.position_mm:g} mm · ROSS node {station.ross_node}{support}",
-            units="Calculate is preview-only; Apply commits only this station",
+            units="Edit visible inputs → Calculate preview → Apply this station",
         )
 
     def _selected_bearing_class(self) -> str | None:
@@ -268,6 +263,8 @@ class RossStudioWindow(QMainWindow):
                     self.bearing_page.set_group(target_group, announce=False)
                 self.bearing_page._select_type(key, announce=False)
         self.bearing_page.apply_button.setEnabled(bool(keep_result and self.bearing_calculation is not None))
+        if self.bearing.coefficients:
+            self.bearing_page.set_bearing_preview(self.bearing)
         if self.bearing_field_result is not None and self.bearing_field_result.source_model == selected_class:
             if isinstance(self.bearing_field_result, ThrustPadCalculationResult):
                 self.bearing_page.set_thrust_result(self.bearing_field_result)
@@ -330,6 +327,7 @@ class RossStudioWindow(QMainWindow):
         self.bearing = base
 
     def _calculate_bearing(self) -> None:
+        """Calculate from the visible inline editor without opening an input dialog."""
         engineering = self.project.engineering
         if engineering is None:
             self.status.set_status("Bearing calculation failed", "Engineering domain is not loaded")
@@ -350,24 +348,10 @@ class RossStudioWindow(QMainWindow):
         self.bearing_context = None
         self.bearing_field_result = None
         self.bearing_page.apply_button.setEnabled(False)
+        self.bearing_page.set_results_available(False)
         try:
             service = self.bearing_dispatcher.for_class(ross_class)
-            inputs = {}
-            if ross_class != "BearingElement":
-                if ross_class in THDBearingStudioService.SUPPORTED_CLASSES:
-                    dialog_class = THDBearingInputDialog
-                elif ross_class in ThrustPadStudioService.SUPPORTED_CLASSES:
-                    dialog_class = ThrustPadInputDialog
-                else:
-                    dialog_class = BearingInputDialog
-                dialog = dialog_class(engineering, bearing_index, ross_class, self)
-                if dialog.exec() != QDialog.DialogCode.Accepted:
-                    self.status.set_status("Bearing calculation cancelled", f"{station.name} · {ross_class}")
-                    return
-                inputs = dialog.values()
-            else:
-                inputs["rated_speed_rpm"] = float(engineering.operating_cases[0].rated_speed_rpm)
-
+            inputs = self.bearing_page.input_values()
             snapshot = deepcopy(engineering)
             if ross_class in THDBearingStudioService.SUPPORTED_CLASSES | ThrustPadStudioService.SUPPORTED_CLASSES:
                 result = THDCalculationDialog(
@@ -388,7 +372,18 @@ class RossStudioWindow(QMainWindow):
         self.bearing_calculation = result
         self.bearing_context = BearingCalculationContext(service, result, bearing_index, snapshot)
         self.bearing_field_result = result if isinstance(result, (THDBearingCalculationResult, ThrustPadCalculationResult)) else None
-        self._refresh_bearing_page(selected_class=result.source_model, keep_result=True)
+
+        # Update only result widgets. Rebuilding the complete page here would erase
+        # the inline engineering values the user has just entered.
+        self.bearing_page.set_bearing_preview(self.bearing)
+        if isinstance(result, ThrustPadCalculationResult):
+            self.bearing_page.set_thrust_result(result)
+        elif isinstance(result, THDBearingCalculationResult):
+            self.bearing_page.set_thd_result(result)
+        else:
+            self.bearing_page.set_results_available(True)
+        self.bearing_page.apply_button.setEnabled(True)
+
         count = (
             len(result.axial_coefficients)
             if isinstance(result, ThrustPadCalculationResult)
@@ -397,7 +392,7 @@ class RossStudioWindow(QMainWindow):
         self.status.set_status(
             f"{result.source_model} calculated for {station.name}",
             f"{count} solved speed station(s)" if count else "Scalar K/C calculated",
-            units=f"Preview only — Apply commits bearing #{bearing_index + 1}",
+            units=f"Preview only — use View Results or scroll; Apply commits bearing #{bearing_index + 1}",
         )
 
     def _apply_bearing(self) -> None:
@@ -425,9 +420,6 @@ class RossStudioWindow(QMainWindow):
             return
 
         if isinstance(result, ThrustPadCalculationResult):
-            # ThrustPad is an auxiliary axial element at the selected radial station.
-            # Commit the new element but keep the editing identity anchored to the
-            # radial station that produced the transaction.
             engineering.bearings = candidate.bearings
             applied_index = next(
                 i
@@ -442,8 +434,6 @@ class RossStudioWindow(QMainWindow):
             selected_index = context.bearing_index
 
         self.bearing_context = None
-        # Preserve native THD/Thrust field evidence after Apply. It is invalidated
-        # only by a new station/model selection or a subsequent calculation.
         note = result.note
         source_model = result.source_model
         application_class = applied.ross_class
@@ -473,7 +463,7 @@ class RossStudioWindow(QMainWindow):
             self.status.set_status(
                 "Bearing Studio 2.0 ready",
                 f"Selected bearing #{self.bearing_index + 1}: {self.bearing.name}",
-                units="Select station → family/class → Calculate → Preview → Apply",
+                units="Select station → model icon → edit inputs → Calculate → Results → Apply",
             )
             return
         if key in self.RESULT_KEYS:
@@ -490,7 +480,7 @@ class RossStudioWindow(QMainWindow):
         )
 
     def _open_bearing_group(self, group: str) -> None:
-        """Compatibility entry point; Bearing Studio 2.0 no longer has a group landing page."""
+        """Compatibility entry point for automated qualification and older callers."""
         requested = str(group)
         if self.bearing_page.current_group.value != requested:
             self.bearing_calculation = None
