@@ -1,0 +1,51 @@
+name: ROSS Studio frozen executable
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  frozen:
+    name: frozen-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Qt headless system libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0
+
+      - name: Install package and frozen-build dependencies
+        run: python -m pip install -e ".[dev,package]"
+
+      - name: Build production-style windowed executable
+        run: python -m PyInstaller --clean --noconfirm packaging/ROSS-Studio.spec
+
+      - name: Qualify exact frozen binary
+        run: python tools/qualify_frozen_binary.py dist artifacts/frozen_selftest_${{ runner.os }}.json
+
+      - name: Upload frozen executable and qualification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ross-studio-0.12.0-${{ runner.os }}
+          path: |
+            dist/ROSS-Studio/
+            artifacts/frozen_selftest_${{ runner.os }}.json
+            artifacts/frozen_selftest_${{ runner.os }}_gui.json
+          if-no-files-found: error

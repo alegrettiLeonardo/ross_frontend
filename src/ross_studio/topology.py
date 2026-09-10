@@ -14,6 +14,10 @@ class NodeInsertion:
     reasons: tuple[str, ...]
     section_boundary: bool
 
+    @property
+    def mesh_node(self) -> bool:
+        return any(reason.startswith("mesh:") for reason in self.reasons)
+
 
 @dataclass(slots=True, frozen=True)
 class NodeInsertionPlan:
@@ -28,6 +32,10 @@ class NodeInsertionPlan:
     def inserted_positions_mm(self) -> tuple[float, ...]:
         return tuple(item.position_mm for item in self.insertions if not item.section_boundary)
 
+    @property
+    def mesh_positions_mm(self) -> tuple[float, ...]:
+        return tuple(item.position_mm for item in self.insertions if item.mesh_node)
+
     def node_for(self, position_mm: float, *, tolerance_mm: float = 1e-7) -> int | None:
         for node, x in enumerate(self.positions_mm):
             if abs(x - position_mm) <= tolerance_mm:
@@ -36,22 +44,35 @@ class NodeInsertionPlan:
 
 
 class NodeInsertionService:
-    """Create the FE node topology from physical coordinates without nearest-node snapping.
+    """Build the ROSS shaft topology without snapping physical entities.
 
-    Physical shaft-section boundaries are kept exactly. Every point entity that needs a
-    ROSS node requests its physical axial coordinate explicitly. Legacy ``[Massas]``
-    additionally request start/end boundaries plus the rigid-equivalent disk center.
+    Each physical shaft section first receives its user-requested base finite-element
+    discretization (``ShaftSection.fe_elements``). Exact physical coordinates required
+    by bearings, masses, disks, seals, couplings, loads and probes are then unioned with
+    that base mesh. Consequently ``fe_elements`` is a minimum mesh density per physical
+    section; mandatory engineering stations may split those elements further, but they
+    are never shifted to a nearest node.
     """
 
     @staticmethod
     def plan(project: "RotorProject") -> NodeInsertionPlan:
         boundaries = {round(x, 10) for x in project.section_boundaries_mm()}
         reasons: dict[float, list[str]] = defaultdict(list)
+        base_mesh: set[float] = set(boundaries)
 
         def request(position_mm: float, reason: str) -> None:
             x = round(float(position_mm), 10)
             if reason not in reasons[x]:
                 reasons[x].append(reason)
+
+        start = 0.0
+        for section in project.shaft_sections:
+            count = int(section.fe_elements)
+            for local_node in range(1, count):
+                x = round(start + section.length_mm * local_node / count, 10)
+                base_mesh.add(x)
+                request(x, f"mesh:S{section.section}:{local_node}/{count}")
+            start += section.length_mm
 
         for index, bearing in enumerate(project.bearings, 1):
             request(bearing.position_mm, f"bearing:{index}:{bearing.name}")
@@ -79,7 +100,7 @@ class NodeInsertionService:
         for index, probe in enumerate(project.probes, 1):
             request(probe.position_mm, f"probe:{index}:{probe.name}")
 
-        positions = tuple(sorted(boundaries | set(reasons)))
+        positions = tuple(sorted(base_mesh | set(reasons)))
         insertions = tuple(
             NodeInsertion(
                 position_mm=x,
