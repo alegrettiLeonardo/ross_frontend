@@ -1,0 +1,71 @@
+name: Build ROSS Studio binaries
+
+on:
+  push:
+    branches:
+      - release/ross-studio-0.11.0-binaries
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-native-binary:
+    name: ${{ matrix.artifact_name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact_name: ROSS-Studio-0.11.0-Linux-x86_64
+          - os: windows-2022
+            artifact_name: ROSS-Studio-0.11.0-Windows-x64
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install release dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+          python -m pip install "pyinstaller>=6.10,<7"
+          python - <<'PY'
+          import platform
+          import ross
+          import ross_studio
+          import PyInstaller
+          print("ROSS Studio", ross_studio.__version__)
+          print("ROSS", ross.__version__)
+          print("Python", platform.python_version())
+          print("PyInstaller", PyInstaller.__version__)
+          assert ross_studio.__version__ == "0.11.0"
+          assert ross.__version__ == "2.3.0"
+          PY
+
+      - name: Build and smoke-test native executable
+        shell: bash
+        run: python tools/build_release.py
+
+      - name: Show release manifest
+        shell: bash
+        run: cat dist/ROSS-Studio/BUILD_INFO.json
+
+      - name: Upload native application bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/ROSS-Studio/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
