@@ -180,6 +180,7 @@ class RossStudioWindow(QMainWindow):
         self.bearing_page.bearing_selected.connect(self._select_bearing)
         self.bearing_page.calculate_button.clicked.connect(self._calculate_bearing)
         self.bearing_page.apply_button.clicked.connect(self._apply_bearing)
+        self.bearing_page.group_selector.currentTextChanged.connect(lambda _text: self._bearing_type_changed())
         for button in self.bearing_page.type_buttons.values():
             button.clicked.connect(self._bearing_type_changed)
         self.bearing_page.apply_button.setEnabled(self.bearing_calculation is not None)
@@ -311,17 +312,19 @@ class RossStudioWindow(QMainWindow):
             if not isinstance(result, BearingCalculationResult):
                 raise ValueError("THD preview requires a solved coefficient table.")
             kxx, kxy, kyx, kyy, cxx, cxy, cyx, cyy = result.scalar_kc
-            base.coefficients = [BearingCoefficientRow(
-                rpm=self.project.speed_rpm,
-                kxx=kxx,
-                kxy=kxy,
-                kyx=kyx,
-                kyy=kyy,
-                cxx=cxx,
-                cxy=cxy,
-                cyx=cyx,
-                cyy=cyy,
-            )]
+            base.coefficients = [
+                BearingCoefficientRow(
+                    rpm=self.project.speed_rpm,
+                    kxx=kxx,
+                    kxy=kxy,
+                    kyx=kyx,
+                    kyy=kyy,
+                    cxx=cxx,
+                    cxy=cxy,
+                    cyx=cyx,
+                    cyy=cyy,
+                )
+            ]
             base.speed_min_rpm = self.project.speed_rpm
             base.speed_max_rpm = self.project.speed_rpm
         self.bearing = base
@@ -422,34 +425,45 @@ class RossStudioWindow(QMainWindow):
             return
 
         if isinstance(result, ThrustPadCalculationResult):
-            # ThrustPad is an additional axial element; never overwrite the radial anchor.
+            # ThrustPad is an auxiliary axial element at the selected radial station.
+            # Commit the new element but keep the editing identity anchored to the
+            # radial station that produced the transaction.
             engineering.bearings = candidate.bearings
             applied_index = next(
-                i for i, bearing in enumerate(engineering.bearings)
+                i
+                for i, bearing in enumerate(engineering.bearings)
                 if bearing.metadata.get("source_model") == "ThrustPad"
                 and abs(float(bearing.position_mm) - float(applied.position_mm)) <= 1e-9
             )
+            selected_index = context.bearing_index
         else:
             engineering.bearings[context.bearing_index] = applied
             applied_index = context.bearing_index
+            selected_index = context.bearing_index
 
         self.bearing_context = None
-        self.bearing_field_result = None
+        # Preserve native THD/Thrust field evidence after Apply. It is invalidated
+        # only by a new station/model selection or a subsequent calculation.
         note = result.note
         source_model = result.source_model
         application_class = applied.ross_class
         self.project.touch()
-        self.bearing_index = applied_index
-        self.bearing = BearingModel.from_project(engineering, applied_index)
+        self.bearing_index = selected_index
+        self.bearing = BearingModel.from_project(engineering, selected_index)
         self.bearing_calculation = None
         self._refresh_bearing_page(
             selected_class=source_model,
             keep_result=False,
             group=self.bearing.group,
         )
+        target = (
+            f"station #{selected_index + 1} {self.bearing.name}; axial element #{applied_index + 1}"
+            if isinstance(result, ThrustPadCalculationResult)
+            else f"bearing #{applied_index + 1} {self.bearing.name}"
+        )
         self.status.set_status(
             "Bearing applied to rotor",
-            f"#{applied_index + 1} {self.bearing.name}: {source_model} → {application_class}. {note}",
+            f"{target}: {source_model} → {application_class}. {note}",
             units="Only the selected bearing transaction was committed; rerun analyses to refresh rotor results",
         )
 
