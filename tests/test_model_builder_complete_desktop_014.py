@@ -40,8 +40,11 @@ def test_concent_is_drawn_and_selectable_in_same_composite_disk_index_space(qtbo
     engineering = window.project.engineering
     assert engineering is not None and engineering.point_masses
 
-    page.resize(1400, 850)
-    page.show()
+    # The sketch is a child of the main stacked workspace. Show the real top-level
+    # window so Qt actually delivers its paint event under the offscreen platform.
+    window.resize(1400, 850)
+    window.show()
+    qtbot.wait(25)
     page.sketch.repaint()
     qtbot.wait(10)
 
@@ -188,14 +191,14 @@ def test_seal_coupling_and_load_gui_add_delete_use_strict_transactions(qtbot, mo
     assert engineering is not None
 
     for key, collection_name in (("seals", "seals"), ("couplings", "couplings"), ("loads", "loads")):
-        collection = getattr(engineering, collection_name)
-        before = len(collection)
+        before = len(getattr(engineering, collection_name))
         page._add_entity(key)
+        collection = getattr(engineering, collection_name)
         assert len(collection) == before + 1
         record = collection[-1]
         assert NodeInsertionService.plan(engineering).node_for(record.position_mm) is not None
         page.editor_tables[key].selectRow(len(collection) - 1)
         page._delete_entity(key)
-        assert len(collection) == before
+        assert len(getattr(engineering, collection_name)) == before
 
     assert RossModelBuilder().build(engineering, strict=True).unresolved_positions_mm == []
