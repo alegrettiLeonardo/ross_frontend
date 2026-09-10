@@ -191,9 +191,13 @@ class BearingStudioPage(QWidget):
         right_layout.addWidget(self._bearing_info_card(), 1)
         right_layout.addWidget(self._actions_card())
 
+        # Connect only after widgets are fully initialized. We intentionally do not
+        # replay a process-global selection during construction: the application has
+        # not wired ``bearing_selected`` yet, and replaying it here could leave page
+        # and application station identities inconsistent. New user/sketch selections
+        # are synchronized immediately after construction.
         self.selection.selection_changed.connect(self._workspace_selection_changed)
         self.set_group(self.current_group.value, announce=False)
-        self._workspace_selection_changed(self.selection.current)
 
     def _bearing_combo_changed(self, row: int) -> None:
         index = self.bearing_selector.itemData(row)
