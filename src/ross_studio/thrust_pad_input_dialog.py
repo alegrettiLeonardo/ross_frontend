@@ -19,7 +19,7 @@ from .domain import RotorProject
 
 
 FIELDS = [
-    ("speed_rpm", "Speed stations (rpm; comma separated)", [90.0]),
+    ("speed_rpm", "Speed stations (rpm; comma separated)", []),
     ("pad_inner_radius_mm", "Pad inner radius (mm)", 1150.0),
     ("pad_outer_radius_mm", "Pad outer radius (mm)", 1725.0),
     ("pad_pivot_radius_mm", "Pad pivot radius (mm)", 1442.5),
@@ -75,8 +75,21 @@ class ThrustPadInputDialog(QDialog):
                 stored = dict(bearing.metadata.get("engineering_input", {}))
                 break
 
+        case = project.operating_cases[0]
+        project_speeds = sorted(
+            {
+                float(case.speed_min_rpm),
+                float(case.rated_speed_rpm),
+                float(case.speed_max_rpm),
+            }
+        )
+        project_speeds = [speed for speed in project_speeds if speed > 0.0]
+
         for key, label, default in FIELDS:
-            value = stored.get(key, default)
+            if key == "speed_rpm":
+                value = stored.get(key, project_speeds)
+            else:
+                value = stored.get(key, default)
             if isinstance(default, tuple):
                 widget = QComboBox()
                 widget.addItems(default)
