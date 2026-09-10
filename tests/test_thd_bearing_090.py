@@ -25,16 +25,14 @@ def _finite_coefficients(result) -> None:
     assert np.all(np.isfinite(values))
 
 
-def test_thd_registry_promotes_only_end_to_end_qualified_lateral_models() -> None:
+def test_thd_registry_promotes_all_end_to_end_qualified_models() -> None:
     rs = pytest.importorskip("ross")
     registry = RossCapabilityRegistry(rs)
     catalog = BearingCatalogService(registry)
     rows = {row["class"]: row for row in catalog.entries(BearingGroup.THD)}
-    for ross_class in ("PlainJournal", "TiltingPad", "SqueezeFilmDamper"):
+    for ross_class in ("PlainJournal", "TiltingPad", "SqueezeFilmDamper", "ThrustPad"):
         assert rows[ross_class]["status"] == AdapterStatus.VALIDATED.value
         assert rows[ross_class]["can_execute"] is True
-    assert rows["ThrustPad"]["status"] == AdapterStatus.PLANNED.value
-    assert rows["ThrustPad"]["can_execute"] is False
 
 
 def test_plain_journal_runs_native_ross_23_and_caches_solved_kc() -> None:
