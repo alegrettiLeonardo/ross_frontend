@@ -114,6 +114,19 @@ class BearingCoefficientRow:
         return cls(round(point.rpm), point.kxx, point.kxy, point.kyx, point.kyy, point.cxx, point.cxy, point.cyx, point.cyy)
 
 
+_BEARING_TITLES = {
+    "BearingElement": "Coefficient K/C",
+    "BallBearingElement": "Ball Bearing",
+    "RollerBearingElement": "Roller Bearing",
+    "CylindricalBearing": "Cylindrical Bearing",
+    "PlainJournal": "Plain Journal",
+    "TiltingPad": "Tilting Pad",
+    "ThrustPad": "Thrust Pad",
+    "SqueezeFilmDamper": "Squeeze Film Damper",
+    "MagneticBearingElement": "Active Magnetic Bearing",
+}
+
+
 @dataclass(slots=True)
 class BearingModel:
     name: str = "DE Journal Bearing"
@@ -154,15 +167,24 @@ class BearingModel:
         spec = project.bearings[index]
         points = [BearingCoefficientRow.from_point(p) for p in spec.coefficients]
         speeds = [p.rpm for p in spec.coefficients]
+        source_model = str(spec.metadata.get("source_model", spec.ross_class))
+        speed_metadata = spec.metadata.get("speed_rpm")
+        if not speeds and isinstance(speed_metadata, list):
+            speeds = [float(value) for value in speed_metadata]
         return cls(
             name=spec.name,
-            bearing_type="Coefficient K/C" if spec.ross_class == "BearingElement" else spec.ross_class,
-            ross_class=spec.ross_class,
+            bearing_type=_BEARING_TITLES.get(source_model, source_model),
+            ross_class=source_model,
             group=spec.group.value,
             node_position=f"x = {spec.position_mm:g} mm",
             connected_shaft="Rotor",
+            shaft_diameter_mm=float(spec.metadata.get("journal_diameter_m", 0.1)) * 1000.0,
+            pad_length_mm=float(spec.metadata.get("bearing_length_m", 0.08)) * 1000.0,
+            radial_clearance_mm=float(spec.metadata.get("radial_clearance_m", 1.0e-4)) * 1000.0,
+            number_of_pads=int(spec.metadata.get("n_balls", spec.metadata.get("n_rollers", 5))),
             speed_min_rpm=round(min(speeds)) if speeds else 0,
             speed_max_rpm=round(max(speeds)) if speeds else 0,
+            load_x_n=float(spec.metadata.get("weight_n", spec.metadata.get("static_load_n", 5000.0))),
             operating_rpm=round(project.operating_cases[0].rated_speed_rpm),
             coefficients=points,
         )

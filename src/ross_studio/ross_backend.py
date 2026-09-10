@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from .concentrated import concentrated_disk_class
 from .domain import BearingSpec, EngineeringError, RotorProject, ShaftSection
 from .services import EngineeringValidationService
 from .topology import NodeInsertionPlan, NodeInsertionService
@@ -53,7 +54,10 @@ class EquivalentPointMassPlan:
     node: int
     position_mm: float
     mass_kg: float
-    source: str = "legacy [Concent]"
+    ix_kg_m2: float = 0.0
+    iy_kg_m2: float = 0.0
+    iz_kg_m2: float = 0.0
+    source: str = "legacy [Concent] mass + Ix/Iy/Iz"
 
 
 @dataclass(slots=True)
@@ -187,7 +191,7 @@ class RossModelBuilder:
             )
 
         if spec.ross_class != "BearingElement":
-            raise EngineeringError(f"Bearing class {spec.ross_class} is not enabled in the qualified 0.8.0 builder.")
+            raise EngineeringError(f"Bearing class {spec.ross_class} is not enabled in the qualified builder.")
         common = {"n": mapping.node, "tag": spec.name, "n_link": n_link}
         if spec.coefficients:
             rpm = np.asarray([point.rpm for point in spec.coefficients], dtype=float)
@@ -306,30 +310,35 @@ class RossModelBuilder:
                 continue
             disks.append(rs.DiskElement(mapping.node, disk.mass_kg, disk.id_kg_m2, disk.ip_kg_m2, tag=disk.name))
 
-        # ROSS 2.3 PointMass is a link/support element and its Rotor constructor expects
-        # every PointMass node to coincide with a BearingElement row.  A scalar mass on
-        # an ordinary shaft node is therefore realized as DiskElement(m, Id=0, Ip=0).
-        # Its 6-DOF mass matrix is diag(m,m,m,0,0,0), exactly the required isotropic
-        # translational point mass with no rotary inertia and no gyroscopic contribution.
+        # ROSS PointMass is a link/support element and its Rotor constructor expects
+        # its node to belong to the support chain. Legacy [Concent] acts directly on
+        # an ordinary shaft station and also carries Ix/Iy/Iz. Represent it as a
+        # DiskElement subclass with independent principal inertias so static gravity,
+        # M and G are all retained without nearest-node or support-node workarounds.
+        concentrated_cls = concentrated_disk_class(rs)
         for mass in project.point_masses:
             mapping = self.map_position(project, mass.position_mm)
             if mapping.node is None:
                 unresolved.append(mass.position_mm)
                 continue
-            if any(value is not None for value in (mass.mx_kg, mass.my_kg, mass.mz_kg)):
-                if strict:
-                    raise EngineeringError(
-                        f"{mass.name} defines directional point-mass components. The qualified ROSS 2.3 "
-                        "shaft-node adapter currently supports scalar isotropic point mass only."
-                    )
-                unresolved.append(mass.position_mm)
-                continue
-            disks.append(rs.DiskElement(mapping.node, mass.mass_kg, 0.0, 0.0, tag=f"{mass.name} / shaft point mass"))
+            disks.append(
+                concentrated_cls(
+                    mapping.node,
+                    mass.mass_kg,
+                    mass.ix_kg_m2,
+                    mass.iy_kg_m2,
+                    mass.iz_kg_m2,
+                    tag=f"{mass.name} / shaft point mass",
+                )
+            )
             equivalent_point_masses.append(EquivalentPointMassPlan(
                 name=mass.name,
                 node=mapping.node,
                 position_mm=mass.position_mm,
                 mass_kg=mass.mass_kg,
+                ix_kg_m2=mass.ix_kg_m2,
+                iy_kg_m2=mass.iy_kg_m2,
+                iz_kg_m2=mass.iz_kg_m2,
             ))
 
         unresolved = sorted(set(unresolved))

@@ -104,10 +104,10 @@ def load_irdin_project(path: str | Path) -> RotorProject:
         poles=max(1, _integer(data.get("polos"), 2)),
         description=component,
         # Positive RPM in the RotorDin source uses the opposite gyroscopic/
-        # synchronous-force handedness from ROSS.  This is a convention map,
+        # synchronous-force handedness from ROSS. This is a convention map,
         # not a fitted physical parameter.
         lateral_convention=LateralConvention.ROTORDIN_POSITIVE,
-        # The iRdin/UI field is an angle in degrees.  The supplied migrated
+        # The iRdin/UI field is an angle in degrees. The supplied migrated
         # RotorDin frontend has a right-justified RANUN parser bug that makes
         # its current golden interpret the raw 45 as radians; that behavior is
         # retained only as an explicit diagnostic compatibility contract.
@@ -186,10 +186,16 @@ def load_irdin_project(path: str | Path) -> RotorProject:
         ))
 
     for index, row in enumerate(_grid_rows(doc.get("concent")), 1):
+        # RotorDin source contract (entrada.f / matrizes.f):
+        #   x, mass, Ix, Iy, Iz
+        # Iy is the inertia about the shaft axis and drives the gyro pair.
         project.point_masses.append(PointMassSpec(
             name=f"Point mass {index}",
             position_mm=_number(_cell(row, 0)),
             mass_kg=_number(_cell(row, 1), 0.0),
+            ix_kg_m2=_number(_cell(row, 2), 0.0),
+            iy_kg_m2=_number(_cell(row, 3), 0.0),
+            iz_kg_m2=_number(_cell(row, 4), 0.0),
         ))
 
     for index, row in enumerate(_grid_rows(doc.get("suporte")), 1):
