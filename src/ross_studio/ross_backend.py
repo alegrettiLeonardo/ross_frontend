@@ -193,6 +193,53 @@ class RossModelBuilder:
         if spec.ross_class != "BearingElement":
             raise EngineeringError(f"Bearing class {spec.ross_class} is not enabled in the qualified builder.")
         common = {"n": mapping.node, "tag": spec.name, "n_link": n_link}
+
+        axial_rows = spec.metadata.get("axial_coefficients")
+        if axial_rows:
+            if n_link is not None:
+                raise EngineeringError(
+                    f"Axial bearing {spec.name!r} is attached to a lateral flexible-support link. "
+                    "ROSS Studio will not transfer Kzz/Czz through that link until an explicit axial support Kzz/Czz contract exists."
+                )
+            try:
+                rpm = np.asarray([float(row["rpm"]) for row in axial_rows], dtype=float)
+                kzz = np.asarray([float(row["kzz"]) for row in axial_rows], dtype=float)
+                czz = np.asarray([float(row["czz"]) for row in axial_rows], dtype=float)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise EngineeringError(
+                    f"Axial bearing {spec.name!r} has an invalid axial_coefficients table; expected rpm/kzz/czz rows."
+                ) from exc
+            if (
+                rpm.ndim != 1
+                or rpm.size == 0
+                or rpm.size != kzz.size
+                or rpm.size != czz.size
+                or not np.all(np.isfinite(rpm))
+                or not np.all(np.isfinite(kzz))
+                or not np.all(np.isfinite(czz))
+                or np.any(rpm <= 0.0)
+                or (rpm.size > 1 and np.any(np.diff(rpm) <= 0.0))
+            ):
+                raise EngineeringError(
+                    f"Axial bearing {spec.name!r} requires finite, positive, strictly increasing speed rows with finite Kzz/Czz."
+                )
+            frequency = rpm * 2.0 * pi / 60.0
+            zeros = np.zeros_like(kzz)
+            return rs.BearingElement(
+                **common,
+                kxx=zeros,
+                kyy=zeros,
+                kxy=zeros,
+                kyx=zeros,
+                cxx=zeros,
+                cyy=zeros,
+                cxy=zeros,
+                cyx=zeros,
+                kzz=kzz,
+                czz=czz,
+                frequency=frequency,
+            )
+
         if spec.coefficients:
             rpm = np.asarray([point.rpm for point in spec.coefficients], dtype=float)
             frequency = rpm * 2.0 * pi / 60.0
