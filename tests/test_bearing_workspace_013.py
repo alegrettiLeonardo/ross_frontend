@@ -58,6 +58,62 @@ def test_axial_auxiliary_is_not_a_new_selectable_bearing_station() -> None:
         BearingWorkspaceService.resolve_index(project, 2)
 
 
+def test_station_inventory_separates_radial_anchor_and_axial_auxiliary() -> None:
+    project = load_irdin_project(FIXTURE)
+    workspace = BearingWorkspaceService()
+
+    baseline_de = workspace.inventory(project, 0)
+    baseline_nde = workspace.inventory(project, 1)
+    assert baseline_de.radial_anchor.element_index == 0
+    assert baseline_de.radial_anchor.role == "radial_anchor"
+    assert baseline_de.axial_auxiliaries == ()
+    assert baseline_nde.radial_anchor.element_index == 1
+    assert baseline_nde.axial_auxiliaries == ()
+
+    project.bearings.append(
+        BearingSpec(
+            name="DE thrust bearing",
+            position_mm=project.bearings[0].position_mm,
+            ross_class="BearingElement",
+            metadata={
+                "source_model": "ThrustPad",
+                "axial_coefficients": [{"rpm": 3600.0, "kzz": 2.0e8, "czz": 2.0e5}],
+            },
+        )
+    )
+
+    de = workspace.inventory(project, 0)
+    nde = workspace.inventory(project, 1)
+    assert [element.element_index for element in de.elements] == [0, 2]
+    assert [element.role for element in de.elements] == ["radial_anchor", "axial_auxiliary"]
+    assert de.axial_auxiliaries[0].source_model == "ThrustPad"
+    assert de.axial_auxiliaries[0].axial is True
+    assert de.axial_auxiliaries[0].position_mm == pytest.approx(de.station.position_mm)
+    assert de.station.ross_node == NodeInsertionService.plan(project).node_for(de.station.position_mm)
+    assert de.station.support_names
+
+    assert [element.element_index for element in nde.elements] == [1]
+    assert nde.radial_anchor.element_index == 1
+    assert nde.axial_auxiliaries == ()
+
+
+def test_orphan_axial_auxiliary_is_fail_closed() -> None:
+    project = load_irdin_project(FIXTURE)
+    project.bearings.append(
+        BearingSpec(
+            name="orphan thrust",
+            position_mm=1000.0,
+            ross_class="BearingElement",
+            metadata={
+                "source_model": "ThrustPad",
+                "axial_coefficients": [{"rpm": 3600.0, "kzz": 1.0e8, "czz": 1.0e5}],
+            },
+        )
+    )
+    with pytest.raises(EngineeringError, match="no physical radial station anchor"):
+        BearingWorkspaceService.anchor_index(project, 2)
+
+
 def test_bearing_studio_2_routes_directly_to_workspace_and_selects_nde(qtbot) -> None:
     pytest.importorskip("ross")
     from ross_studio.app import RossStudioWindow
