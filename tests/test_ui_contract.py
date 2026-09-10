@@ -6,10 +6,12 @@ from ross_studio.theme import COLORS
 
 
 def test_approved_palette_contract() -> None:
-    assert COLORS.title_bar == "#173f5f"
-    assert COLORS.sidebar == "#1f3f5d"
-    assert COLORS.active == "#2186e5"
-    assert COLORS.background == "#f3f8fc"
+    # 0.14.1 readability refresh: engineering work surfaces are lighter while
+    # retaining the approved blue ROSS Studio identity and dark solver console.
+    assert COLORS.title_bar == "#20597f"
+    assert COLORS.sidebar == "#245372"
+    assert COLORS.active == "#2589df"
+    assert COLORS.background == "#f8fbfe"
     assert COLORS.surface == "#ffffff"
     assert COLORS.success == "#1ba85b"
     assert COLORS.console_bg == "#09141f"
@@ -55,6 +57,7 @@ def test_required_screen_sources_exist() -> None:
         root / "pages" / "rotor_model.py",
         root / "pages" / "bearing_studio.py",
         root / "bearing_workspace.py",
+        root / "bearing_input_panel.py",
         root / "pages" / "results.py",
         root / "solver_console.py",
         root / "domain.py",
