@@ -12,7 +12,6 @@ import os
 from pathlib import Path
 import platform
 import subprocess
-import sys
 
 import PyInstaller
 import PyInstaller.__main__
@@ -44,6 +43,7 @@ def main() -> int:
         "--collect-data", "ross_studio",
         "--collect-data", "ross",
         "--collect-submodules", "ross",
+        "--collect-data", "ccp",
         "--collect-data", "plotly",
         "--collect-data", "pint",
         "--copy-metadata", "ross-rotordynamics",
@@ -78,7 +78,6 @@ def main() -> int:
             f"stderr={completed.stderr}"
         )
 
-    # Import versions from the same environment used to build the executable.
     import ross as rs
     import ross_studio
 
