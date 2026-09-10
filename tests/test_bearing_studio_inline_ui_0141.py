@@ -50,7 +50,7 @@ def test_bearing_studio_uses_light_inline_model_driven_workspace(qtbot) -> None:
 
     qtbot.mouseClick(page.type_buttons["tilting"], Qt.MouseButton.LeftButton)
     assert window._selected_bearing_class() == "TiltingPad"
-    assert {"pad_thickness_mm", "n_pad", "pivot_angles_deg", "nx", "nz"}.issubset(
+    assert {"pad_thickness_mm", "n_pads", "pivot_angles_deg", "nx", "nz"}.issubset(
         page.input_panel.fields
     )
     assert window.project.engineering == original
