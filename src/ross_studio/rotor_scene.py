@@ -49,7 +49,14 @@ class InteractiveRotorSketch(QWidget):
         self._show_mesh = True
         self.setMinimumHeight(290)
         self.setMouseTracking(True)
-        self.selection.selection_changed.connect(lambda _ref: self.update())
+        # Use a bound QObject slot instead of a lambda captured by the process-global
+        # selection model. Qt can then disconnect it automatically when this widget
+        # is destroyed; repeated desktop test/window construction cannot retain a
+        # callback to a deleted C++ object.
+        self.selection.selection_changed.connect(self._selection_changed)
+
+    def _selection_changed(self, _ref: RotorEntityRef | None) -> None:
+        self.update()
 
     @property
     def zoom(self) -> float:
