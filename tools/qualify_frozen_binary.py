@@ -28,6 +28,16 @@ EXPECTED_THD = {
     "SqueezeFilmDamper",
     "ThrustPad",
 }
+EXPECTED_MODEL_BUILDERS = {"disks", "seals", "couplings", "loads", "probes"}
+EXPECTED_TRANSACTION_KINDS = {
+    "distributed_mass",
+    "disk",
+    "point_mass",
+    "seal",
+    "coupling",
+    "load",
+    "probe",
+}
 
 
 def executable_path(dist_root: Path) -> Path:
@@ -80,7 +90,7 @@ def main() -> int:
         exe,
         ["--gui-smoke", "--gui-smoke-output"],
         gui_output,
-        "GUI startup smoke",
+        "GUI startup and model-builder smoke",
     )
     assert gui_payload["project"] == "OP-W60-500-60Hz-IC611-P3", gui_payload
     assert gui_payload["view_modes"] == ["Engineering 2D", "ROSS Native"], gui_payload
@@ -93,6 +103,19 @@ def main() -> int:
     assert set(gui_payload["thd_executable"]) == EXPECTED_THD, gui_payload
     assert gui_payload["amb_blocked"] == ["MagneticBearingElement"], gui_payload
     assert {"ump", "probes", "shaft", "bearings"}.issubset(set(gui_payload["sidebar_routes"])), gui_payload
+
+    model_builder = gui_payload["model_builder_014"]
+    assert model_builder["status"] == "PASS", model_builder
+    assert set(model_builder["enabled_editor_groups"]) == EXPECTED_MODEL_BUILDERS, model_builder
+    assert set(model_builder["transaction_nodes"]) == EXPECTED_TRANSACTION_KINDS, model_builder
+    assert all(node is not None for node in model_builder["transaction_nodes"].values()), model_builder
+    assert model_builder["concent_table_visible"] is True, model_builder
+    assert model_builder["concent_sketch_visible"] is True, model_builder
+    assert model_builder["concent_inertias_preserved"] is True, model_builder
+    assert model_builder["seal_native_class"] == "SealElement", model_builder
+    assert model_builder["coupling_native_mapping"] == "BLOCKED_PENDING_TWO_NODE_CONTRACT", model_builder
+    assert model_builder["load_realization"] == "ANALYSIS_INPUT_EXACT_NODE", model_builder
+    assert model_builder["unresolved_positions_mm"] == [], model_builder
 
     combined = {
         "status": "PASS",
