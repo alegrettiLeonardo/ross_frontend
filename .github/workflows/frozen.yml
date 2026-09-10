@@ -2,6 +2,9 @@ name: ROSS Studio frozen executable
 
 on:
   pull_request:
+  push:
+    branches:
+      - feature/project-file-io-dyrobes-0.14.2
   workflow_dispatch:
 
 jobs:
@@ -37,15 +40,16 @@ jobs:
       - name: Build production-style windowed executable
         run: python -m PyInstaller --clean --noconfirm packaging/ROSS-Studio.spec
 
-      - name: Qualify exact frozen binary
+      - name: Qualify exact frozen binary including project I/O
         run: python tools/qualify_frozen_binary.py dist artifacts/frozen_selftest_${{ runner.os }}.json
 
       - name: Upload frozen executable and qualification evidence
         uses: actions/upload-artifact@v4
         with:
-          name: ross-studio-0.14.0-${{ runner.os }}
+          name: ross-studio-0.14.2-${{ runner.os }}
           path: |
             dist/ROSS-Studio/
             artifacts/frozen_selftest_${{ runner.os }}.json
+            artifacts/frozen_selftest_${{ runner.os }}_project_io.json
             artifacts/frozen_selftest_${{ runner.os }}_gui.json
           if-no-files-found: error
