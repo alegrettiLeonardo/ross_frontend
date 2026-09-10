@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..domain import AdapterStatus, BearingGroup
+from .thd_results import THDResultTab
 from ..icons import engineering_icon
 from ..models import BearingModel, ProjectModel
 from ..services import BearingCatalogService
@@ -111,14 +112,10 @@ class BearingStudioPage(QWidget):
         self.editor_note.setWordWrap(True)
         page_layout.addWidget(self.editor_note)
 
-        input_row = QHBoxLayout()
-        input_row.setSpacing(10)
-        input_row.addWidget(self._geometry_box(), 1)
-        input_row.addWidget(self._operation_box(), 1)
-        input_row.addWidget(self._lubrication_box(), 1)
-        input_row.addWidget(self._operating_point_box(), 1)
-        page_layout.addLayout(input_row)
-        center.addWidget(page_card, 5)
+        self.input_summary = QLabel("Calculate Bearing opens the class-specific input editor. Review geometry, lubricant, loads and speed stations there before solving.")
+        self.input_summary.setWordWrap(True)
+        page_layout.addWidget(self.input_summary)
+        center.addWidget(page_card, 1)
 
         result_card = Card()
         result_layout = QVBoxLayout(result_card)
@@ -127,13 +124,11 @@ class BearingStudioPage(QWidget):
         tabs.setDocumentMode(True)
         result_layout.addWidget(tabs, 1)
         tabs.addTab(self._kc_tab(), "K & C Coefficients")
+        self.result_tabs = {}
+        self.tabs = tabs
         for name in ("Pressure", "Temperature", "Film Thickness", "Journal Position", "Convergence"):
-            holder = QWidget()
-            layout = QVBoxLayout(holder)
-            label = QLabel(f"{name} field visualization")
-            label.setObjectName("muted")
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(label)
+            holder = THDResultTab(name)
+            self.result_tabs[name] = holder
             tabs.addTab(holder, name)
         center.addWidget(result_card, 5)
 
@@ -182,7 +177,7 @@ class BearingStudioPage(QWidget):
         status, reason = self.catalog.registry.effective_status(ross_class)
         self.adapter_state_label.setText(f"{ross_class}: {status.value}")
         self.calculate_button.setEnabled(status == AdapterStatus.VALIDATED)
-        self.apply_button.setEnabled(status == AdapterStatus.VALIDATED)
+        self.apply_button.setEnabled(False)
 
         if group == BearingGroup.GENERAL:
             self.editor_note.setText(
@@ -191,8 +186,8 @@ class BearingStudioPage(QWidget):
             )
         elif group == BearingGroup.THD:
             self.editor_note.setText(
-                "THD classes remain visible for model definition, but execution is disabled until "
-                "their geometry, lubricant, thermal and discretization adapters are scientifically qualified."
+                "THD results retain native fields and all solved K/C speed stations. "
+                "Apply uses the solved BearingElement table, including flexible supports. ThrustPad remains gated."
             )
         else:
             self.editor_note.setText(
@@ -207,142 +202,17 @@ class BearingStudioPage(QWidget):
                 detail = f" {reason}" if reason else ""
                 self.status_message.emit(f"{title}: {status.value}.{detail}")
 
-    def _spin(self, value: float, decimals: int = 2) -> QDoubleSpinBox:
-        widget = QDoubleSpinBox()
-        widget.setDecimals(decimals)
-        widget.setRange(-1e12, 1e12)
-        widget.setValue(value)
-        widget.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
-        return widget
-
-    def _geometry_box(self) -> QWidget:
-        card = Card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 10, 12, 10)
-        title = QLabel("Geometry")
-        title.setObjectName("subHeader")
-        layout.addWidget(title)
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(6)
-        grid.setVerticalSpacing(7)
-        rows = [
-            ("Shaft Diameter (D)", self._spin(self.bearing.shaft_diameter_mm, 0), "mm"),
-            ("Pad Length (L)", self._spin(self.bearing.pad_length_mm, 0), "mm"),
-            ("Radial Clearance (c)", self._spin(self.bearing.radial_clearance_mm, 2), "mm"),
-            ("Pad Arc (α)", self._spin(self.bearing.pad_arc_deg, 0), "deg"),
-            ("Preload", self._spin(self.bearing.preload, 2), "-"),
-        ]
-        pads = QSpinBox()
-        pads.setRange(1, 20)
-        pads.setValue(self.bearing.number_of_pads)
-        rows.append(("Number of Pads", pads, ""))
-        for row, (text, widget, unit) in enumerate(rows):
-            grid.addWidget(QLabel(text), row, 0)
-            grid.addWidget(widget, row, 1)
-            unit_label = QLabel(unit)
-            unit_label.setObjectName("muted")
-            grid.addWidget(unit_label, row, 2)
-        grid.setColumnStretch(1, 1)
-        layout.addLayout(grid)
-        layout.addStretch(1)
-        return card
-
-    def _operation_box(self) -> QWidget:
-        card = Card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 10, 12, 10)
-        title = QLabel("Operation")
-        title.setObjectName("subHeader")
-        layout.addWidget(title)
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(6)
-        grid.setVerticalSpacing(7)
-        grid.addWidget(QLabel("Speed Range"), 0, 0)
-        speed_row = QHBoxLayout()
-        start = QSpinBox()
-        start.setRange(0, 999999)
-        start.setValue(self.bearing.speed_min_rpm)
-        end = QSpinBox()
-        end.setRange(0, 999999)
-        end.setValue(self.bearing.speed_max_rpm)
-        speed_row.addWidget(start)
-        speed_row.addWidget(QLabel("to"))
-        speed_row.addWidget(end)
-        box = QWidget()
-        box.setLayout(speed_row)
-        grid.addWidget(box, 0, 1, 1, 2)
-        grid.addWidget(QLabel("rpm"), 0, 3)
-        rows = [
-            ("Load X (Fx)", self._spin(self.bearing.load_x_n, 0), "N"),
-            ("Load Y (Fy)", self._spin(self.bearing.load_y_n, 0), "N"),
-            ("Oil Inlet\nTemperature", self._spin(self.bearing.oil_inlet_temperature_c, 0), "°C"),
-            ("Supply Pressure", self._spin(self.bearing.supply_pressure_bar, 1), "bar"),
-        ]
-        for row, (text, widget, unit) in enumerate(rows, 1):
-            grid.addWidget(QLabel(text), row, 0)
-            grid.addWidget(widget, row, 1, 1, 2)
-            grid.addWidget(QLabel(unit), row, 3)
-        grid.setColumnStretch(1, 1)
-        layout.addLayout(grid)
-        layout.addStretch(1)
-        return card
-
-    def _lubrication_box(self) -> QWidget:
-        card = Card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 10, 12, 10)
-        title = QLabel("Lubrication / Model")
-        title.setObjectName("subHeader")
-        layout.addWidget(title)
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(6)
-        grid.setVerticalSpacing(10)
-        data = [
-            ("Lubricant Grade", ["ISO VG 32", "ISO VG 46", "ISO VG 68"], self.bearing.lubricant_grade),
-            ("Thermal Model", ["Energy Equation", "Isothermal"], self.bearing.thermal_model),
-            ("Viscosity Model", ["Roelands", "Walther"], self.bearing.viscosity_model),
-            ("Mesh /\nDiscretization", ["Medium (60 × 30)", "Coarse (30 × 15)", "Fine (120 × 60)"], self.bearing.mesh),
-        ]
-        for row, (label, options, current) in enumerate(data):
-            grid.addWidget(QLabel(label), row, 0)
-            combo = QComboBox()
-            combo.addItems(options)
-            combo.setCurrentText(current)
-            grid.addWidget(combo, row, 1)
-        grid.setColumnStretch(1, 1)
-        layout.addLayout(grid)
-        layout.addStretch(1)
-        return card
-
-    def _operating_point_box(self) -> QWidget:
-        card = Card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(0, 0, 0, 0)
-        header = QLabel(f"Operating Point (at {self.bearing.operating_rpm:,} rpm)")
-        header.setObjectName("subHeader")
-        header.setContentsMargins(12, 10, 0, 6)
-        layout.addWidget(header)
-        table = QTableWidget(6, 3)
-        table.setHorizontalHeaderLabels(["", "", ""])
-        table.horizontalHeader().hide()
-        configure_table(table, row_height=30)
-        table.verticalHeader().hide()
-        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        rows = [
-            ("Eccentricity Ratio (ε)", f"{self.bearing.eccentricity_ratio:.3f}", "-"),
-            ("Attitude Angle (φ)", f"{self.bearing.attitude_angle_deg:.1f}", "deg"),
-            ("Minimum Film Thickness (hmin)", f"{self.bearing.min_film_thickness_mm:.3f}", "mm"),
-            ("Power Loss", f"{self.bearing.power_loss_kw:.2f}", "kW"),
-            ("Flow Rate", f"{self.bearing.flow_rate_l_min:.1f}", "L/min"),
-            ("Max Temperature (Pad)", f"{self.bearing.max_temperature_c:.1f}", "°C"),
-        ]
-        for row, values in enumerate(rows):
-            for col, value in enumerate(values):
-                table.setItem(row, col, item(value, center=col > 0))
-        table.setColumnWidth(0, 165)
-        table.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(table, 1)
-        return card
+    def set_thd_result(self, result):
+        self.thd_result = result
+        rated = self.project.engineering.operating_cases[0].rated_speed_rpm
+        for tab in self.result_tabs.values():
+            tab.set_result(result, rated)
+        self.input_summary.setText(
+            f"{result.source_model} → {result.application_class} · "
+            f"ROSS {result.metadata['ross_api_contract']} · "
+            f"{len(result.coefficients)} solved stations · lubricant: {result.metadata['lubricant']}. "
+            "Native fields retained; Calculate Bearing opens the input editor."
+        )
 
     def _kc_tab(self) -> QWidget:
         page = QWidget()
@@ -379,7 +249,11 @@ class BearingStudioPage(QWidget):
             for col, value in enumerate(values):
                 table.setItem(row, col, item(value))
         if self.bearing.coefficients:
-            table.selectRow(min(4, len(self.bearing.coefficients) - 1))
+            rated = self.project.engineering.operating_cases[0].rated_speed_rpm
+            self.nominal_index = min(range(len(self.bearing.coefficients)), key=lambda i: abs(self.bearing.coefficients[i].rpm-rated))
+            table.selectRow(self.nominal_index)
+            table.item(self.nominal_index, 0).setToolTip(f"Nearest solved station to rated {rated:g} rpm")
+        self.kc_table = table
         table.resizeColumnsToContents()
         layout.addWidget(table, 3)
         chart_card = Card()
@@ -394,7 +268,9 @@ class BearingStudioPage(QWidget):
         combo.addItems(["Stiffness (K)", "Damping (C)"])
         top.addWidget(combo)
         chart_layout.addLayout(top)
-        chart_layout.addWidget(BearingCoefficientChart(self.bearing), 1)
+        self.coefficient_chart = BearingCoefficientChart(self.bearing)
+        combo.currentIndexChanged.connect(self.coefficient_chart.set_coefficient_kind)
+        chart_layout.addWidget(self.coefficient_chart, 1)
         layout.addWidget(chart_card, 2)
         return page
 
@@ -409,10 +285,7 @@ class BearingStudioPage(QWidget):
             ("ROSS Class", self.bearing.ross_class),
             ("Node Position", self.bearing.node_position),
             ("Connected Shaft", self.bearing.connected_shaft),
-            ("Number of Pads", str(self.bearing.number_of_pads)),
-            ("Preload", f"{self.bearing.preload:.2f}"),
-            ("Clearance", f"{self.bearing.radial_clearance_mm:.2f} mm"),
-            ("Pad Arc", f"{self.bearing.pad_arc_deg:.0f} deg"),
+
         ]
         for row, (key, value) in enumerate(rows):
             label = QLabel(key)
@@ -444,5 +317,7 @@ class BearingStudioPage(QWidget):
         export = QPushButton("Export Curves")
         export.setObjectName("softButton")
         export.setIcon(engineering_icon("export", 20))
+        export.setEnabled(False)
+        export.setToolTip("Curve export is not implemented.")
         card.root.addWidget(export)
         return card

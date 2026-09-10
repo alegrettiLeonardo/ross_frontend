@@ -80,13 +80,16 @@ def main() -> int:
     modal = backend.run_modal_build(cylindrical_build, 3600.0, num_modes=12)
     modal_finite = bool(np.all(np.isfinite(np.asarray(modal.wd, dtype=float))))
 
-    thd_blocked = True
+    # This gate is intentionally about service ownership, not about the global
+    # capability registry. Lateral THD models are VALIDATED in ROSS Studio 0.10.0,
+    # but they must never be accepted by the General BearingStudioService.
+    thd_rejected_by_general_service = True
     try:
         service.calculate(source, 0, "PlainJournal", {})
     except Exception:
         pass
     else:
-        thd_blocked = False
+        thd_rejected_by_general_service = False
 
     gates = {
         "direct_kc_exact": direct_exact and finite_kc(direct),
@@ -102,7 +105,7 @@ def main() -> int:
             and cylindrical_link_ok
             and modal_finite
         ),
-        "thd_remains_gated": thd_blocked,
+        "general_service_rejects_thd": thd_rejected_by_general_service,
     }
     passed = all(gates.values())
 
@@ -148,7 +151,11 @@ def main() -> int:
                 "note": cylindrical.note,
             },
         },
-        "scope_gate": "General / Parametric only. THD and AMB remain disabled until their own qualification tranche.",
+        "scope_gate": (
+            "General / Parametric service qualification only. Lateral THD is handled "
+            "exclusively by THDBearingStudioService; ThrustPad and AMB retain their "
+            "independent capability gates."
+        ),
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import import_module
 from math import pi
 from typing import Any, Mapping
@@ -38,7 +38,7 @@ class THDBearingCalculationResult:
     application_class: str
     coefficients: tuple[BearingCoefficientPoint, ...]
     operating_points: tuple[THDOperatingPoint, ...]
-    metadata: dict[str, float | int | str | list[float]]
+    metadata: dict[str, Any]
     note: str
     native_element: Any
 
@@ -167,24 +167,68 @@ class THDBearingStudioService:
         inputs: Mapping[str, Any] | None = None,
     ) -> THDBearingCalculationResult:
         self._bearing(project, index)
-        values = dict(inputs or {})
+        engineering_input = dict(inputs or {})
+        values = self.normalize_inputs(engineering_input)
         if ross_class not in self.SUPPORTED_CLASSES:
             raise EngineeringError(
                 f"{ross_class} is not in the qualified THD lateral adapter set. "
                 "ThrustPad and AMB keep independent scientific gates."
             )
         if ross_class == "PlainJournal":
-            return self._plain_journal(project, values)
-        if ross_class == "TiltingPad":
-            return self._tilting_pad(project, values)
-        return self._squeeze_film_damper(project, values)
+            result = self._plain_journal(project, values)
+        elif ross_class == "TiltingPad":
+            result = self._tilting_pad(project, values)
+        else:
+            result = self._squeeze_film_damper(project, values)
+        metadata = dict(result.metadata)
+        metadata["engineering_input"] = engineering_input
+        metadata["normalized_input"] = values
+        # SI audit is separate from the explicit mixed-unit ROSS constructor contract.
+        si = {k: v for k, v in metadata.items() if k.endswith(("_m", "_n", "_pa"))}
+        si["speed_rad_s"] = [float(p.rpm * 2*pi/60) for p in result.coefficients]
+        for k, v in metadata.items():
+            if k.endswith("_deg") and isinstance(v, (int, float)):
+                si[k[:-4] + "_rad"] = float(v * pi/180)
+            elif k.endswith("_c") and isinstance(v, (int, float)):
+                si[k[:-2] + "_k"] = float(v + 273.15)
+        if "oil_flow_l_min" in metadata:
+            si["oil_flow_m3_s"] = metadata["oil_flow_l_min"] / 60000
+        metadata["si_input"] = si
+        metadata["discretization"] = {k: metadata[k] for k in ("nx", "nz", "elements_circumferential", "elements_axial") if k in metadata}
+        metadata["operating_condition"] = {k: metadata[k] for k in ("fxs_load_n", "fys_load_n", "operating_type", "equilibrium_type", "thermal_type", "eccentricity_ratio", "cavitation") if k in metadata}
+        return replace(result, metadata=metadata)
+
+    @staticmethod
+    def normalize_inputs(inputs: Mapping[str, Any]) -> dict[str, Any]:
+        """Convert desktop engineering units at the scientific boundary only.
+
+        ROSS mixed-unit arguments (rpm, degrees, Celsius, L/min) retain their
+        explicit suffixes and are wrapped with Q_ where required by ROSS 2.3.
+        """
+        values = dict(inputs)
+        for source, target, scale in (
+            ("journal_diameter_mm", "journal_diameter_m", 1e-3),
+            ("axial_length_mm", "axial_length_m", 1e-3),
+            ("pad_axial_length_mm", "pad_axial_length_m", 1e-3),
+            ("pad_thickness_mm", "pad_thickness_m", 1e-3),
+            ("radial_clearance_um", "radial_clearance_m", 1e-6),
+            ("oil_supply_pressure_bar", "oil_supply_pressure_pa", 1e5),
+        ):
+            if source in values:
+                if target in values:
+                    raise EngineeringError(f"Specify either {source} or {target}, not both.")
+                values[target] = float(values.pop(source)) * scale
+        if "initial_eccentricity_ratio" in values:
+            values["initial_guess"] = [float(values.pop("initial_eccentricity_ratio")),
+                                       float(values.pop("initial_attitude_angle_deg")) * pi / 180.0]
+        return values
 
     def _base_result(
         self,
         source_model: str,
         element: Any,
         speeds_rpm: np.ndarray,
-        metadata: dict[str, float | int | str | list[float]],
+        metadata: dict[str, Any],
         operating_points: list[THDOperatingPoint],
         note: str,
     ) -> THDBearingCalculationResult:
@@ -245,10 +289,19 @@ class THDBearingStudioService:
         lubricant = str(inputs.get("lubricant", "ISOVG32"))
         oil_flow_l_min = self._positive(inputs.get("oil_flow_l_min", 37.86), "Oil flow", allow_zero=True)
         oil_supply_pressure_pa = self._positive(inputs.get("oil_supply_pressure_pa", 0.0), "Oil supply pressure", allow_zero=True)
+        sommerfeld_type = int(inputs.get("sommerfeld_type", 2))
+        if sommerfeld_type not in {1, 2}:
+            raise EngineeringError("Sommerfeld type must be 1 or 2.")
+        if np.any(groove < 0) or np.any(groove > 1):
+            raise EngineeringError("Groove factors must be fractions in [0, 1]; correct the value for each pad.")
+        if not 0 <= preload < 1:
+            raise EngineeringError("Preload must satisfy 0 <= preload < 1.")
         initial_guess = np.asarray(inputs.get("initial_guess", [0.1, -0.1]), dtype=float)
         if initial_guess.shape != (2,) or not np.all(np.isfinite(initial_guess)):
             raise EngineeringError("PlainJournal initial_guess must be [eccentricity_ratio, attitude_angle_rad].")
 
+        if not 0 <= initial_guess[0] < 1:
+            raise EngineeringError("Initial eccentricity ratio must satisfy 0 <= epsilon < 1.")
         element = rs.PlainJournal(
             n=0,
             axial_length=axial_length,
@@ -313,6 +366,10 @@ class THDBearingStudioService:
                 "operating_type": operating_type,
                 "method": method,
                 "oil_flow_l_min": oil_flow_l_min,
+                "oil_supply_pressure_pa": oil_supply_pressure_pa,
+                "groove_factor": groove.tolist(),
+                "sommerfeld_type": int(inputs.get("sommerfeld_type", 2)),
+                "initial_guess": initial_guess.tolist(),
             },
             ops,
             "Native ROSS 2.3 PlainJournal THD/Reynolds solution; solved K/C is cached as BearingElement for rotor execution.",
@@ -387,9 +444,9 @@ class THDBearingStudioService:
             max_t = self._sequence_value(getattr(results, "maxT_list", None), i)
             ops.append(THDOperatingPoint(
                 rpm=float(rpm),
-                max_pressure_pa=max_p if max_p is not None else (self._extreme(pressure_fields[i], "max") if i < len(pressure_fields) else None),
-                max_temperature_c=max_t if max_t is not None else (self._extreme(temperature_fields[i], "max") if i < len(temperature_fields) else None),
-                min_film_thickness_m=self._sequence_value(getattr(results, "minH_list", None), i),
+                max_pressure_pa=self._extreme(pressure_fields[i], "max") if i < len(pressure_fields) else max_p,
+                max_temperature_c=self._extreme(temperature_fields[i], "max") if i < len(temperature_fields) else max_t,
+                min_film_thickness_m=None,  # ROSS minH_list is h_pivot, not a global film minimum.
                 eccentricity_ratio=self._sequence_value(getattr(results, "ecc_list", None), i),
                 attitude_angle_rad=self._sequence_value(getattr(results, "attitude_angle_list", None), i),
             ))
@@ -401,6 +458,7 @@ class THDBearingStudioService:
                 "journal_diameter_m": journal_diameter,
                 "radial_clearance_m": radial_clearance,
                 "pad_thickness_m": pad_thickness,
+                "geometry": "tilting_pads",
                 "n_pads": n_pads,
                 "pivot_angles_deg": [float(value) for value in pivot_angles_deg],
                 "pad_arc_deg": pad_arc_deg,
@@ -412,6 +470,8 @@ class THDBearingStudioService:
                 "fxs_load_n": fxs_load,
                 "fys_load_n": fys_load,
                 "equilibrium_type": equilibrium_type,
+                "eccentricity_ratio": eccentricity,
+                "attitude_angle_deg": attitude_deg,
                 "thermal_type": thermal_type,
                 "nx": nx,
                 "nz": nz,

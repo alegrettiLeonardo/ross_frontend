@@ -53,6 +53,7 @@ jobs:
             artifacts/concentrated_mass_qualification.json
             artifacts/bearing_studio_qualification.json
             artifacts/thd_bearing_studio_qualification.json
+            artifacts/thd_desktop_qualification.json
             artifacts/op_w60_pipeline_summary.json
             artifacts/op_w60_ross_vs_rotordin_correlation.json
             artifacts/op_w60_ross_vs_rotordin_correlation.csv

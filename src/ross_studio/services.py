@@ -27,10 +27,10 @@ class RossCapabilityRegistry:
         Capability(BearingGroup.GENERAL, "BallBearingElement", "Ball Bearing", AdapterStatus.VALIDATED),
         Capability(BearingGroup.GENERAL, "RollerBearingElement", "Roller Bearing", AdapterStatus.VALIDATED),
         Capability(BearingGroup.GENERAL, "CylindricalBearing", "Cylindrical Bearing", AdapterStatus.VALIDATED),
-        Capability(BearingGroup.THD, "PlainJournal", "Plain Journal", AdapterStatus.PLANNED, "Native ROSS 2.3 THD solver adapter is scientifically qualified, but UI calculate/apply routing and field-result handoff remain an end-to-end gate."),
-        Capability(BearingGroup.THD, "TiltingPad", "Tilting Pad", AdapterStatus.PLANNED, "Native ROSS 2.3 THD solver adapter is scientifically qualified, but UI calculate/apply routing and field-result handoff remain an end-to-end gate."),
+        Capability(BearingGroup.THD, "PlainJournal", "Plain Journal", AdapterStatus.VALIDATED, "Native ROSS 2.3 lateral THD workflow qualified end to end: engineering input, calculate, native fields, solved K/C preview, BearingElement apply, flexible n_link, strict rotor and modal."),
+        Capability(BearingGroup.THD, "TiltingPad", "Tilting Pad", AdapterStatus.VALIDATED, "Native ROSS 2.3 lateral THD workflow qualified end to end: engineering input, calculate, native fields, solved K/C preview, BearingElement apply, flexible n_link, strict rotor and modal."),
         Capability(BearingGroup.THD, "ThrustPad", "Thrust Pad", AdapterStatus.PLANNED, "Requires a qualified axial Kzz/Czz domain and rotor-result contract before execution is enabled."),
-        Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.PLANNED, "Native ROSS 2.3 SFD solver adapter is scientifically qualified, but UI calculate/apply routing and result handoff remain an end-to-end gate."),
+        Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.VALIDATED, "Native ROSS 2.3 lateral SFD workflow qualified end to end: engineering input, calculate, solved K/C preview, BearingElement apply, flexible n_link, strict rotor and modal. Unsupported native fields remain explicitly unavailable."),
         Capability(BearingGroup.AMB, "MagneticBearingElement", "Active Magnetic Bearing", AdapterStatus.BLOCKED, "Requires an explicit actuator/sensor/controller domain before execution is enabled."),
     )
 
