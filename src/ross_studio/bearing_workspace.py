@@ -36,13 +36,16 @@ class BearingWorkspaceService:
 
     @staticmethod
     def _is_station_anchor(bearing) -> bool:
-        # The qualified ThrustPad adapter stores an axial Kzz/Czz table and adds a
-        # separate BearingSpec at the selected radial station. That spec is physical
-        # rotor content, but not a new selectable shaft station.
-        return not bool(bearing.metadata.get("axial_coefficients"))
+        # A valid qualified ThrustPad auxiliary carries both source_model and the
+        # solved axial table. Treat either marker as sufficient to avoid exposing a
+        # malformed/partially migrated axial element as a new radial station.
+        return not (
+            str(bearing.metadata.get("source_model", "")) == "ThrustPad"
+            or bool(bearing.metadata.get("axial_coefficients"))
+        )
 
-    @classmethod
-    def resolve_index(cls, project: RotorProject, index: int) -> int:
+    @staticmethod
+    def _raw_index(project: RotorProject, index: int) -> int:
         try:
             resolved = int(index)
         except (TypeError, ValueError) as exc:
@@ -51,11 +54,45 @@ class BearingWorkspaceService:
             raise EngineeringError(
                 f"Bearing index {resolved} is outside the project range 0..{max(len(project.bearings) - 1, 0)}."
             )
+        return resolved
+
+    @classmethod
+    def resolve_index(cls, project: RotorProject, index: int) -> int:
+        resolved = cls._raw_index(project, index)
         if not cls._is_station_anchor(project.bearings[resolved]):
             raise EngineeringError(
                 f"Bearing index {resolved} is an axial auxiliary element, not a selectable physical radial station."
             )
         return resolved
+
+    @classmethod
+    def anchor_index(cls, project: RotorProject, element_index: int) -> int:
+        """Map any visible bearing element back to its physical radial station.
+
+        This is used by sketch hit-testing. A radial element maps to itself. A
+        ThrustPad auxiliary maps to the unique radial station at the same axial
+        coordinate, so clicking the auxiliary graphic never changes the editing
+        identity to a non-selectable axial BearingSpec.
+        """
+
+        resolved = cls._raw_index(project, element_index)
+        bearing = project.bearings[resolved]
+        if cls._is_station_anchor(bearing):
+            return resolved
+        matches = [
+            station.index
+            for station in cls.stations(project)
+            if abs(station.position_mm - float(bearing.position_mm)) <= 1e-9
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            raise EngineeringError(
+                f"Axial bearing element #{resolved + 1} at {bearing.position_mm:g} mm has no physical radial station anchor."
+            )
+        raise EngineeringError(
+            f"Axial bearing element #{resolved + 1} at {bearing.position_mm:g} mm maps to multiple radial stations {matches}."
+        )
 
     @classmethod
     def stations(cls, project: RotorProject) -> tuple[BearingStation, ...]:
