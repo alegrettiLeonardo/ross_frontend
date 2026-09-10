@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication
 
 from ross_studio.app import RossStudioWindow
 from ross_studio.analysis_backend import RossAnalysisBackend
-from ross_studio.domain import AdapterStatus
+from ross_studio.domain import AdapterStatus, BearingGroup
 from ross_studio.ross_backend import RossModelBuilder
 from ross_studio.thd_results import UNAVAILABLE, native_field
 from ross_studio.thrust_pad_input_dialog import ThrustPadInputDialog
@@ -22,27 +22,31 @@ from ross_studio.thrust_pad_service import ThrustPadCalculationResult
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_pre_promotion_registry_keeps_thrust_pad_gated(qtbot):
+def test_promoted_registry_enables_thrust_pad(qtbot):
     window = RossStudioWindow()
     qtbot.addWidget(window)
     try:
-        status, _reason = window.catalog.registry.effective_status("ThrustPad")
-        assert status == AdapterStatus.PLANNED
+        status, reason = window.catalog.registry.effective_status("ThrustPad")
+        assert status == AdapterStatus.VALIDATED
+        assert "axial" in reason.lower()
+        entries = {
+            row["class"]: row
+            for row in window.catalog.entries(BearingGroup.THD)
+        }
+        thrust_entry = entries["ThrustPad"]
+        assert thrust_entry["status"] == AdapterStatus.VALIDATED.value
+        assert thrust_entry["can_execute"] is True
+
         window._open_bearing_group("THD")
         window.bearing_page._select_type("thrust", announce=False)
-        assert not window.bearing_page.calculate_button.isEnabled()
+        assert window.bearing_page.calculate_button.isEnabled()
         assert not window.bearing_page.apply_button.isEnabled()
     finally:
         window.close()
 
 
 def test_real_qt_thrust_pad_calculate_preview_apply_strict_modal(qtbot, monkeypatch):
-    """Exercise the complete desktop wiring while the production capability is gated.
-
-    The button is enabled only inside this coordination test. The calculation itself is
-    the real ROSS 2.3 ThrustPad solve; no scientific result is mocked. Promotion occurs
-    only after this test and all independent scientific gates are green.
-    """
+    """Exercise the complete promoted ThrustPad desktop path with no execution bypass."""
     assert rs.__version__ == "2.3.0"
     window = RossStudioWindow()
     qtbot.addWidget(window)
@@ -50,10 +54,9 @@ def test_real_qt_thrust_pad_calculate_preview_apply_strict_modal(qtbot, monkeypa
     window._open_bearing_group("THD")
     qtbot.mouseClick(window.bearing_page.type_buttons["thrust"], Qt.MouseButton.LeftButton)
     assert window._selected_bearing_class() == "ThrustPad"
-    assert not window.bearing_page.calculate_button.isEnabled()
+    assert window.catalog.registry.effective_status("ThrustPad")[0] == AdapterStatus.VALIDATED
+    assert window.bearing_page.calculate_button.isEnabled()
 
-    # Pre-promotion execution is deliberately test-local. No registry status is changed.
-    window.bearing_page.calculate_button.setEnabled(True)
     original = deepcopy(window.project.engineering)
     calls: list[tuple[str, str]] = []
     calculate = window.thrust_pad_service.calculate
@@ -82,7 +85,7 @@ def test_real_qt_thrust_pad_calculate_preview_apply_strict_modal(qtbot, monkeypa
     def fill_dialog():
         dialog = QApplication.activeModalWidget()
         assert isinstance(dialog, ThrustPadInputDialog)
-        # One canonical ROSS 2.3 speed station keeps this E2E deterministic.
+        # Explicit canonical ROSS 2.3 speed station keeps the qualification deterministic.
         dialog.fields["speed_rpm"].setText("90")
         entered.update(dialog.values())
         dialog.accept()
@@ -187,7 +190,8 @@ def test_real_qt_thrust_pad_calculate_preview_apply_strict_modal(qtbot, monkeypa
         "shaft_elements": len(build.rotor.shaft_elements),
         "modal_wn_rad_s": [float(v) for v in modal.wn],
         "native_fields_retained_after_apply": window.bearing_field_result is result,
-        "capability_status_during_gate": "PLANNED",
+        "capability_status_post_promotion": AdapterStatus.VALIDATED.value,
+        "can_execute_post_promotion": True,
     }
     out = ROOT / "artifacts" / "thrust_pad_desktop_qualification.json"
     out.parent.mkdir(exist_ok=True)
