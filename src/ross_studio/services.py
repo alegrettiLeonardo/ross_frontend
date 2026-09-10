@@ -27,10 +27,10 @@ class RossCapabilityRegistry:
         Capability(BearingGroup.GENERAL, "BallBearingElement", "Ball Bearing", AdapterStatus.VALIDATED),
         Capability(BearingGroup.GENERAL, "RollerBearingElement", "Roller Bearing", AdapterStatus.VALIDATED),
         Capability(BearingGroup.GENERAL, "CylindricalBearing", "Cylindrical Bearing", AdapterStatus.VALIDATED),
-        Capability(BearingGroup.THD, "PlainJournal", "Plain Journal", AdapterStatus.VALIDATED, "Qualified native ROSS 2.3 THD calculation; solved K/C is cached for rotor execution while native fields remain result evidence."),
-        Capability(BearingGroup.THD, "TiltingPad", "Tilting Pad", AdapterStatus.VALIDATED, "Qualified native ROSS 2.3 THD calculation; solved K/C is cached for rotor execution while native fields remain result evidence."),
+        Capability(BearingGroup.THD, "PlainJournal", "Plain Journal", AdapterStatus.PLANNED, "Native ROSS 2.3 THD solver adapter is scientifically qualified, but UI calculate/apply routing and field-result handoff remain an end-to-end gate."),
+        Capability(BearingGroup.THD, "TiltingPad", "Tilting Pad", AdapterStatus.PLANNED, "Native ROSS 2.3 THD solver adapter is scientifically qualified, but UI calculate/apply routing and field-result handoff remain an end-to-end gate."),
         Capability(BearingGroup.THD, "ThrustPad", "Thrust Pad", AdapterStatus.PLANNED, "Requires a qualified axial Kzz/Czz domain and rotor-result contract before execution is enabled."),
-        Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.VALIDATED, "Qualified native ROSS 2.3 squeeze-film calculation; solved K/C is cached for rotor execution."),
+        Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.PLANNED, "Native ROSS 2.3 SFD solver adapter is scientifically qualified, but UI calculate/apply routing and result handoff remain an end-to-end gate."),
         Capability(BearingGroup.AMB, "MagneticBearingElement", "Active Magnetic Bearing", AdapterStatus.BLOCKED, "Requires an explicit actuator/sensor/controller domain before execution is enabled."),
     )
 
