@@ -350,11 +350,13 @@ class BearingStudioPage(QWidget):
         if not available:
             self.result_card.hide()
             self.results_button.setText("View Results")
+            self.results_button.setIcon(engineering_icon("results", 19))
             return
         if show:
             self.set_results_visible(True)
         else:
             self.results_button.setText("View Results")
+            self.results_button.setIcon(engineering_icon("results", 19))
 
     def set_results_visible(self, visible: bool) -> None:
         if visible and not self.results_button.isEnabled():
@@ -366,6 +368,56 @@ class BearingStudioPage(QWidget):
             QTimer.singleShot(0, lambda: self.workspace_scroll.ensureWidgetVisible(self.result_card, 0, 20))
         else:
             QTimer.singleShot(0, lambda: self.workspace_scroll.ensureWidgetVisible(self.input_card, 0, 20))
+
+    def set_bearing_preview(self, bearing: BearingModel) -> None:
+        """Refresh result-only widgets while preserving the visible input editor."""
+        self.bearing = bearing
+        headers = [
+            "RPM",
+            "Kxx\n(N/m)",
+            "Kxy\n(N/m)",
+            "Kyx\n(N/m)",
+            "Kyy\n(N/m)",
+            "Cxx\n(N·s/m)",
+            "Cxy\n(N·s/m)",
+            "Cyx\n(N·s/m)",
+            "Cyy\n(N·s/m)",
+        ]
+        self.kc_table.clear()
+        self.kc_table.setRowCount(len(bearing.coefficients))
+        self.kc_table.setColumnCount(len(headers))
+        self.kc_table.setHorizontalHeaderLabels(headers)
+        configure_table(self.kc_table, row_height=30)
+        self.kc_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        for row, coeff in enumerate(bearing.coefficients):
+            values = [
+                f"{coeff.rpm:g}",
+                f"{coeff.kxx:.2e}",
+                f"{coeff.kxy:.2e}",
+                f"{coeff.kyx:.2e}",
+                f"{coeff.kyy:.2e}",
+                f"{coeff.cxx:.2e}",
+                f"{coeff.cxy:.2e}",
+                f"{coeff.cyx:.2e}",
+                f"{coeff.cyy:.2e}",
+            ]
+            for col, value in enumerate(values):
+                self.kc_table.setItem(row, col, item(value))
+        if bearing.coefficients:
+            rated = self.project.engineering.operating_cases[0].rated_speed_rpm
+            self.nominal_index = min(
+                range(len(bearing.coefficients)),
+                key=lambda i: abs(bearing.coefficients[i].rpm - rated),
+            )
+            self.kc_table.selectRow(self.nominal_index)
+            self.kc_table.item(self.nominal_index, 0).setToolTip(
+                f"Nearest solved station to rated {rated:g} rpm"
+            )
+        self.kc_table.resizeColumnsToContents()
+        self.coefficient_chart.bearing = bearing
+        self.coefficient_chart.update()
+        self.chart_card.setVisible(True)
+        self.set_results_available(True)
 
     def set_thd_result(self, result) -> None:
         self.thd_result = result
