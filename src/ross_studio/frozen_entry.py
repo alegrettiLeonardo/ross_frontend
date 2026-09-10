@@ -26,6 +26,17 @@ def _write_payload(path: str | None, payload: dict[str, object]) -> None:
         print(text)
 
 
+def _failure_payload(exc: Exception) -> dict[str, object]:
+    return {
+        "status": "FAIL",
+        "error_type": type(exc).__name__,
+        "error": str(exc),
+        "traceback": format_exc(),
+        "executable": str(Path(sys.executable).resolve()),
+        "frozen": bool(getattr(sys, "frozen", False)),
+    }
+
+
 def frozen_self_test_main(argv: list[str]) -> int:
     output_path = _option_value(argv, "--self-test-output")
     try:
@@ -38,26 +49,35 @@ def frozen_self_test_main(argv: list[str]) -> int:
         _write_payload(output_path, payload)
         return 0
     except Exception as exc:
-        payload = {
-            "status": "FAIL",
-            "error_type": type(exc).__name__,
-            "error": str(exc),
-            "traceback": format_exc(),
-            "executable": str(Path(sys.executable).resolve()),
-            "frozen": bool(getattr(sys, "frozen", False)),
-        }
-        _write_payload(output_path, payload)
+        _write_payload(output_path, _failure_payload(exc))
         return 2
+
+
+def frozen_gui_smoke_main(argv: list[str]) -> int:
+    output_path = _option_value(argv, "--gui-smoke-output")
+    try:
+        from ross_studio.frozen_gui_smoke import run_frozen_gui_smoke
+
+        result = run_frozen_gui_smoke()
+        payload: dict[str, object] = result.to_dict()
+        payload["executable"] = str(Path(sys.executable).resolve())
+        payload["frozen"] = bool(getattr(sys, "frozen", False))
+        _write_payload(output_path, payload)
+        return 0
+    except Exception as exc:
+        _write_payload(output_path, _failure_payload(exc))
+        return 3
 
 
 def main() -> int:
     argv = list(sys.argv[1:])
     if "--self-test" in argv or "--self-test-output" in argv:
         return frozen_self_test_main(argv)
+    if "--gui-smoke" in argv or "--gui-smoke-output" in argv:
+        return frozen_gui_smoke_main(argv)
 
-    # Keep the heavy Qt application import out of the packaging self-test bootstrap.
-    # This gives CI a clean way to prove the scientific runtime independently of a
-    # desktop display while still executing the exact same frozen binary.
+    # Keep heavy Qt imports out of the scientific packaging self-test bootstrap.
+    # Normal desktop execution still enters the exact production application.
     from ross_studio.app import launch
 
     return int(launch())
