@@ -4,12 +4,13 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QDialog, QLabel
 
 from ross_studio.bearing_workspace import BearingWorkspaceService
 from ross_studio.domain import BearingSpec, EngineeringError
 from ross_studio.legacy_import import load_irdin_project
 from ross_studio.ross_backend import RossModelBuilder
+from ross_studio.rotor_selection import RotorEntityRef, WORKSPACE_SELECTION
 from ross_studio.topology import NodeInsertionService
 
 
@@ -118,6 +119,7 @@ def test_bearing_studio_2_routes_directly_to_workspace_and_selects_nde(qtbot) ->
     pytest.importorskip("ross")
     from ross_studio.app import RossStudioWindow
 
+    WORKSPACE_SELECTION.clear()
     window = RossStudioWindow()
     qtbot.addWidget(window)
 
@@ -136,12 +138,65 @@ def test_bearing_studio_2_routes_directly_to_workspace_and_selects_nde(qtbot) ->
     assert window.bearing.name == window.project.engineering.bearings[1].name
     assert window.bearing_page.bearing_index == 1
     assert window.bearing_page.bearing_selector.currentData() == 1
+    assert WORKSPACE_SELECTION.current is not None
+    assert WORKSPACE_SELECTION.current.kind == "bearings"
+    assert WORKSPACE_SELECTION.current.index == 1
+
+
+def test_rotor_selection_drives_bearing_station_and_axial_selection_canonicalizes(qtbot) -> None:
+    pytest.importorskip("ross")
+    from ross_studio.app import RossStudioWindow
+
+    WORKSPACE_SELECTION.clear()
+    window = RossStudioWindow()
+    qtbot.addWidget(window)
+    engineering = window.project.engineering
+    assert engineering is not None
+
+    nde = engineering.bearings[1]
+    WORKSPACE_SELECTION.select(RotorEntityRef("bearings", 1, nde.name, nde.position_mm))
+    qtbot.waitUntil(lambda: window.bearing_index == 1)
+    assert window.stack.currentWidget() is window.bearing_page
+    assert window.bearing_page.bearing_selector.currentData() == 1
+
+    # Add an axial auxiliary at DE and deliberately select its element identity.
+    # Bearing Studio must expose it as station content but keep the edit anchor DE.
+    de = engineering.bearings[0]
+    engineering.bearings.append(
+        BearingSpec(
+            name="DE thrust bearing",
+            position_mm=de.position_mm,
+            ross_class="BearingElement",
+            metadata={
+                "source_model": "ThrustPad",
+                "axial_coefficients": [{"rpm": 3600.0, "kzz": 2.0e8, "czz": 2.0e5}],
+            },
+        )
+    )
+    axial_index = len(engineering.bearings) - 1
+
+    WORKSPACE_SELECTION.select(RotorEntityRef("bearings", axial_index, "DE thrust bearing", de.position_mm))
+    qtbot.waitUntil(lambda: window.bearing_index == 0)
+    assert window.bearing_page.bearing_selector.count() == 2
+    assert window.bearing_page.bearing_selector.currentData() == 0
+    assert window.bearing_page.inventory is not None
+    assert [element.role for element in window.bearing_page.inventory.elements] == [
+        "radial_anchor",
+        "axial_auxiliary",
+    ]
+    assert any("ThrustPad" in label.text() for label in window.bearing_page.findChildren(QLabel))
+    assert WORKSPACE_SELECTION.current is not None
+    assert WORKSPACE_SELECTION.current.index == 0
+    assert WORKSPACE_SELECTION.current.position_mm == pytest.approx(de.position_mm)
+
+    WORKSPACE_SELECTION.clear()
 
 
 def test_nde_ball_calculate_preview_apply_isolated_from_de(qtbot, monkeypatch) -> None:
     rs = pytest.importorskip("ross")
     import ross_studio.app as app_module
 
+    WORKSPACE_SELECTION.clear()
     captured: dict[str, object] = {}
 
     class FakeBearingInputDialog:
@@ -205,6 +260,7 @@ def test_switching_station_invalidates_unapplied_preview(qtbot) -> None:
     pytest.importorskip("ross")
     from ross_studio.app import RossStudioWindow
 
+    WORKSPACE_SELECTION.clear()
     window = RossStudioWindow()
     qtbot.addWidget(window)
     engineering = window.project.engineering
