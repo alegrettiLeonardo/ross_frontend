@@ -109,9 +109,6 @@ def test_real_ross_23_runs_complete_op_w60_scientific_pipeline() -> None:
     completed = [event.stage for event in events if event.state == "completed"]
     assert completed == list(AnalysisPipelineService.STAGES)
 
-    # Push the actual numerical object through the Qt Results page and every
-    # implemented result tab. This is the end-to-end GUI handoff gate: no mock
-    # CAMPBELL_MODES or canned response values are involved.
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
@@ -199,7 +196,7 @@ def test_real_ross_23_runs_complete_op_w60_scientific_pipeline() -> None:
     )
 
 
-def test_qt_engineering_routes_and_bearing_groups() -> None:
+def test_qt_engineering_routes_and_bearing_studio_2_workspace() -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication, QTabWidget
@@ -225,12 +222,13 @@ def test_qt_engineering_routes_and_bearing_groups() -> None:
         assert window.stack.currentWidget() is window.rotor_page
         assert window.rotor_page.editor_stack.currentIndex() == workspace_index
 
-    # 0.12 contract: the left sidebar is the only model navigation. A second
-    # horizontal QTabWidget must not silently return.
     assert window.rotor_page.findChildren(QTabWidget) == []
 
     window._navigate("bearings")
-    assert window.stack.currentWidget() is window.bearing_groups_page
+    assert window.stack.currentWidget() is window.bearing_page
+    assert window.stack.count() == 3
+    assert not hasattr(window, "bearing_groups_page")
+    assert window.bearing_page.bearing_selector.count() == len(window.project.engineering.bearings) == 2
 
     window._open_bearing_group("THD")
     assert window.stack.currentWidget() is window.bearing_page

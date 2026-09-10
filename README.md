@@ -75,6 +75,30 @@ The model workspace uses the left sidebar as its single primary navigation. The 
 
 ## Bearing Studio
 
+### Bearing Studio 2.0 — 0.13.0 tranche
+
+The Bearing Studio workspace now separates **physical bearing identity** from the **ROSS calculation model**. The sidebar opens Bearing Studio directly; there is no intermediate family landing page.
+
+The transaction is:
+
+```text
+select physical bearing station (DE / NDE / future station)
+        ↓
+select model family and qualified ROSS class
+        ↓
+Calculate
+        ↓
+Preview only — engineering RotorProject unchanged
+        ↓
+Apply to Rotor
+        ↓
+commit exactly the selected bearing transaction
+```
+
+`BearingWorkspaceService` resolves every `BearingSpec` to its engineering index, exact axial coordinate, exact ROSS shaft node, current source model and flexible-support ownership. The application no longer uses an implicit `bearing_index=0` for dialogs, scientific services, previews or calculation context.
+
+Changing the selected physical station invalidates an unapplied preview. The Apply gate also verifies that the current station still matches the station captured during Calculate. For the OP-W60 qualification, an NDE BallBearing transaction must leave DE byte-for-byte equivalent at the engineering-domain level and preserve the qualified flexible-support links 28/29 in the strict ROSS rotor.
+
 ### General / Parametric
 
 Qualified classes:
@@ -135,15 +159,16 @@ The existing radial bearing at that station remains a separate element. Its late
 
 `MagneticBearingElement` remains blocked until an explicit actuator, sensor and controller domain is implemented and qualified.
 
-## Frozen desktop executable gate — 0.12.0
+## Frozen desktop executable gate — 0.12.0 qualified
 
-The desktop package uses a production-style PyInstaller onedir build. The same frozen binary supports an internal non-interactive qualification mode:
+The desktop package uses a production-style PyInstaller onedir build. The exact same frozen executable supports two internal non-interactive qualification modes:
 
 ```text
 ROSS-Studio --self-test --self-test-output frozen_selftest.json
+ROSS-Studio --gui-smoke --gui-smoke-output frozen_gui.json
 ```
 
-This is not an import-only smoke test. The executable must prove, from inside its frozen runtime:
+The scientific self-test proves, from inside the packaged runtime:
 
 - ROSS version is exactly 2.3.0;
 - the OP-W60 engineering resource is packaged;
@@ -152,7 +177,7 @@ This is not an import-only smoke test. The executable must prove, from inside it
 - all eight qualified Bearing Studio classes remain executable;
 - only `MagneticBearingElement` remains blocked.
 
-The pull-request workflow builds and runs this exact binary on Linux and Windows. Each OS publishes both the packaged application and the machine-readable self-test artifact. A packaging success without a successful scientific self-test is not a release pass.
+The GUI smoke additionally constructs the real `RossStudioWindow` in the frozen runtime and exercises non-modal navigation/capability gating. The 0.12 gate passed on both Linux and Windows. A successful PyInstaller build without successful scientific and GUI runtime gates is not a release pass.
 
 ## Run
 
@@ -190,19 +215,21 @@ python tools/qualify_bearing_studio.py
 python tools/qualify_thd_bearing_studio.py
 python tools/qualify_thrust_pad.py
 python tools/qualify_workspace_012.py
+python tools/qualify_bearing_workspace.py
 python tools/qualify_op_w60_pipeline.py
 python tools/correlate_op_w60_rotordin.py --enforce
 python tools/isolate_op_w60_response_differences.py
 python tools/isolate_op_w60_conventions.py
 ```
 
-GitHub Actions runs the same scientific gates. The separate frozen-executable workflow additionally builds Linux and Windows desktop packages and runs `tools/qualify_frozen_binary.py` against the actual binaries. Failures are release gates; tests, tolerances and physical checks must not be weakened merely to obtain a green CI.
+GitHub Actions runs the same scientific gates. The separate frozen-executable workflow additionally builds Linux and Windows desktop packages and runs the scientific self-test plus GUI startup smoke against the actual binaries. Failures are release gates; tests, tolerances and physical checks must not be weakened merely to obtain a green CI.
 
 ## Core architecture
 
 ```text
 src/ross_studio/
-├── app.py                         # desktop shell, explicit service dispatch and transactional Apply
+├── app.py                         # desktop shell, explicit station selection and transactional Apply
+├── bearing_workspace.py           # physical bearing identity / DE-NDE station mapping
 ├── bearing_dispatch.py            # class -> scientific service ownership
 ├── bearing_studio_service.py      # General / Parametric models
 ├── thd_bearing_service.py         # lateral THD models
@@ -214,8 +241,9 @@ src/ross_studio/
 ├── ross_backend.py                # strict ROSS model assembly
 ├── analysis_backend.py            # qualified real ROSS analyses
 ├── services.py                    # capability registry and engineering validation
-├── frozen_entry.py                # normal GUI bootstrap + frozen self-test mode
+├── frozen_entry.py                # normal GUI bootstrap + frozen qualification modes
 ├── frozen_selftest.py             # scientific packaged-runtime gate
+├── frozen_gui_smoke.py            # frozen Qt/Bearing Studio startup gate
 ├── solver_console.py              # execution console
 └── pages/
     ├── rotor_model.py

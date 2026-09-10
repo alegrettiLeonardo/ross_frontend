@@ -53,8 +53,8 @@ def test_required_screen_sources_exist() -> None:
     root = Path(__file__).parents[1] / "src" / "ross_studio"
     required = [
         root / "pages" / "rotor_model.py",
-        root / "pages" / "bearing_groups.py",
         root / "pages" / "bearing_studio.py",
+        root / "bearing_workspace.py",
         root / "pages" / "results.py",
         root / "solver_console.py",
         root / "domain.py",

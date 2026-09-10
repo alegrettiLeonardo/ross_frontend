@@ -85,6 +85,10 @@ def main() -> int:
     assert gui_payload["project"] == "OP-W60-500-60Hz-IC611-P3", gui_payload
     assert gui_payload["view_modes"] == ["Engineering 2D", "ROSS Native"], gui_payload
     assert gui_payload["rotor_editor_count"] == 8, gui_payload
+    assert gui_payload["bearing_station_count"] == 2, gui_payload
+    assert gui_payload["bearing_direct_route"] is True, gui_payload
+    assert gui_payload["bearing_selection_synced"] is True, gui_payload
+    assert gui_payload["bearing_station_inventory"] == [["radial_anchor"], ["radial_anchor"]], gui_payload
     assert set(gui_payload["general_executable"]) == EXPECTED_GENERAL, gui_payload
     assert set(gui_payload["thd_executable"]) == EXPECTED_THD, gui_payload
     assert gui_payload["amb_blocked"] == ["MagneticBearingElement"], gui_payload

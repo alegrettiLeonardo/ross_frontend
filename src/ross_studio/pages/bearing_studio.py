@@ -1,31 +1,40 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QSize, Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QDoubleSpinBox,
-    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSpinBox,
     QTabWidget,
     QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from ..bearing_workspace import BearingStation, BearingStationInventory, BearingWorkspaceService
 from ..domain import AdapterStatus, BearingGroup
-from .thd_results import THDResultTab
 from ..icons import engineering_icon
 from ..models import BearingModel, ProjectModel
+from ..rotor_selection import RotorEntityRef, WORKSPACE_SELECTION
 from ..services import BearingCatalogService
 from ..widgets import BearingCoefficientChart, Card, ProjectInfoCard, SectionCard, configure_table, item
+from .thd_results import THDResultTab
 
 
 class BearingStudioPage(QWidget):
+    """Bearing Studio 2.0 workspace.
+
+    A physical bearing station is selected first. The ROSS calculation family/class
+    is selected independently after that. The application service owns the
+    Calculate -> Preview -> Apply transaction and receives the explicit station
+    index emitted by this page. The station selector shares the same engineering
+    selection identity used by the rotor sketch.
+    """
+
     status_message = Signal(str)
+    bearing_selected = Signal(int)
 
     TYPE_DEFINITIONS = (
         ("kc", "Coefficient K/C", "wave", "BearingElement", BearingGroup.GENERAL),
@@ -45,11 +54,24 @@ class BearingStudioPage(QWidget):
         bearing: BearingModel,
         parent: QWidget | None = None,
         catalog: BearingCatalogService | None = None,
+        bearing_index: int = 0,
     ) -> None:
         super().__init__(parent)
         self.project = project
         self.bearing = bearing
         self.catalog = catalog or BearingCatalogService()
+        self.bearing_index = int(bearing_index)
+        self.workspace = BearingWorkspaceService()
+        self.selection = WORKSPACE_SELECTION
+        self.stations: tuple[BearingStation, ...] = (
+            self.workspace.stations(project.engineering) if project.engineering is not None else ()
+        )
+        self.station = next((row for row in self.stations if row.index == self.bearing_index), None)
+        self.inventory: BearingStationInventory | None = (
+            self.workspace.inventory(project.engineering, self.bearing_index)
+            if project.engineering is not None and self.station is not None
+            else None
+        )
         try:
             self.current_group = BearingGroup(bearing.group)
         except ValueError:
@@ -68,8 +90,9 @@ class BearingStudioPage(QWidget):
         page_layout = QVBoxLayout(page_card)
         page_layout.setContentsMargins(14, 10, 14, 10)
         page_layout.setSpacing(8)
+
         header_row = QHBoxLayout()
-        title = QLabel("Bearing Studio")
+        title = QLabel("Bearing Studio 2.0")
         title.setObjectName("cardHeader")
         header_row.addWidget(title)
         self.crumb = QLabel()
@@ -78,10 +101,32 @@ class BearingStudioPage(QWidget):
         header_row.addStretch(1)
         page_layout.addLayout(header_row)
 
+        station_row = QHBoxLayout()
+        station_label = QLabel("Bearing Station")
+        station_label.setObjectName("subHeader")
+        station_row.addWidget(station_label)
+        self.bearing_selector = QComboBox()
+        self.bearing_selector.setObjectName("bearingStationSelector")
+        for station in self.stations:
+            self.bearing_selector.addItem(station.display_label, station.index)
+        selected_row = self.bearing_selector.findData(self.bearing_index)
+        if selected_row >= 0:
+            self.bearing_selector.setCurrentIndex(selected_row)
+        self.bearing_selector.setEnabled(bool(self.stations))
+        self.bearing_selector.currentIndexChanged.connect(self._bearing_combo_changed)
+        station_row.addWidget(self.bearing_selector, 1)
+        page_layout.addLayout(station_row)
+
         group_row = QHBoxLayout()
-        group_label = QLabel("Bearing Group")
+        group_label = QLabel("Model Family")
         group_label.setObjectName("subHeader")
         group_row.addWidget(group_label)
+        self.group_selector = QComboBox()
+        self.group_selector.setObjectName("bearingFamilySelector")
+        for group in (BearingGroup.GENERAL, BearingGroup.THD, BearingGroup.AMB):
+            self.group_selector.addItem(group.value, group.value)
+        self.group_selector.currentTextChanged.connect(self.set_group)
+        group_row.addWidget(self.group_selector)
         self.group_badge = QLabel()
         self.group_badge.setObjectName("muted")
         group_row.addWidget(self.group_badge)
@@ -112,7 +157,10 @@ class BearingStudioPage(QWidget):
         self.editor_note.setWordWrap(True)
         page_layout.addWidget(self.editor_note)
 
-        self.input_summary = QLabel("Calculate Bearing opens the class-specific input editor. Review geometry, lubricant, loads and speed stations there before solving.")
+        self.input_summary = QLabel(
+            "Select the physical bearing station, then the ROSS model. Calculate Bearing is preview-only; "
+            "Apply to Rotor commits only the selected station."
+        )
         self.input_summary.setWordWrap(True)
         page_layout.addWidget(self.input_summary)
         center.addWidget(page_card, 1)
@@ -124,7 +172,7 @@ class BearingStudioPage(QWidget):
         tabs.setDocumentMode(True)
         result_layout.addWidget(tabs, 1)
         tabs.addTab(self._kc_tab(), "K & C Coefficients")
-        self.result_tabs = {}
+        self.result_tabs: dict[str, THDResultTab] = {}
         self.tabs = tabs
         for name in ("Pressure", "Temperature", "Film Thickness", "Journal Position", "Convergence"):
             holder = THDResultTab(name)
@@ -143,13 +191,58 @@ class BearingStudioPage(QWidget):
         right_layout.addWidget(self._bearing_info_card(), 1)
         right_layout.addWidget(self._actions_card())
 
+        # Connect only after widgets are fully initialized. We intentionally do not
+        # replay a process-global selection during construction: the application has
+        # not wired ``bearing_selected`` yet, and replaying it here could leave page
+        # and application station identities inconsistent. New user/sketch selections
+        # are synchronized immediately after construction.
+        self.selection.selection_changed.connect(self._workspace_selection_changed)
         self.set_group(self.current_group.value, announce=False)
+
+    def _bearing_combo_changed(self, row: int) -> None:
+        index = self.bearing_selector.itemData(row)
+        if index is None:
+            return
+        index = int(index)
+        station = next((candidate for candidate in self.stations if candidate.index == index), None)
+        if station is not None:
+            self.selection.select(RotorEntityRef("bearings", index, station.name, station.position_mm))
+        if index != self.bearing_index:
+            self.bearing_selected.emit(index)
+
+    def _workspace_selection_changed(self, ref: RotorEntityRef | None) -> None:
+        """Mirror rotor-sketch bearing selection into the physical station selector."""
+        engineering = self.project.engineering
+        if ref is None or ref.kind != "bearings" or engineering is None:
+            return
+        try:
+            anchor = self.workspace.anchor_index(engineering, ref.index)
+            station = self.workspace.station(engineering, anchor)
+        except Exception:
+            # Invalid/orphan axial elements are fail-closed by the domain service.
+            # The UI does not silently associate them with a nearest bearing.
+            return
+        row = self.bearing_selector.findData(anchor)
+        if row < 0:
+            return
+        if row != self.bearing_selector.currentIndex():
+            self.bearing_selector.setCurrentIndex(row)
+        elif ref.index != anchor:
+            # Canonicalize an axial auxiliary selection back to its radial station.
+            self.selection.select(RotorEntityRef("bearings", anchor, station.name, station.position_mm))
 
     def set_group(self, group: str, *, announce: bool = True) -> None:
         selected_group = BearingGroup(group)
         self.current_group = selected_group
         self.group_badge.setText(selected_group.value)
-        self.crumb.setText(f"Model  /  Bearings  /  {selected_group.value}  /  {self.bearing.name}")
+        self.crumb.setText(
+            f"Model  /  Bearings  /  {self.bearing.name}  /  {selected_group.value}"
+        )
+        combo_index = self.group_selector.findData(selected_group.value)
+        if combo_index >= 0 and combo_index != self.group_selector.currentIndex():
+            self.group_selector.blockSignals(True)
+            self.group_selector.setCurrentIndex(combo_index)
+            self.group_selector.blockSignals(False)
 
         visible_keys: list[str] = []
         for key, button in self.type_buttons.items():
@@ -179,30 +272,30 @@ class BearingStudioPage(QWidget):
         self.calculate_button.setEnabled(status == AdapterStatus.VALIDATED)
         self.apply_button.setEnabled(False)
 
+        station_name = self.station.name if self.station is not None else self.bearing.name
         if group == BearingGroup.GENERAL:
             self.editor_note.setText(
-                "General / Parametric classes use direct or analytical engineering inputs. "
-                "The imported OP-W60 BearingElement K/C table is preserved without recomputation."
+                f"Target station: {station_name}. General / Parametric classes use direct or analytical engineering inputs. "
+                "Calculate never mutates the rotor; Apply replaces only this selected radial bearing."
             )
         elif ross_class == "ThrustPad":
             self.editor_note.setText(
-                "ThrustPad is an axial THD model. Its rotor contract contains Kzz/Czz only and is added as an independent axial BearingElement at the selected shaft station. "
-                "Existing radial K/C and lateral flexible-support n_link are never reused or overwritten."
+                f"Target station: {station_name}. ThrustPad is axial-only. Apply adds/updates an independent Kzz/Czz "
+                "BearingElement at this shaft station and never overwrites the existing radial K/C or lateral n_link."
             )
         elif group == BearingGroup.THD:
             self.editor_note.setText(
-                "Lateral THD results retain native fields and all solved K/C speed stations. "
-                "Apply uses the solved BearingElement table, including qualified flexible supports."
+                f"Target station: {station_name}. Lateral THD retains native fields and solved K/C speed stations. "
+                "Apply commits the solved BearingElement table only to the selected radial bearing."
             )
         else:
             self.editor_note.setText(
-                "AMB execution is intentionally blocked until actuator, sensor and controller definitions "
-                "exist in the ROSS Studio domain."
+                "AMB execution remains blocked until actuator, sensor and controller definitions exist in the engineering domain."
             )
 
         if announce:
             if status == AdapterStatus.VALIDATED:
-                self.status_message.emit(f"{title}: validated ROSS Studio adapter")
+                self.status_message.emit(f"{title}: validated adapter for {station_name}")
             else:
                 detail = f" {reason}" if reason else ""
                 self.status_message.emit(f"{title}: {status.value}.{detail}")
@@ -213,10 +306,9 @@ class BearingStudioPage(QWidget):
         for tab in self.result_tabs.values():
             tab.set_result(result, rated)
         self.input_summary.setText(
-            f"{result.source_model} → {result.application_class} · "
-            f"ROSS {result.metadata['ross_api_contract']} · "
-            f"{len(result.coefficients)} solved stations · lubricant: {result.metadata['lubricant']}. "
-            "Native fields retained; Calculate Bearing opens the input editor."
+            f"Preview for {self.bearing.name}: {result.source_model} → {result.application_class} · "
+            f"ROSS {result.metadata['ross_api_contract']} · {len(result.coefficients)} solved stations · "
+            f"lubricant: {result.metadata['lubricant']}. Apply is required to commit this station."
         )
 
     def set_thrust_result(self, result) -> None:
@@ -249,10 +341,10 @@ class BearingStudioPage(QWidget):
         self.kc_table.resizeColumnsToContents()
         self.chart_card.setVisible(False)
         self.input_summary.setText(
-            f"ThrustPad → BearingElement (axial-only) · ROSS {result.metadata['ross_api_contract']} · "
-            f"{len(result.axial_coefficients)} solved Kzz/Czz station(s) · axial load: "
-            f"{result.metadata['axial_load_n']:.6g} N · lubricant: {result.metadata['lubricant']}. "
-            "The radial bearing remains a separate element."
+            f"Preview for {self.bearing.name}: ThrustPad → BearingElement (axial-only) · "
+            f"ROSS {result.metadata['ross_api_contract']} · {len(result.axial_coefficients)} solved Kzz/Czz station(s) · "
+            f"axial load: {result.metadata['axial_load_n']:.6g} N · lubricant: {result.metadata['lubricant']}. "
+            "The radial bearing remains separate after Apply."
         )
 
     def _kc_tab(self) -> QWidget:
@@ -291,12 +383,16 @@ class BearingStudioPage(QWidget):
                 table.setItem(row, col, item(value))
         if self.bearing.coefficients:
             rated = self.project.engineering.operating_cases[0].rated_speed_rpm
-            self.nominal_index = min(range(len(self.bearing.coefficients)), key=lambda i: abs(self.bearing.coefficients[i].rpm-rated))
+            self.nominal_index = min(
+                range(len(self.bearing.coefficients)),
+                key=lambda i: abs(self.bearing.coefficients[i].rpm - rated),
+            )
             table.selectRow(self.nominal_index)
             table.item(self.nominal_index, 0).setToolTip(f"Nearest solved station to rated {rated:g} rpm")
         self.kc_table = table
         table.resizeColumnsToContents()
         layout.addWidget(table, 3)
+
         chart_card = Card()
         self.chart_card = chart_card
         chart_layout = QVBoxLayout(chart_card)
@@ -317,28 +413,46 @@ class BearingStudioPage(QWidget):
         return page
 
     def _bearing_info_card(self) -> QWidget:
-        card = SectionCard("Bearing Information")
+        card = SectionCard("Selected Bearing Station")
         grid = QGridLayout()
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(9)
+        support = "Grounded / rigid" if self.station is None or not self.station.support_names else ", ".join(self.station.support_names)
+        ross_node = "—" if self.station is None or self.station.ross_node is None else str(self.station.ross_node)
+        radial = "—"
+        axial = "None"
+        if self.inventory is not None:
+            anchor = self.inventory.radial_anchor
+            radial = f"#{anchor.element_index + 1} {anchor.source_model} → {anchor.ross_class}"
+            if self.inventory.axial_auxiliaries:
+                axial = "; ".join(
+                    f"#{element.element_index + 1} {element.source_model} → {element.ross_class}"
+                    for element in self.inventory.axial_auxiliaries
+                )
         rows = [
+            ("Station Index", str(self.bearing_index + 1)),
             ("Bearing Name", self.bearing.name),
-            ("Bearing Type", self.bearing.bearing_type),
+            ("Current Model", self.bearing.bearing_type),
             ("ROSS Class", self.bearing.ross_class),
             ("Node Position", self.bearing.node_position),
-            ("Connected Shaft", self.bearing.connected_shaft),
+            ("ROSS Node", ross_node),
+            ("Support", support),
+            ("Radial Element", radial),
+            ("Axial Elements", axial),
         ]
         for row, (key, value) in enumerate(rows):
             label = QLabel(key)
             label.setObjectName("muted")
             grid.addWidget(label, row, 0)
-            grid.addWidget(QLabel(value), row, 1)
+            field = QLabel(value)
+            field.setWordWrap(True)
+            grid.addWidget(field, row, 1)
         grid.setColumnStretch(1, 1)
         card.root.addLayout(grid)
         return card
 
     def _actions_card(self) -> QWidget:
-        card = SectionCard("Quick Actions")
+        card = SectionCard("Transaction")
         self.adapter_state_label = QLabel()
         self.adapter_state_label.setObjectName("muted")
         self.adapter_state_label.setWordWrap(True)
@@ -347,7 +461,9 @@ class BearingStudioPage(QWidget):
         self.calculate_button = QPushButton("Calculate Bearing")
         self.calculate_button.setObjectName("primaryButton")
         self.calculate_button.setIcon(engineering_icon("gear", 20, "#ffffff"))
-        self.calculate_button.clicked.connect(lambda: self.status_message.emit("Bearing calculation requested through application service"))
+        self.calculate_button.clicked.connect(
+            lambda: self.status_message.emit("Bearing calculation requested through application service")
+        )
         card.root.addWidget(self.calculate_button)
 
         self.apply_button = QPushButton("Apply to Rotor")
