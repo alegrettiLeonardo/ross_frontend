@@ -1,0 +1,45 @@
+name: ROSS Studio Linux source package
+
+on:
+  push:
+    branches:
+      - release/ross-studio-0.14.0-compact-binaries
+  workflow_dispatch:
+
+jobs:
+  source-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Linux source ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/source/ROSS-Studio-0.14.0-Linux-Source
+          rsync -a ./ artifacts/source/ROSS-Studio-0.14.0-Linux-Source/ \
+            --exclude='.git' \
+            --exclude='.venv*' \
+            --exclude='build' \
+            --exclude='dist' \
+            --exclude='artifacts'
+          chmod +x artifacts/source/ROSS-Studio-0.14.0-Linux-Source/build_linux.sh
+          (
+            cd artifacts/source
+            zip -r -9 -q ../ROSS-Studio-0.14.0-Linux-Source.zip ROSS-Studio-0.14.0-Linux-Source
+          )
+          sha256sum artifacts/ROSS-Studio-0.14.0-Linux-Source.zip \
+            > artifacts/ROSS-Studio-0.14.0-Linux-Source.SHA256
+          unzip -tq artifacts/ROSS-Studio-0.14.0-Linux-Source.zip
+          ls -lh artifacts/ROSS-Studio-0.14.0-Linux-Source.zip
+
+      - name: Upload Linux source project
+        uses: actions/upload-artifact@v4
+        with:
+          name: ross-studio-0.14.0-linux-source-project
+          path: |
+            artifacts/ROSS-Studio-0.14.0-Linux-Source.zip
+            artifacts/ROSS-Studio-0.14.0-Linux-Source.SHA256
+          if-no-files-found: error
+          compression-level: 0
