@@ -22,8 +22,9 @@ from ross_studio.thrust_pad_service import ThrustPadCalculationResult
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_pre_promotion_registry_keeps_thrust_pad_gated():
+def test_pre_promotion_registry_keeps_thrust_pad_gated(qtbot):
     window = RossStudioWindow()
+    qtbot.addWidget(window)
     try:
         status, _reason = window.catalog.registry.effective_status("ThrustPad")
         assert status == AdapterStatus.PLANNED
