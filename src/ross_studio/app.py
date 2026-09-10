@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import sys
 
 from PySide6.QtCore import QPoint, Qt
@@ -7,6 +9,10 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
 from .bearing_input_dialog import BearingInputDialog
+from .bearing_dispatch import BearingCalculationContext, BearingServiceDispatcher
+from .thd_input_dialog import THDBearingInputDialog
+from .thd_calculation_dialog import THDCalculationDialog
+from .thd_bearing_service import THDBearingCalculationResult, THDBearingStudioService
 from .bearing_studio_service import BearingCalculationResult, BearingStudioService
 from .icons import engineering_icon
 from .models import BearingCoefficientRow, BearingModel, ProjectModel, load_reference_project_model
@@ -89,7 +95,11 @@ class RossStudioWindow(QMainWindow):
         self.bearing = BearingModel.from_project(self.project.engineering) if self.project.engineering else BearingModel()
         self.catalog = BearingCatalogService()
         self.bearing_service = BearingStudioService(self.catalog.registry.ross_module)
-        self.bearing_calculation: BearingCalculationResult | None = None
+        self.thd_bearing_service = THDBearingStudioService(self.catalog.registry.ross_module)
+        self.bearing_dispatcher = BearingServiceDispatcher(self.bearing_service, self.thd_bearing_service)
+        self.bearing_context: BearingCalculationContext | None = None
+        self.bearing_field_result: THDBearingCalculationResult | None = None
+        self.bearing_calculation: BearingCalculationResult | THDBearingCalculationResult | None = None
         self.validation_service = EngineeringValidationService()
         self.setWindowTitle(f"ROSS STUDIO | {self.project.name}")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
@@ -151,6 +161,7 @@ class RossStudioWindow(QMainWindow):
     def _bearing_type_changed(self) -> None:
         # A calculation is valid only for the exact class/input state that created it.
         self.bearing_calculation = None
+        self.bearing_context = None
         self.bearing_page.apply_button.setEnabled(False)
 
     def _selected_bearing_class(self) -> str | None:
@@ -182,10 +193,12 @@ class RossStudioWindow(QMainWindow):
             if key is not None:
                 self.bearing_page._select_type(key, announce=False)
         self.bearing_page.apply_button.setEnabled(bool(keep_result and self.bearing_calculation is not None))
+        if self.bearing_field_result is not None and self.bearing_field_result.source_model == selected_class:
+            self.bearing_page.set_thd_result(self.bearing_field_result)
         if was_current:
             self.stack.setCurrentWidget(self.bearing_page)
 
-    def _preview_bearing_result(self, result: BearingCalculationResult) -> None:
+    def _preview_bearing_result(self, result: BearingCalculationResult | THDBearingCalculationResult) -> None:
         if self.project.engineering is None:
             return
         base = BearingModel.from_project(self.project.engineering, 0)
@@ -202,6 +215,8 @@ class RossStudioWindow(QMainWindow):
             base.speed_min_rpm = round(result.coefficients[0].rpm)
             base.speed_max_rpm = round(result.coefficients[-1].rpm)
         else:
+            if not isinstance(result, BearingCalculationResult):
+                raise ValueError("THD preview requires a solved coefficient table.")
             kxx, kxy, kyx, kyy, cxx, cxy, cyx, cyy = result.scalar_kc
             base.coefficients = [BearingCoefficientRow(
                 rpm=self.project.speed_rpm,
@@ -228,43 +243,58 @@ class RossStudioWindow(QMainWindow):
             self.status.set_status("Bearing calculation failed", "No bearing class is selected")
             return
 
-        inputs = {}
-        if ross_class != "BearingElement":
-            dialog = BearingInputDialog(engineering, 0, ross_class, self)
-            if dialog.exec() != QDialog.DialogCode.Accepted:
-                self.status.set_status("Bearing calculation cancelled", ross_class)
-                return
-            inputs = dialog.values()
-        else:
-            inputs["rated_speed_rpm"] = float(engineering.operating_cases[0].rated_speed_rpm)
-
+        # Invalidate an earlier preview before opening a new input session.
+        self.bearing_calculation = None
+        self.bearing_context = None
+        self.bearing_page.apply_button.setEnabled(False)
         try:
-            result = self.bearing_service.calculate(engineering, 0, ross_class, inputs)
+            service = self.bearing_dispatcher.for_class(ross_class)
+            inputs = {}
+            if ross_class != "BearingElement":
+                dialog_class = THDBearingInputDialog if ross_class in THDBearingStudioService.SUPPORTED_CLASSES else BearingInputDialog
+                dialog = dialog_class(engineering, 0, ross_class, self)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    self.status.set_status("Bearing calculation cancelled", ross_class)
+                    return
+                inputs = dialog.values()
+            else:
+                inputs["rated_speed_rpm"] = float(engineering.operating_cases[0].rated_speed_rpm)
+            snapshot = deepcopy(engineering)
+            if ross_class in THDBearingStudioService.SUPPORTED_CLASSES:
+                result = THDCalculationDialog(service, snapshot, 0, ross_class, inputs, self).calculate()
+            else:
+                result = service.calculate(snapshot, 0, ross_class, inputs)
+            self._preview_bearing_result(result)
         except Exception as exc:
-            self.bearing_calculation = None
-            self.bearing_page.apply_button.setEnabled(False)
             self.status.set_status("Bearing calculation failed", str(exc))
             return
 
         self.bearing_calculation = result
-        self._preview_bearing_result(result)
+        self.bearing_context = BearingCalculationContext(service, result, 0, snapshot)
+        self.bearing_field_result = result if isinstance(result, THDBearingCalculationResult) else None
         self._refresh_bearing_page(selected_class=result.source_model, keep_result=True)
-        kxx, _kxy, _kyx, kyy, cxx, _cxy, _cyx, cyy = result.scalar_kc
+        count = len(result.coefficients)
         self.status.set_status(
             f"{result.source_model} calculated",
-            f"Kxx={kxx:.4e} N/m · Kyy={kyy:.4e} N/m · Cxx={cxx:.4e} N·s/m · Cyy={cyy:.4e} N·s/m",
+            f"{count} solved speed station(s)" if count else "Scalar K/C calculated",
             units="Preview only — Apply to Rotor commits the bearing model",
         )
 
     def _apply_bearing(self) -> None:
         engineering = self.project.engineering
         result = self.bearing_calculation
-        if engineering is None or result is None:
+        context = self.bearing_context
+        if engineering is None or result is None or context is None:
             self.status.set_status("Bearing not applied", "Calculate the selected bearing model first")
             return
         try:
-            applied = self.bearing_service.apply(engineering, 0, result)
-            issues = self.validation_service.validate(engineering)
+            if result is not context.result or self._selected_bearing_class() != result.source_model:
+                raise ValueError("The selected class has changed; calculate again before Apply.")
+            if engineering != context.project_snapshot:
+                raise ValueError("The rotor inputs have changed since Calculate; calculate again before Apply.")
+            candidate = deepcopy(engineering)
+            applied = context.service.apply(candidate, context.bearing_index, result)
+            issues = self.validation_service.validate(candidate)
             errors = [issue for issue in issues if issue.severity == "error"]
             if errors:
                 raise ValueError(errors[0].message)
@@ -272,6 +302,8 @@ class RossStudioWindow(QMainWindow):
             self.status.set_status("Bearing apply failed", str(exc))
             return
 
+        engineering.bearings[context.bearing_index] = applied
+        self.bearing_context = None
         note = result.note
         source_model = result.source_model
         application_class = applied.ross_class
@@ -303,6 +335,7 @@ class RossStudioWindow(QMainWindow):
         requested = str(group)
         if self.bearing_page.current_group.value != requested:
             self.bearing_calculation = None
+            self.bearing_context = None
         if hasattr(self.bearing_page, "set_group"):
             self.bearing_page.set_group(group)
         self.bearing_page.apply_button.setEnabled(self.bearing_calculation is not None)

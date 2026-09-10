@@ -41,29 +41,61 @@ class RotorSketch(QWidget):
 
 
 class BearingCoefficientChart(QWidget):
-    def __init__(self, bearing: BearingModel, parent: QWidget | None = None) -> None:
-        super().__init__(parent); self.bearing=bearing; self.setMinimumSize(330,200)
+    """Plot the complete solved table with independent stiffness/damping scales."""
+    def __init__(self, bearing: BearingModel, parent=None):
+        super().__init__(parent)
+        self.bearing = bearing
+        self.kind = "k"
+        self.setMinimumSize(330, 220)
 
-    def paintEvent(self,event) -> None:  # noqa: N802
-        p=QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing,True)
-        w,h=self.width(),self.height(); lm,rm,tm,bm=50,78,35,45; plot=QRectF(lm,tm,w-lm-rm,h-tm-bm)
-        p.setPen(QPen(QColor(COLORS.grid),1));
-        for i in range(6):
-            y=plot.top()+plot.height()*i/5; p.drawLine(QPointF(plot.left(),y),QPointF(plot.right(),y))
-        for i in range(6):
-            x=plot.left()+plot.width()*i/5; p.drawLine(QPointF(x,plot.top()),QPointF(x,plot.bottom()))
-        p.setPen(QPen(QColor("#49657d"),1.2)); p.drawRect(plot)
-        rows=self.bearing.coefficients; xmin,xmax=0,10000; ymin,ymax=-5e7,5e7
-        def xy(rpm,val):
-            return QPointF(plot.left()+(rpm-xmin)/(xmax-xmin)*plot.width(), plot.bottom()-(val-ymin)/(ymax-ymin)*plot.height())
-        series=[("Kxx","#1487e8",lambda r:r.kxx,Qt.PenStyle.SolidLine),("Kyy","#ff3b30",lambda r:r.kyy,Qt.PenStyle.SolidLine),("Kxy","#109b56",lambda r:r.kxy,Qt.PenStyle.DashLine),("Kyx","#f3a000",lambda r:r.kyx,Qt.PenStyle.DashLine)]
-        for idx,(name,color,fn,style) in enumerate(series):
-            pen=QPen(QColor(color),2); pen.setStyle(style); p.setPen(pen); path=QPainterPath();
-            for i,r in enumerate(rows):
-                pt=xy(r.rpm,fn(r)); path.moveTo(pt) if i==0 else path.lineTo(pt)
-            p.drawPath(path); lx=plot.right()+20; ly=plot.top()+8+idx*20; p.drawLine(QPointF(lx,ly),QPointF(lx+20,ly)); p.setPen(QColor(COLORS.text)); p.drawText(QRectF(lx+26,ly-8,45,16),Qt.AlignmentFlag.AlignLeft,name)
-        p.setPen(QColor(COLORS.text)); p.drawText(QRectF(plot.left(),h-28,plot.width(),20),Qt.AlignmentFlag.AlignCenter,"Speed (RPM)")
-        p.save(); p.translate(16,plot.center().y()); p.rotate(-90); p.drawText(QRectF(-plot.height()/2,-10,plot.height(),20),Qt.AlignmentFlag.AlignCenter,"Stiffness (N/m)"); p.restore(); p.end()
+    def set_coefficient_kind(self, index):
+        self.kind = "c" if index else "k"
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        plot = QRectF(80, 30, self.width()-155, self.height()-85)
+        rows = self.bearing.coefficients
+        names = [self.kind + suffix for suffix in ("xx", "xy", "yx", "yy")]
+        if not rows:
+            p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No solved coefficients")
+            return
+        xmin, xmax = min(r.rpm for r in rows), max(r.rpm for r in rows)
+        if xmin == xmax:
+            xmin, xmax = xmin-1, xmax+1
+        values = [getattr(r, name) for r in rows for name in names]
+        ymin, ymax = min(values), max(values)
+        pad = max((ymax-ymin)*0.05, max(abs(ymin), abs(ymax))*0.01, 1e-12)
+        ymin, ymax = ymin-pad, ymax+pad
+        def xy(x, y):
+            return QPointF(plot.left()+(x-xmin)/(xmax-xmin)*plot.width(), plot.bottom()-(y-ymin)/(ymax-ymin)*plot.height())
+        for i in range(5):
+            frac = i/4
+            y = plot.bottom()-frac*plot.height()
+            x = plot.left()+frac*plot.width()
+            p.setPen(QColor(COLORS.grid))
+            p.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
+            p.setPen(QColor(COLORS.text))
+            p.drawText(QRectF(1,y-9,74,18), Qt.AlignmentFlag.AlignRight, f"{ymin+frac*(ymax-ymin):.2e}")
+            p.drawText(QRectF(x-32,plot.bottom()+4,64,18), Qt.AlignmentFlag.AlignCenter, f"{xmin+frac*(xmax-xmin):g}")
+        for i, (name, color) in enumerate(zip(names, ("#1487e8", "#109b56", "#f3a000", "#ff3b30"))):
+            p.setPen(QPen(QColor(color), 2))
+            path = QPainterPath()
+            for j, row in enumerate(rows):
+                pt = xy(row.rpm, getattr(row, name))
+                if j == 0:
+                    path.moveTo(pt)
+                else:
+                    path.lineTo(pt)
+                p.drawEllipse(pt, 2, 2)
+            p.drawPath(path)
+            p.drawText(QRectF(plot.right()+8, plot.top()+i*22, 60, 20), Qt.AlignmentFlag.AlignLeft, name.capitalize())
+        unit = "N/m" if self.kind == "k" else "N·s/m"
+        p.setPen(QColor(COLORS.text))
+        p.drawText(QRectF(0,0,self.width(),24), Qt.AlignmentFlag.AlignCenter, f"Solved {self.kind.upper()} ({unit})")
+        p.drawText(QRectF(0,self.height()-24,self.width(),20), Qt.AlignmentFlag.AlignCenter, "Speed (rpm)")
+        p.end()
 
 
 class CampbellChart(QWidget):

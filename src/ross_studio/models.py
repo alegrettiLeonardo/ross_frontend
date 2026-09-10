@@ -111,7 +111,7 @@ class BearingCoefficientRow:
 
     @classmethod
     def from_point(cls, point: BearingCoefficientPoint) -> "BearingCoefficientRow":
-        return cls(round(point.rpm), point.kxx, point.kxy, point.kyx, point.kyy, point.cxx, point.cxy, point.cyx, point.cyy)
+        return cls(float(point.rpm), point.kxx, point.kxy, point.kyx, point.kyy, point.cxx, point.cxy, point.cyx, point.cyy)
 
 
 _BEARING_TITLES = {
