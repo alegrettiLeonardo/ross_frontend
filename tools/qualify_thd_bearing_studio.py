@@ -10,6 +10,7 @@ import ross as rs
 from ross_studio.legacy_import import load_irdin_project
 from ross_studio.ross_backend import RossModelBuilder
 from ross_studio.thd_bearing_service import THDBearingStudioService
+from ross_studio.thd_results import convergence, native_field
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -158,6 +159,13 @@ def main() -> int:
     else:
         gates["thrust_not_silently_lateralized"] = False
 
+    desktop_path = OUT.with_name("thd_desktop_qualification.json")
+    desktop = json.loads(desktop_path.read_text()) if desktop_path.exists() else {}
+    gates["qt_end_to_end_all_lateral_models"] = all(
+        desktop.get(name, {}).get("status") == "PASS"
+        for name in service.SUPPORTED_CLASSES
+    )
+
     # Qualification predicates may be produced by NumPy (np.bool_). Normalize
     # reporting only; the scientific predicates and pass/fail thresholds are unchanged.
     gates = {name: bool(value) for name, value in gates.items()}
@@ -189,6 +197,25 @@ def main() -> int:
             },
         },
     }
+    payload["desktop_end_to_end"] = desktop
+    for result in (plain, tilting, sfd):
+        model = payload["models"][result.source_model]
+        model["application_class"] = result.application_class
+        model["input_engineering_domain"] = result.metadata["engineering_input"]
+        model["si_normalized_input"] = result.metadata["si_input"]
+        model["speed_rpm"] = result.metadata["speed_rpm"]
+        model["convergence"] = [convergence(result, i) for i in range(len(result.coefficients))]
+        model["field_availability"] = {
+            name: [native_field(result, name, i) is not None for i in range(len(result.coefficients))]
+            for name in ("Pressure", "Temperature", "Film Thickness")
+        }
+        model["flexible_support"] = "Solved BearingElement K/C table with n_link; native solver not re-executed"
+    payload["scientific_limitations"] = [
+        "TiltingPad ROSS 2.3 minH_list stores selected-pad pivot thickness, not global h_min; global h_min is unavailable.",
+        "Native results do not retain a film-thickness distribution for these adapters.",
+        "SFD provides pressure maxima but no native pressure/temperature field.",
+        "Optimization evaluations are not mislabeled as optimizer iterations; missing iteration counts are unavailable.",
+    ]
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(payload, indent=2, ensure_ascii=False))

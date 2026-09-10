@@ -444,8 +444,8 @@ class THDBearingStudioService:
             max_t = self._sequence_value(getattr(results, "maxT_list", None), i)
             ops.append(THDOperatingPoint(
                 rpm=float(rpm),
-                max_pressure_pa=max_p if max_p is not None else (self._extreme(pressure_fields[i], "max") if i < len(pressure_fields) else None),
-                max_temperature_c=max_t if max_t is not None else (self._extreme(temperature_fields[i], "max") if i < len(temperature_fields) else None),
+                max_pressure_pa=self._extreme(pressure_fields[i], "max") if i < len(pressure_fields) else max_p,
+                max_temperature_c=self._extreme(temperature_fields[i], "max") if i < len(temperature_fields) else max_t,
                 min_film_thickness_m=None,  # ROSS minH_list is h_pivot, not a global film minimum.
                 eccentricity_ratio=self._sequence_value(getattr(results, "ecc_list", None), i),
                 attitude_angle_rad=self._sequence_value(getattr(results, "attitude_angle_list", None), i),
