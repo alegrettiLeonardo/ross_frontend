@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from ..domain import EngineeringError
 from ..icons import engineering_icon
+from ..model_builder_service import RotorModelMutationService
 from ..models import ProjectModel
 from ..ross_backend import RossModelBuilder
 from ..ross_native_view import RossNativeRotorView
@@ -34,7 +35,8 @@ class RotorModelPage(QWidget):
 
     ROSS Studio 0.12 removes the duplicated horizontal model tabs. The left sidebar is
     the only primary navigation. A shared selection model synchronizes the model-driven
-    sketch and the currently visible engineering table.
+    sketch and the currently visible engineering table. ROSS Studio 0.14 routes every
+    enabled domain edit through the transactional strict-Ross model-builder service.
     """
 
     run_requested = Signal()
@@ -57,6 +59,7 @@ class RotorModelPage(QWidget):
         super().__init__(parent)
         self.project = project
         self.selection = WORKSPACE_SELECTION
+        self.model_builder = RotorModelMutationService()
         self.editor_tables: dict[str, QTableWidget] = {}
         self.editor_pages: dict[str, QWidget] = {}
         self._table_ref_builders: dict[str, list[RotorEntityRef]] = {}
@@ -472,15 +475,18 @@ class RotorModelPage(QWidget):
         cell = table.item(row, column)
         previous = section.fe_elements
         try:
-            value = int(cell.text().strip())
-            if str(value) != cell.text().strip() and not cell.text().strip().startswith("+"):
-                raise ValueError
-            section.fe_elements = value
-            section.validate()
-            # Force full topology validation before accepting the edit.
-            self.project.engineering.validate()
+            text = cell.text().strip()
+            value = int(text)
+            if str(value) != text and not (text.startswith("+") and str(value) == text[1:]):
+                raise ValueError(f"FE element count must be an integer; received {text!r}.")
+            preview = self.model_builder.preview_update(
+                self.project.engineering,
+                "shaft",
+                row,
+                {"fe_elements": value},
+            )
+            audit = self.model_builder.commit(self.project.engineering, preview)
         except (ValueError, EngineeringError) as exc:
-            section.fe_elements = previous
             self._mesh_edit_guard = True
             cell.setText(str(previous))
             self._mesh_edit_guard = False
@@ -499,5 +505,6 @@ class RotorModelPage(QWidget):
         if self.native_view is not None:
             self.native_view._loaded = False
         self.status_message.emit(
-            f"Section {section.section}: base mesh {section.fe_elements} element(s); effective rotor {self.project.ross_shaft_elements} ShaftElements"
+            f"Section {section.section}: strict ROSS-qualified base mesh {section.fe_elements} element(s); "
+            f"effective rotor {audit.shaft_elements} ShaftElements / {audit.shaft_nodes} shaft nodes"
         )
