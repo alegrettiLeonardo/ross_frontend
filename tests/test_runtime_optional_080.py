@@ -202,7 +202,7 @@ def test_real_ross_23_runs_complete_op_w60_scientific_pipeline() -> None:
 def test_qt_engineering_routes_and_bearing_groups() -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     pytest.importorskip("PySide6")
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QTabWidget
 
     from ross_studio.app import RossStudioWindow
 
@@ -210,18 +210,24 @@ def test_qt_engineering_routes_and_bearing_groups() -> None:
     window = RossStudioWindow()
     assert window.project.name == "OP-W60-500-60Hz-IC611-P3"
 
-    expected_tabs = {
+    expected_workspaces = {
         "shaft": 0,
         "disks": 1,
         "supports": 2,
         "seals": 3,
         "couplings": 4,
         "loads": 5,
+        "ump": 6,
+        "probes": 7,
     }
-    for route, tab_index in expected_tabs.items():
+    for route, workspace_index in expected_workspaces.items():
         window._navigate(route)
         assert window.stack.currentWidget() is window.rotor_page
-        assert window.rotor_page.tabs.currentIndex() == tab_index
+        assert window.rotor_page.editor_stack.currentIndex() == workspace_index
+
+    # 0.12 contract: the left sidebar is the only model navigation. A second
+    # horizontal QTabWidget must not silently return.
+    assert window.rotor_page.findChildren(QTabWidget) == []
 
     window._navigate("bearings")
     assert window.stack.currentWidget() is window.bearing_groups_page
