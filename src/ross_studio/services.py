@@ -29,7 +29,7 @@ class RossCapabilityRegistry:
         Capability(BearingGroup.GENERAL, "CylindricalBearing", "Cylindrical Bearing", AdapterStatus.VALIDATED),
         Capability(BearingGroup.THD, "PlainJournal", "Plain Journal", AdapterStatus.VALIDATED, "Native ROSS 2.3 lateral THD workflow qualified end to end: engineering input, calculate, native fields, solved K/C preview, BearingElement apply, flexible n_link, strict rotor and modal."),
         Capability(BearingGroup.THD, "TiltingPad", "Tilting Pad", AdapterStatus.VALIDATED, "Native ROSS 2.3 lateral THD workflow qualified end to end: engineering input, calculate, native fields, solved K/C preview, BearingElement apply, flexible n_link, strict rotor and modal."),
-        Capability(BearingGroup.THD, "ThrustPad", "Thrust Pad", AdapterStatus.PLANNED, "Requires a qualified axial Kzz/Czz domain and rotor-result contract before execution is enabled."),
+        Capability(BearingGroup.THD, "ThrustPad", "Thrust Pad", AdapterStatus.VALIDATED, "Native ROSS 2.3 axial ThrustPad workflow qualified end to end: engineering input, calculate, native pressure/temperature/film fields, solved Kzz/Czz preview, independent axial BearingElement apply, strict rotor and modal; radial K/C and lateral n_link are preserved."),
         Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.VALIDATED, "Native ROSS 2.3 lateral SFD workflow qualified end to end: engineering input, calculate, solved K/C preview, BearingElement apply, flexible n_link, strict rotor and modal. Unsupported native fields remain explicitly unavailable."),
         Capability(BearingGroup.AMB, "MagneticBearingElement", "Active Magnetic Bearing", AdapterStatus.BLOCKED, "Requires an explicit actuator/sensor/controller domain before execution is enabled."),
     )
@@ -115,7 +115,15 @@ class EngineeringValidationService:
         for support in project.supports:
             if 0 <= support.bearing_index < len(project.bearings):
                 bearing = project.bearings[support.bearing_index]
-                if bearing.ross_class == "CylindricalBearing":
+                if bearing.metadata.get("axial_coefficients"):
+                    issues.append(ValidationIssue(
+                        "error",
+                        "AXIAL_SUPPORT_LINK_UNAVAILABLE",
+                        f"{bearing.name} contains axial Kzz/Czz but is attached to lateral flexible support {support.name}. "
+                        "ROSS Studio requires an explicit axial support Kzz/Czz contract before that link can be assembled; "
+                        "do not reuse lateral n_link stiffness for thrust dynamics.",
+                    ))
+                elif bearing.ross_class == "CylindricalBearing":
                     issues.append(ValidationIssue(
                         "error",
                         "CYLINDRICAL_SUPPORT_LINK_UNAVAILABLE",

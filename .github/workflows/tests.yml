@@ -35,6 +35,8 @@ jobs:
         run: python tools/qualify_bearing_studio.py
       - name: Qualify THD lateral bearing models
         run: python tools/qualify_thd_bearing_studio.py
+      - name: Qualify ThrustPad axial model and strict assembly
+        run: python tools/qualify_thrust_pad.py
       - name: Run production-resolution OP-W60 pipeline
         run: python tools/qualify_op_w60_pipeline.py
       - name: Enforce ROSS against regenerated RotorDin golden
@@ -54,6 +56,8 @@ jobs:
             artifacts/bearing_studio_qualification.json
             artifacts/thd_bearing_studio_qualification.json
             artifacts/thd_desktop_qualification.json
+            artifacts/thrust_pad_qualification.json
+            artifacts/thrust_pad_desktop_qualification.json
             artifacts/op_w60_pipeline_summary.json
             artifacts/op_w60_ross_vs_rotordin_correlation.json
             artifacts/op_w60_ross_vs_rotordin_correlation.csv

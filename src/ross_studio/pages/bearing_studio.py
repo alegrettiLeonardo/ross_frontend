@@ -184,10 +184,15 @@ class BearingStudioPage(QWidget):
                 "General / Parametric classes use direct or analytical engineering inputs. "
                 "The imported OP-W60 BearingElement K/C table is preserved without recomputation."
             )
+        elif ross_class == "ThrustPad":
+            self.editor_note.setText(
+                "ThrustPad is an axial THD model. Its rotor contract contains Kzz/Czz only and is added as an independent axial BearingElement at the selected shaft station. "
+                "Existing radial K/C and lateral flexible-support n_link are never reused or overwritten."
+            )
         elif group == BearingGroup.THD:
             self.editor_note.setText(
-                "THD results retain native fields and all solved K/C speed stations. "
-                "Apply uses the solved BearingElement table, including flexible supports. ThrustPad remains gated."
+                "Lateral THD results retain native fields and all solved K/C speed stations. "
+                "Apply uses the solved BearingElement table, including qualified flexible supports."
             )
         else:
             self.editor_note.setText(
@@ -202,7 +207,7 @@ class BearingStudioPage(QWidget):
                 detail = f" {reason}" if reason else ""
                 self.status_message.emit(f"{title}: {status.value}.{detail}")
 
-    def set_thd_result(self, result):
+    def set_thd_result(self, result) -> None:
         self.thd_result = result
         rated = self.project.engineering.operating_cases[0].rated_speed_rpm
         for tab in self.result_tabs.values():
@@ -212,6 +217,42 @@ class BearingStudioPage(QWidget):
             f"ROSS {result.metadata['ross_api_contract']} · "
             f"{len(result.coefficients)} solved stations · lubricant: {result.metadata['lubricant']}. "
             "Native fields retained; Calculate Bearing opens the input editor."
+        )
+
+    def set_thrust_result(self, result) -> None:
+        """Render the axial contract without mapping Kzz/Czz into lateral columns."""
+        self.thd_result = result
+        rated = self.project.engineering.operating_cases[0].rated_speed_rpm
+        for tab in self.result_tabs.values():
+            tab.set_result(result, rated)
+
+        headers = ["RPM", "Kzz\n(N/m)", "Czz\n(N·s/m)"]
+        self.kc_table.clear()
+        self.kc_table.setRowCount(len(result.axial_coefficients))
+        self.kc_table.setColumnCount(len(headers))
+        self.kc_table.setHorizontalHeaderLabels(headers)
+        configure_table(self.kc_table, row_height=30)
+        self.kc_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        for row, coeff in enumerate(result.axial_coefficients):
+            values = [f"{coeff.rpm:g}", f"{coeff.kzz:.6e}", f"{coeff.czz:.6e}"]
+            for col, value in enumerate(values):
+                self.kc_table.setItem(row, col, item(value))
+        if result.axial_coefficients:
+            self.nominal_index = min(
+                range(len(result.axial_coefficients)),
+                key=lambda i: abs(result.axial_coefficients[i].rpm - rated),
+            )
+            self.kc_table.selectRow(self.nominal_index)
+            self.kc_table.item(self.nominal_index, 0).setToolTip(
+                f"Nearest solved axial station to rated {rated:g} rpm"
+            )
+        self.kc_table.resizeColumnsToContents()
+        self.chart_card.setVisible(False)
+        self.input_summary.setText(
+            f"ThrustPad → BearingElement (axial-only) · ROSS {result.metadata['ross_api_contract']} · "
+            f"{len(result.axial_coefficients)} solved Kzz/Czz station(s) · axial load: "
+            f"{result.metadata['axial_load_n']:.6g} N · lubricant: {result.metadata['lubricant']}. "
+            "The radial bearing remains a separate element."
         )
 
     def _kc_tab(self) -> QWidget:
@@ -257,6 +298,7 @@ class BearingStudioPage(QWidget):
         table.resizeColumnsToContents()
         layout.addWidget(table, 3)
         chart_card = Card()
+        self.chart_card = chart_card
         chart_layout = QVBoxLayout(chart_card)
         chart_layout.setContentsMargins(10, 8, 10, 8)
         top = QHBoxLayout()
@@ -285,7 +327,6 @@ class BearingStudioPage(QWidget):
             ("ROSS Class", self.bearing.ross_class),
             ("Node Position", self.bearing.node_position),
             ("Connected Shaft", self.bearing.connected_shaft),
-
         ]
         for row, (key, value) in enumerate(rows):
             label = QLabel(key)

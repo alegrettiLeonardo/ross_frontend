@@ -11,8 +11,10 @@ from PySide6.QtWidgets import QApplication, QDialog, QFrame, QHBoxLayout, QLabel
 from .bearing_input_dialog import BearingInputDialog
 from .bearing_dispatch import BearingCalculationContext, BearingServiceDispatcher
 from .thd_input_dialog import THDBearingInputDialog
+from .thrust_pad_input_dialog import ThrustPadInputDialog
 from .thd_calculation_dialog import THDCalculationDialog
 from .thd_bearing_service import THDBearingCalculationResult, THDBearingStudioService
+from .thrust_pad_service import ThrustPadCalculationResult, ThrustPadStudioService
 from .bearing_studio_service import BearingCalculationResult, BearingStudioService
 from .icons import engineering_icon
 from .models import BearingCoefficientRow, BearingModel, ProjectModel, load_reference_project_model
@@ -96,10 +98,15 @@ class RossStudioWindow(QMainWindow):
         self.catalog = BearingCatalogService()
         self.bearing_service = BearingStudioService(self.catalog.registry.ross_module)
         self.thd_bearing_service = THDBearingStudioService(self.catalog.registry.ross_module)
-        self.bearing_dispatcher = BearingServiceDispatcher(self.bearing_service, self.thd_bearing_service)
+        self.thrust_pad_service = ThrustPadStudioService(self.catalog.registry.ross_module)
+        self.bearing_dispatcher = BearingServiceDispatcher(
+            self.bearing_service,
+            self.thd_bearing_service,
+            self.thrust_pad_service,
+        )
         self.bearing_context: BearingCalculationContext | None = None
-        self.bearing_field_result: THDBearingCalculationResult | None = None
-        self.bearing_calculation: BearingCalculationResult | THDBearingCalculationResult | None = None
+        self.bearing_field_result: THDBearingCalculationResult | ThrustPadCalculationResult | None = None
+        self.bearing_calculation: BearingCalculationResult | THDBearingCalculationResult | ThrustPadCalculationResult | None = None
         self.validation_service = EngineeringValidationService()
         self.setWindowTitle(f"ROSS STUDIO | {self.project.name}")
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
@@ -159,7 +166,6 @@ class RossStudioWindow(QMainWindow):
         self.bearing_page.apply_button.setEnabled(self.bearing_calculation is not None)
 
     def _bearing_type_changed(self) -> None:
-        # A calculation is valid only for the exact class/input state that created it.
         self.bearing_calculation = None
         self.bearing_context = None
         self.bearing_page.apply_button.setEnabled(False)
@@ -194,11 +200,17 @@ class RossStudioWindow(QMainWindow):
                 self.bearing_page._select_type(key, announce=False)
         self.bearing_page.apply_button.setEnabled(bool(keep_result and self.bearing_calculation is not None))
         if self.bearing_field_result is not None and self.bearing_field_result.source_model == selected_class:
-            self.bearing_page.set_thd_result(self.bearing_field_result)
+            if isinstance(self.bearing_field_result, ThrustPadCalculationResult):
+                self.bearing_page.set_thrust_result(self.bearing_field_result)
+            else:
+                self.bearing_page.set_thd_result(self.bearing_field_result)
         if was_current:
             self.stack.setCurrentWidget(self.bearing_page)
 
-    def _preview_bearing_result(self, result: BearingCalculationResult | THDBearingCalculationResult) -> None:
+    def _preview_bearing_result(
+        self,
+        result: BearingCalculationResult | THDBearingCalculationResult | ThrustPadCalculationResult,
+    ) -> None:
         if self.project.engineering is None:
             return
         base = BearingModel.from_project(self.project.engineering, 0)
@@ -208,8 +220,17 @@ class RossStudioWindow(QMainWindow):
             "BallBearingElement": "Ball Bearing",
             "RollerBearingElement": "Roller Bearing",
             "CylindricalBearing": "Cylindrical Bearing",
+            "ThrustPad": "Axial Thrust Pad",
         }
         base.bearing_type = titles.get(result.source_model, result.source_model)
+
+        if isinstance(result, ThrustPadCalculationResult):
+            base.coefficients = []
+            base.speed_min_rpm = round(result.axial_coefficients[0].rpm)
+            base.speed_max_rpm = round(result.axial_coefficients[-1].rpm)
+            self.bearing = base
+            return
+
         if result.coefficients:
             base.coefficients = [BearingCoefficientRow.from_point(point) for point in result.coefficients]
             base.speed_min_rpm = round(result.coefficients[0].rpm)
@@ -243,7 +264,6 @@ class RossStudioWindow(QMainWindow):
             self.status.set_status("Bearing calculation failed", "No bearing class is selected")
             return
 
-        # Invalidate an earlier preview before opening a new input session.
         self.bearing_calculation = None
         self.bearing_context = None
         self.bearing_page.apply_button.setEnabled(False)
@@ -251,7 +271,12 @@ class RossStudioWindow(QMainWindow):
             service = self.bearing_dispatcher.for_class(ross_class)
             inputs = {}
             if ross_class != "BearingElement":
-                dialog_class = THDBearingInputDialog if ross_class in THDBearingStudioService.SUPPORTED_CLASSES else BearingInputDialog
+                if ross_class in THDBearingStudioService.SUPPORTED_CLASSES:
+                    dialog_class = THDBearingInputDialog
+                elif ross_class in ThrustPadStudioService.SUPPORTED_CLASSES:
+                    dialog_class = ThrustPadInputDialog
+                else:
+                    dialog_class = BearingInputDialog
                 dialog = dialog_class(engineering, 0, ross_class, self)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     self.status.set_status("Bearing calculation cancelled", ross_class)
@@ -260,7 +285,7 @@ class RossStudioWindow(QMainWindow):
             else:
                 inputs["rated_speed_rpm"] = float(engineering.operating_cases[0].rated_speed_rpm)
             snapshot = deepcopy(engineering)
-            if ross_class in THDBearingStudioService.SUPPORTED_CLASSES:
+            if ross_class in THDBearingStudioService.SUPPORTED_CLASSES | ThrustPadStudioService.SUPPORTED_CLASSES:
                 result = THDCalculationDialog(service, snapshot, 0, ross_class, inputs, self).calculate()
             else:
                 result = service.calculate(snapshot, 0, ross_class, inputs)
@@ -271,9 +296,13 @@ class RossStudioWindow(QMainWindow):
 
         self.bearing_calculation = result
         self.bearing_context = BearingCalculationContext(service, result, 0, snapshot)
-        self.bearing_field_result = result if isinstance(result, THDBearingCalculationResult) else None
+        self.bearing_field_result = result if isinstance(result, (THDBearingCalculationResult, ThrustPadCalculationResult)) else None
         self._refresh_bearing_page(selected_class=result.source_model, keep_result=True)
-        count = len(result.coefficients)
+        count = (
+            len(result.axial_coefficients)
+            if isinstance(result, ThrustPadCalculationResult)
+            else len(result.coefficients)
+        )
         self.status.set_status(
             f"{result.source_model} calculated",
             f"{count} solved speed station(s)" if count else "Scalar K/C calculated",
@@ -302,13 +331,24 @@ class RossStudioWindow(QMainWindow):
             self.status.set_status("Bearing apply failed", str(exc))
             return
 
-        engineering.bearings[context.bearing_index] = applied
+        if isinstance(result, ThrustPadCalculationResult):
+            # ThrustPad is an additional axial element; never overwrite the radial anchor.
+            engineering.bearings = candidate.bearings
+            applied_index = next(
+                i for i, bearing in enumerate(engineering.bearings)
+                if bearing.metadata.get("source_model") == "ThrustPad"
+                and abs(float(bearing.position_mm) - float(applied.position_mm)) <= 1e-9
+            )
+        else:
+            engineering.bearings[context.bearing_index] = applied
+            applied_index = context.bearing_index
+
         self.bearing_context = None
         note = result.note
         source_model = result.source_model
         application_class = applied.ross_class
         self.project.touch()
-        self.bearing = BearingModel.from_project(engineering, 0)
+        self.bearing = BearingModel.from_project(engineering, applied_index)
         self.bearing_calculation = None
         self._refresh_bearing_page(selected_class=source_model, keep_result=False)
         self.status.set_status(
