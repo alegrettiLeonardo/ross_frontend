@@ -17,6 +17,8 @@ class FrozenGuiSmokeResult:
     rotor_editor_count: int
     bearing_station_count: int
     bearing_direct_route: bool
+    bearing_selection_synced: bool
+    bearing_station_inventory: tuple[tuple[str, ...], ...]
     general_executable: tuple[str, ...]
     thd_executable: tuple[str, ...]
     amb_blocked: tuple[str, ...]
@@ -39,8 +41,10 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
     from PySide6.QtWidgets import QApplication, QTabWidget
 
     from .app import RossStudioWindow
+    from .rotor_selection import RotorEntityRef, WORKSPACE_SELECTION
 
     app = QApplication.instance() or QApplication([])
+    WORKSPACE_SELECTION.clear()
     window = RossStudioWindow()
     try:
         project = window.project
@@ -101,22 +105,43 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
                 raise RuntimeError(f"Frozen route {route!r} did not open the Rotor engineering workspace.")
 
         # Bearing Studio 2.0 is the direct target of the sidebar. There is no
-        # intermediate family landing page and every physical bearing is selectable.
+        # intermediate family landing page and every physical radial station is
+        # selectable independently from its calculation model.
         window._navigate("bearings")
         bearing_direct_route = window.stack.currentWidget() is window.bearing_page
         if not bearing_direct_route:
             raise RuntimeError("Frozen Bearings route did not open Bearing Studio 2.0 directly.")
-        expected_stations = len(project.engineering.bearings)
+        stations = window.bearing_workspace.stations(project.engineering)
+        expected_stations = len(stations)
         station_count = window.bearing_page.bearing_selector.count()
         if station_count != expected_stations:
             raise RuntimeError(
                 f"Frozen Bearing Studio exposes {station_count} stations; expected {expected_stations}."
             )
+        inventories = tuple(window.bearing_workspace.inventory(project.engineering, station.index) for station in stations)
+        inventory_roles = tuple(tuple(element.role for element in inventory.elements) for inventory in inventories)
+        if inventory_roles != tuple(("radial_anchor",) for _ in stations):
+            raise RuntimeError(f"Frozen baseline bearing station inventory mismatch: {inventory_roles}")
+
+        # Bearing Studio selector -> shared rotor selection.
+        bearing_selection_synced = True
         if expected_stations > 1:
-            window.bearing_page.bearing_selector.setCurrentIndex(expected_stations - 1)
+            last = stations[-1]
+            row = window.bearing_page.bearing_selector.findData(last.index)
+            window.bearing_page.bearing_selector.setCurrentIndex(row)
             app.processEvents()
-            if window.bearing_index != expected_stations - 1:
+            current = WORKSPACE_SELECTION.current
+            if window.bearing_index != last.index:
                 raise RuntimeError("Frozen bearing selector did not update the application station identity.")
+            if current is None or current.kind != "bearings" or current.index != last.index:
+                raise RuntimeError("Frozen bearing selector did not update the shared rotor bearing selection.")
+
+            # Shared rotor/sketch selection -> Bearing Studio selector/application.
+            first = stations[0]
+            WORKSPACE_SELECTION.select(RotorEntityRef("bearings", first.index, first.name, first.position_mm))
+            app.processEvents()
+            if window.bearing_index != first.index or window.bearing_page.bearing_selector.currentData() != first.index:
+                raise RuntimeError("Frozen rotor bearing selection did not synchronize back to Bearing Studio.")
 
         # Exercise family visibility and capability gating inside the single workspace.
         for group in (BearingGroup.GENERAL, BearingGroup.THD, BearingGroup.AMB):
@@ -153,11 +178,14 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
             rotor_editor_count=window.rotor_page.editor_stack.count(),
             bearing_station_count=station_count,
             bearing_direct_route=bearing_direct_route,
+            bearing_selection_synced=bearing_selection_synced,
+            bearing_station_inventory=inventory_roles,
             general_executable=tuple(executable_by_group[BearingGroup.GENERAL]),
             thd_executable=tuple(executable_by_group[BearingGroup.THD]),
             amb_blocked=tuple(blocked_by_group[BearingGroup.AMB]),
         )
     finally:
+        WORKSPACE_SELECTION.clear()
         window.close()
         app.processEvents()
 
