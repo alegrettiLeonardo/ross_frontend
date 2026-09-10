@@ -25,6 +25,44 @@ class BearingStation:
         return f"{self.name} · x={self.position_mm:g} mm · node {node} · {self.source_model}{support}"
 
 
+@dataclass(slots=True, frozen=True)
+class BearingStationElement:
+    """One physical bearing element owned by a Bearing Studio station."""
+
+    element_index: int
+    role: str
+    name: str
+    position_mm: float
+    ross_class: str
+    source_model: str
+    group: BearingGroup
+
+    @property
+    def axial(self) -> bool:
+        return self.role == "axial_auxiliary"
+
+
+@dataclass(slots=True, frozen=True)
+class BearingStationInventory:
+    """Traceable radial anchor plus any auxiliary elements at one shaft station."""
+
+    station: BearingStation
+    elements: tuple[BearingStationElement, ...]
+
+    @property
+    def radial_anchor(self) -> BearingStationElement:
+        anchors = [element for element in self.elements if element.role == "radial_anchor"]
+        if len(anchors) != 1:
+            raise EngineeringError(
+                f"Bearing station #{self.station.index + 1} must own exactly one radial anchor; received {len(anchors)}."
+            )
+        return anchors[0]
+
+    @property
+    def axial_auxiliaries(self) -> tuple[BearingStationElement, ...]:
+        return tuple(element for element in self.elements if element.role == "axial_auxiliary")
+
+
 class BearingWorkspaceService:
     """Resolve physical bearing-station identity independently from model class.
 
@@ -33,6 +71,8 @@ class BearingWorkspaceService:
     elements created by Apply are auxiliary elements at an existing station; they
     must never appear as a new DE/NDE station or become an implicit editing anchor.
     """
+
+    POSITION_TOLERANCE_MM = 1e-9
 
     @staticmethod
     def _is_station_anchor(bearing) -> bool:
@@ -69,10 +109,9 @@ class BearingWorkspaceService:
     def anchor_index(cls, project: RotorProject, element_index: int) -> int:
         """Map any visible bearing element back to its physical radial station.
 
-        This is used by sketch hit-testing. A radial element maps to itself. A
-        ThrustPad auxiliary maps to the unique radial station at the same axial
-        coordinate, so clicking the auxiliary graphic never changes the editing
-        identity to a non-selectable axial BearingSpec.
+        A radial element maps to itself. A ThrustPad auxiliary maps to the unique
+        radial station at the same exact axial coordinate, so selecting an auxiliary
+        never changes the editing identity to a non-selectable axial BearingSpec.
         """
 
         resolved = cls._raw_index(project, element_index)
@@ -82,7 +121,7 @@ class BearingWorkspaceService:
         matches = [
             station.index
             for station in cls.stations(project)
-            if abs(station.position_mm - float(bearing.position_mm)) <= 1e-9
+            if abs(station.position_mm - float(bearing.position_mm)) <= cls.POSITION_TOLERANCE_MM
         ]
         if len(matches) == 1:
             return matches[0]
@@ -128,5 +167,59 @@ class BearingWorkspaceService:
                 return station
         raise EngineeringError(f"Bearing index {resolved} did not resolve to a physical station.")
 
+    @classmethod
+    def station_elements(cls, project: RotorProject, index: int) -> tuple[BearingStationElement, ...]:
+        """Return every bearing element physically owned by one station.
 
-__all__ = ["BearingStation", "BearingWorkspaceService"]
+        The radial station anchor is always first. Auxiliary axial elements are then
+        listed in engineering-domain order. Ownership is established through the same
+        exact-position mapping used by ``anchor_index``; no nearest-node or nearest-
+        coordinate association is permitted.
+        """
+
+        station = cls.station(project, index)
+        rows: list[BearingStationElement] = []
+        for element_index, bearing in enumerate(project.bearings):
+            if element_index == station.index:
+                role = "radial_anchor"
+            elif cls._is_station_anchor(bearing):
+                continue
+            else:
+                owner = cls.anchor_index(project, element_index)
+                if owner != station.index:
+                    continue
+                role = "axial_auxiliary"
+
+            rows.append(
+                BearingStationElement(
+                    element_index=element_index,
+                    role=role,
+                    name=bearing.name,
+                    position_mm=float(bearing.position_mm),
+                    ross_class=bearing.ross_class,
+                    source_model=str(bearing.metadata.get("source_model", bearing.ross_class)),
+                    group=bearing.group,
+                )
+            )
+
+        inventory = BearingStationInventory(station=station, elements=tuple(rows))
+        _ = inventory.radial_anchor
+        return inventory.elements
+
+    @classmethod
+    def inventory(cls, project: RotorProject, index: int) -> BearingStationInventory:
+        station = cls.station(project, index)
+        inventory = BearingStationInventory(
+            station=station,
+            elements=cls.station_elements(project, station.index),
+        )
+        _ = inventory.radial_anchor
+        return inventory
+
+
+__all__ = [
+    "BearingStation",
+    "BearingStationElement",
+    "BearingStationInventory",
+    "BearingWorkspaceService",
+]
