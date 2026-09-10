@@ -144,7 +144,7 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
         expected_fields = {
             "ball": {"n_balls", "d_balls_mm", "static_load_n", "contact_angle_deg"},
             "sfd": {"speed_rpm", "journal_diameter_mm", "radial_clearance_um", "lubricant", "axial_length_mm", "eccentricity_ratio", "geometry", "cavitation"},
-            "thrust": {"speed_rpm", "inner_radius_mm", "outer_radius_mm", "axial_load_n", "n_theta", "n_radial"},
+            "thrust": {"speed_rpm", "pad_inner_radius_mm", "pad_outer_radius_mm", "axial_load_n", "n_theta", "n_radial"},
         }
         for key, required in expected_fields.items():
             page._select_type(key, announce=False)
