@@ -51,6 +51,9 @@ def test_axial_auxiliary_is_not_a_new_selectable_bearing_station() -> None:
 
     stations = BearingWorkspaceService.stations(project)
     assert [station.index for station in stations] == [0, 1]
+    # A visible axial auxiliary belongs to the DE physical station and must map
+    # back to that anchor for sketch/UI selection without becoming a third station.
+    assert BearingWorkspaceService.anchor_index(project, 2) == 0
     with pytest.raises(EngineeringError, match="axial auxiliary"):
         BearingWorkspaceService.resolve_index(project, 2)
 
