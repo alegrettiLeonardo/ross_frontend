@@ -110,7 +110,7 @@ class BearingSpec:
     cxy: float = 0.0
     cyx: float = 0.0
     coefficients: list[BearingCoefficientPoint] = field(default_factory=list)
-    metadata: dict[str, float | int | str | list[float]] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
 
     @property
     def frequency_dependent(self) -> bool:
