@@ -1,8 +1,9 @@
 """Production THD desktop qualification uses real Qt, native ROSS and strict modal.
 
-The three lateral THD capabilities are enabled by the production registry. The
-end-to-end test therefore exercises the same capability gate seen by users; it
-does not patch PLANNED adapters into an executable state.
+The three lateral THD capabilities are enabled by the production registry and are
+qualified here through their dedicated lateral service. ThrustPad is also promoted
+in the registry, but its scientific and desktop execution remain covered by the
+separate axial ThrustPad qualification; it is never routed through this lateral service.
 """
 from copy import deepcopy
 import json
@@ -24,12 +25,12 @@ from ross_studio.thd_input_dialog import THDBearingInputDialog
 from ross_studio.thd_results import UNAVAILABLE, convergence, native_field
 
 
-def test_production_registry_promotes_only_qualified_lateral_thd():
+def test_production_registry_promotes_qualified_thd_and_blocks_amb():
     registry = RossCapabilityRegistry(rs)
     for model in THDBearingStudioService.SUPPORTED_CLASSES:
         status, _reason = registry.effective_status(model)
         assert status == AdapterStatus.VALIDATED
-    assert registry.effective_status("ThrustPad")[0] == AdapterStatus.PLANNED
+    assert registry.effective_status("ThrustPad")[0] == AdapterStatus.VALIDATED
     assert registry.effective_status("MagneticBearingElement")[0] == AdapterStatus.BLOCKED
 
 
@@ -123,7 +124,7 @@ def test_real_qt_thd_calculate_preview_apply_strict_modal(qtbot, monkeypatch, mo
     assert np.all(np.isfinite(modal.wn)) and len(modal.wn) > 0
     assert calls == [("calculate", model), ("apply", model)]  # no THD re-solve
     window.bearing_page._select_type("thrust", announce=False)
-    assert not window.bearing_page.calculate_button.isEnabled()
+    assert window.bearing_page.calculate_button.isEnabled()
     assert not window.bearing_page.apply_button.isEnabled()
     window._open_bearing_group("AMB")
     assert not window.bearing_page.calculate_button.isEnabled()
