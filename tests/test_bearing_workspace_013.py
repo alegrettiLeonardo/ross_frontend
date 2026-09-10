@@ -7,6 +7,7 @@ import pytest
 from PySide6.QtWidgets import QDialog
 
 from ross_studio.bearing_workspace import BearingWorkspaceService
+from ross_studio.domain import BearingSpec, EngineeringError
 from ross_studio.legacy_import import load_irdin_project
 from ross_studio.ross_backend import RossModelBuilder
 from ross_studio.topology import NodeInsertionService
@@ -32,6 +33,26 @@ def test_bearing_workspace_exposes_both_op_w60_physical_stations() -> None:
     assert stations[0].support_names
     assert stations[1].support_names
     assert stations[0].support_names != stations[1].support_names
+
+
+def test_axial_auxiliary_is_not_a_new_selectable_bearing_station() -> None:
+    project = load_irdin_project(FIXTURE)
+    project.bearings.append(
+        BearingSpec(
+            name="ThrustPad axial auxiliary",
+            position_mm=project.bearings[0].position_mm,
+            ross_class="BearingElement",
+            metadata={
+                "source_model": "ThrustPad",
+                "axial_coefficients": [{"rpm": 3600.0, "kzz": 1.0e8, "czz": 1.0e5}],
+            },
+        )
+    )
+
+    stations = BearingWorkspaceService.stations(project)
+    assert [station.index for station in stations] == [0, 1]
+    with pytest.raises(EngineeringError, match="axial auxiliary"):
+        BearingWorkspaceService.resolve_index(project, 2)
 
 
 def test_bearing_studio_2_routes_directly_to_workspace_and_selects_nde(qtbot) -> None:
