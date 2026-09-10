@@ -141,7 +141,8 @@ def test_catalog_separates_class_existence_from_adapter_readiness() -> None:
     assert general["BearingElement"]["can_execute"] is True
     assert general["CylindricalBearing"]["status"] == AdapterStatus.VALIDATED.value
     thd = {row["class"]: row for row in catalog.entries(BearingGroup.THD)}
-    assert thd["ThrustPad"]["status"] == AdapterStatus.PLANNED.value
+    assert thd["ThrustPad"]["status"] == AdapterStatus.VALIDATED.value
+    assert thd["ThrustPad"]["can_execute"] is True
     amb = catalog.entries(BearingGroup.AMB)[0]
     assert amb["status"] == AdapterStatus.BLOCKED.value
 
