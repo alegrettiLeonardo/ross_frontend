@@ -15,6 +15,8 @@ class FrozenGuiSmokeResult:
     sidebar_routes: tuple[str, ...]
     view_modes: tuple[str, ...]
     rotor_editor_count: int
+    bearing_station_count: int
+    bearing_direct_route: bool
     general_executable: tuple[str, ...]
     thd_executable: tuple[str, ...]
     amb_blocked: tuple[str, ...]
@@ -26,10 +28,10 @@ class FrozenGuiSmokeResult:
 def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
     """Construct the production Qt window and exercise non-modal navigation.
 
-    The frozen scientific self-test validates the backend. This companion gate proves
-    that the packaged desktop shell imports, constructs and exposes the same Bearing
-    Studio capabilities instead of silently degrading to ``0 executable adapters``.
-    No solver dialog or expensive THD calculation is started here.
+    The scientific self-test validates the backend. This companion gate proves the
+    packaged desktop shell imports, constructs and exposes Bearing Studio 2.0 with
+    explicit bearing-station selection instead of silently degrading to a fixed
+    ``bearing_index=0`` path. No solver dialog or expensive THD calculation is run.
     """
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -62,7 +64,6 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
         if missing_routes:
             raise RuntimeError(f"Frozen sidebar is missing model routes: {sorted(missing_routes)}")
 
-        # 0.12 intentionally removed the second horizontal model navigation bar.
         if window.rotor_page.findChildren(QTabWidget):
             raise RuntimeError("Frozen Rotor workspace unexpectedly contains a duplicate QTabWidget model navigator.")
         if window.rotor_page.editor_stack.count() != 8:
@@ -92,17 +93,32 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
                 f"{executable_by_group[BearingGroup.THD]}"
             )
         if blocked_by_group[BearingGroup.AMB] != ["MagneticBearingElement"]:
-            raise RuntimeError(
-                "Frozen AMB gate mismatch: "
-                f"{blocked_by_group[BearingGroup.AMB]}"
-            )
+            raise RuntimeError(f"Frozen AMB gate mismatch: {blocked_by_group[BearingGroup.AMB]}")
 
-        # Exercise actual application routing and button gating for every family.
         for route in ("shaft", "disks", "supports", "loads", "ump", "probes"):
             window._navigate(route)
             if window.stack.currentWidget() is not window.rotor_page:
                 raise RuntimeError(f"Frozen route {route!r} did not open the Rotor engineering workspace.")
 
+        # Bearing Studio 2.0 is the direct target of the sidebar. There is no
+        # intermediate family landing page and every physical bearing is selectable.
+        window._navigate("bearings")
+        bearing_direct_route = window.stack.currentWidget() is window.bearing_page
+        if not bearing_direct_route:
+            raise RuntimeError("Frozen Bearings route did not open Bearing Studio 2.0 directly.")
+        expected_stations = len(project.engineering.bearings)
+        station_count = window.bearing_page.bearing_selector.count()
+        if station_count != expected_stations:
+            raise RuntimeError(
+                f"Frozen Bearing Studio exposes {station_count} stations; expected {expected_stations}."
+            )
+        if expected_stations > 1:
+            window.bearing_page.bearing_selector.setCurrentIndex(expected_stations - 1)
+            app.processEvents()
+            if window.bearing_index != expected_stations - 1:
+                raise RuntimeError("Frozen bearing selector did not update the application station identity.")
+
+        # Exercise family visibility and capability gating inside the single workspace.
         for group in (BearingGroup.GENERAL, BearingGroup.THD, BearingGroup.AMB):
             window._open_bearing_group(group.value)
             visible = [
@@ -135,6 +151,8 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
             sidebar_routes=tuple(sorted(expected_routes)),
             view_modes=view_modes,
             rotor_editor_count=window.rotor_page.editor_stack.count(),
+            bearing_station_count=station_count,
+            bearing_direct_route=bearing_direct_route,
             general_executable=tuple(executable_by_group[BearingGroup.GENERAL]),
             thd_executable=tuple(executable_by_group[BearingGroup.THD]),
             amb_blocked=tuple(blocked_by_group[BearingGroup.AMB]),
