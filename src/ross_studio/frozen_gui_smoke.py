@@ -1,189 +1,157 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import os
 from typing import Any
 
-from .domain import BearingGroup
+from .frozen_gui_smoke_base import run_frozen_gui_smoke as _run_base_gui_smoke
 
 
 @dataclass(slots=True, frozen=True)
 class FrozenGuiSmokeResult:
-    status: str
-    window_title: str
-    project: str
-    sidebar_routes: tuple[str, ...]
-    view_modes: tuple[str, ...]
-    rotor_editor_count: int
-    bearing_station_count: int
-    bearing_direct_route: bool
-    bearing_selection_synced: bool
-    bearing_station_inventory: tuple[tuple[str, ...], ...]
-    general_executable: tuple[str, ...]
-    thd_executable: tuple[str, ...]
-    amb_blocked: tuple[str, ...]
+    payload: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return dict(self.payload)
 
 
 def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
-    """Construct the production Qt window and exercise non-modal navigation.
+    """Qualify the production GUI plus 0.14 model-builder transactions in-place.
 
-    The scientific self-test validates the backend. This companion gate proves the
-    packaged desktop shell imports, constructs and exposes Bearing Studio 2.0 with
-    explicit bearing-station selection instead of silently degrading to a fixed
-    ``bearing_index=0`` path. No solver dialog or expensive THD calculation is run.
+    The inherited 0.13 gate first checks navigation and Bearing Studio. A second
+    production window then exercises the same transaction service used by the editor,
+    proving PyInstaller includes every newly enabled entity path on both Linux and
+    Windows. Coupling and Load are intentionally qualified as engineering/analysis
+    inputs at exact stations, not falsely reported as structural ROSS elements.
     """
 
+    base = _run_base_gui_smoke().to_dict()
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-    from PySide6.QtWidgets import QApplication, QTabWidget
+    from PySide6.QtWidgets import QApplication
 
     from .app import RossStudioWindow
-    from .rotor_selection import RotorEntityRef, WORKSPACE_SELECTION
+    from .domain import (
+        CouplingSpec,
+        DiskSpec,
+        DistributedMassSpec,
+        LoadSpec,
+        PointMassSpec,
+        ProbeSpec,
+        SealSpec,
+    )
+    from .ross_backend import RossModelBuilder
+    from .rotor_selection import WORKSPACE_SELECTION
+    from .topology import NodeInsertionService
 
     app = QApplication.instance() or QApplication([])
     WORKSPACE_SELECTION.clear()
     window = RossStudioWindow()
     try:
-        project = window.project
-        if project.engineering is None:
-            raise RuntimeError("GUI startup did not load the OP-W60 engineering model.")
+        project = window.project.engineering
+        if project is None:
+            raise RuntimeError("Frozen Model Builder smoke did not load OP-W60 engineering domain.")
+        service = window.rotor_page.model_builder
 
-        expected_routes = {
-            "rotor",
-            "shaft",
-            "disks",
-            "bearings",
-            "seals",
-            "supports",
-            "couplings",
-            "loads",
-            "ump",
-            "probes",
-        }
-        available_routes = set(window.sidebar.buttons)
-        missing_routes = expected_routes - available_routes
-        if missing_routes:
-            raise RuntimeError(f"Frozen sidebar is missing model routes: {sorted(missing_routes)}")
-
-        if window.rotor_page.findChildren(QTabWidget):
-            raise RuntimeError("Frozen Rotor workspace unexpectedly contains a duplicate QTabWidget model navigator.")
-        if window.rotor_page.editor_stack.count() != 8:
-            raise RuntimeError(
-                f"Frozen Rotor workspace expected 8 engineering editor pages, received {window.rotor_page.editor_stack.count()}."
-            )
-
-        view_modes = tuple(window.toolbar.view_combo.itemText(i) for i in range(window.toolbar.view_combo.count()))
-        if view_modes != ("Engineering 2D", "ROSS Native"):
-            raise RuntimeError(f"Frozen model-view selector mismatch: {view_modes}")
-
-        executable_by_group: dict[BearingGroup, list[str]] = {}
-        blocked_by_group: dict[BearingGroup, list[str]] = {}
-        for group in (BearingGroup.GENERAL, BearingGroup.THD, BearingGroup.AMB):
-            rows = window.catalog.entries(group)
-            executable_by_group[group] = sorted(str(row["class"]) for row in rows if bool(row["can_execute"]))
-            blocked_by_group[group] = sorted(str(row["class"]) for row in rows if not bool(row["can_execute"]))
-
-        if len(executable_by_group[BearingGroup.GENERAL]) != 4:
-            raise RuntimeError(
-                "Frozen General Bearing Studio did not expose 4 executable adapters: "
-                f"{executable_by_group[BearingGroup.GENERAL]}"
-            )
-        if len(executable_by_group[BearingGroup.THD]) != 4:
-            raise RuntimeError(
-                "Frozen THD Bearing Studio did not expose 4 executable adapters: "
-                f"{executable_by_group[BearingGroup.THD]}"
-            )
-        if blocked_by_group[BearingGroup.AMB] != ["MagneticBearingElement"]:
-            raise RuntimeError(f"Frozen AMB gate mismatch: {blocked_by_group[BearingGroup.AMB]}")
-
-        for route in ("shaft", "disks", "supports", "loads", "ump", "probes"):
-            window._navigate(route)
-            if window.stack.currentWidget() is not window.rotor_page:
-                raise RuntimeError(f"Frozen route {route!r} did not open the Rotor engineering workspace.")
-
-        # Bearing Studio 2.0 is the direct target of the sidebar. There is no
-        # intermediate family landing page and every physical radial station is
-        # selectable independently from its calculation model.
-        window._navigate("bearings")
-        bearing_direct_route = window.stack.currentWidget() is window.bearing_page
-        if not bearing_direct_route:
-            raise RuntimeError("Frozen Bearings route did not open Bearing Studio 2.0 directly.")
-        stations = window.bearing_workspace.stations(project.engineering)
-        expected_stations = len(stations)
-        station_count = window.bearing_page.bearing_selector.count()
-        if station_count != expected_stations:
-            raise RuntimeError(
-                f"Frozen Bearing Studio exposes {station_count} stations; expected {expected_stations}."
-            )
-        inventories = tuple(window.bearing_workspace.inventory(project.engineering, station.index) for station in stations)
-        inventory_roles = tuple(tuple(element.role for element in inventory.elements) for inventory in inventories)
-        if inventory_roles != tuple(("radial_anchor",) for _ in stations):
-            raise RuntimeError(f"Frozen baseline bearing station inventory mismatch: {inventory_roles}")
-
-        # Bearing Studio selector -> shared rotor selection.
-        bearing_selection_synced = True
-        if expected_stations > 1:
-            last = stations[-1]
-            row = window.bearing_page.bearing_selector.findData(last.index)
-            window.bearing_page.bearing_selector.setCurrentIndex(row)
-            app.processEvents()
-            current = WORKSPACE_SELECTION.current
-            if window.bearing_index != last.index:
-                raise RuntimeError("Frozen bearing selector did not update the application station identity.")
-            if current is None or current.kind != "bearings" or current.index != last.index:
-                raise RuntimeError("Frozen bearing selector did not update the shared rotor bearing selection.")
-
-            # Shared rotor/sketch selection -> Bearing Studio selector/application.
-            first = stations[0]
-            WORKSPACE_SELECTION.select(RotorEntityRef("bearings", first.index, first.name, first.position_mm))
-            app.processEvents()
-            if window.bearing_index != first.index or window.bearing_page.bearing_selector.currentData() != first.index:
-                raise RuntimeError("Frozen rotor bearing selection did not synchronize back to Bearing Studio.")
-
-        # Exercise family visibility and capability gating inside the single workspace.
-        for group in (BearingGroup.GENERAL, BearingGroup.THD, BearingGroup.AMB):
-            window._open_bearing_group(group.value)
-            visible = [
-                (key, window.bearing_page.type_metadata[key][1], button)
-                for key, button in window.bearing_page.type_buttons.items()
-                if not button.isHidden()
-            ]
-            expected_count = len(window.catalog.entries(group))
-            if len(visible) != expected_count:
-                raise RuntimeError(
-                    f"Frozen {group.value} page shows {len(visible)} model buttons; expected {expected_count}."
-                )
-            for key, ross_class, _button in visible:
-                window.bearing_page._select_type(key, announce=False)
-                can_execute = next(
-                    bool(row["can_execute"])
-                    for row in window.catalog.entries(group)
-                    if row["class"] == ross_class
-                )
-                if window.bearing_page.calculate_button.isEnabled() != can_execute:
-                    raise RuntimeError(
-                        f"Frozen Calculate button gating mismatch for {ross_class}: expected {can_execute}."
-                    )
-
-        app.processEvents()
-        return FrozenGuiSmokeResult(
-            status="PASS",
-            window_title=window.windowTitle(),
-            project=project.name,
-            sidebar_routes=tuple(sorted(expected_routes)),
-            view_modes=view_modes,
-            rotor_editor_count=window.rotor_page.editor_stack.count(),
-            bearing_station_count=station_count,
-            bearing_direct_route=bearing_direct_route,
-            bearing_selection_synced=bearing_selection_synced,
-            bearing_station_inventory=inventory_roles,
-            general_executable=tuple(executable_by_group[BearingGroup.GENERAL]),
-            thd_executable=tuple(executable_by_group[BearingGroup.THD]),
-            amb_blocked=tuple(blocked_by_group[BearingGroup.AMB]),
+        records = (
+            ("distributed_mass", DistributedMassSpec("FROZEN-MASSAS", 1000.125, 30.0, 9.0, 160.0, 20.0)),
+            ("disk", DiskSpec("FROZEN-DISK", 1100.250, 8.0, 0.03, 0.06)),
+            ("point_mass", PointMassSpec("FROZEN-CONCENT", 1200.375, 7.0, 0.011, 0.022, 0.033)),
+            (
+                "seal",
+                SealSpec(
+                    "FROZEN-SEAL", 1300.500,
+                    kxx=1.0e6, kyy=1.1e6, cxx=100.0, cyy=110.0,
+                    kxy=-2.0e5, kyx=2.1e5, cxy=-20.0, cyx=21.0,
+                ),
+            ),
+            (
+                "coupling",
+                CouplingSpec(
+                    "FROZEN-COUPLING", 1400.625,
+                    left_mass_kg=2.0, right_mass_kg=3.0,
+                    left_ip_kg_m2=0.04, right_ip_kg_m2=0.05,
+                    kr_z_n_m_rad=2.0e6,
+                ),
+            ),
+            ("load", LoadSpec("FROZEN-LOAD", "harmonic", 1500.750, 100.0, 15.0, {"order": 1})),
+            ("probe", ProbeSpec("FROZEN-PROBE", 1600.875, 1, 45.0)),
         )
+
+        transaction_nodes: dict[str, int] = {}
+        for kind, record in records:
+            preview = service.preview_add(project, kind, record)
+            service.commit(project, preview)
+            if kind == "distributed_mass":
+                position = record.center_mm
+            else:
+                position = record.position_mm
+            node = NodeInsertionService.plan(project).node_for(position)
+            if node is None:
+                raise RuntimeError(f"Frozen {kind} transaction did not retain exact node at {position:g} mm.")
+            transaction_nodes[kind] = node
+
+        final = RossModelBuilder().build(project, strict=True)
+        if final.unresolved_positions_mm:
+            raise RuntimeError(f"Frozen strict Rotor contains unresolved stations: {final.unresolved_positions_mm}")
+        if not any(item.name == "FROZEN-MASSAS" for item in final.equivalent_disks):
+            raise RuntimeError("Frozen strict Rotor lost the [Massas] equivalent DiskElement.")
+        point = next((item for item in final.equivalent_point_masses if item.name == "FROZEN-CONCENT"), None)
+        if point is None or (point.ix_kg_m2, point.iy_kg_m2, point.iz_kg_m2) != (0.011, 0.022, 0.033):
+            raise RuntimeError("Frozen strict Rotor did not preserve [Concent] principal inertias.")
+        seal_candidates = [*getattr(final.rotor, "seal_elements", []), *getattr(final.rotor, "bearing_elements", [])]
+        if not any(type(element).__name__ == "SealElement" and getattr(element, "tag", None) == "FROZEN-SEAL" for element in seal_candidates):
+            raise RuntimeError("Frozen strict Rotor did not realize the new seal as ROSS SealElement.")
+        if any(type(element).__name__ == "CouplingElement" for element in final.rotor.shaft_elements):
+            raise RuntimeError("Frozen single-station coupling was silently mapped to a two-node CouplingElement.")
+
+        # Rebuild the visible tables from the committed domain and exercise the actual
+        # offscreen sketch paint pass so [Concent] cannot disappear only in packaging.
+        window.rotor_page._rebuild_editors("disks")
+        table = window.rotor_page.editor_tables["disks"]
+        concent_table_visible = any(
+            table.item(row, 1) is not None and "[Concent]" in table.item(row, 1).text()
+            for row in range(table.rowCount())
+        )
+        if not concent_table_visible:
+            raise RuntimeError("Frozen mass editor does not expose [Concent] as a first-class body.")
+
+        window.resize(1400, 850)
+        window.show()
+        app.processEvents()
+        window.rotor_page.sketch.repaint()
+        app.processEvents()
+        concent_sketch_visible = any("[Concent]" in hit.tooltip for hit in window.rotor_page.sketch._hits)
+        if not concent_sketch_visible:
+            raise RuntimeError("Frozen Engineering 2D sketch did not render an interactive [Concent] body.")
+
+        buttons = window.rotor_page.editor_action_buttons
+        enabled_editor_groups = tuple(
+            key
+            for key in ("disks", "seals", "couplings", "loads", "probes")
+            if all(buttons[key][action].isEnabled() for action in ("add", "edit", "delete"))
+        )
+        if enabled_editor_groups != ("disks", "seals", "couplings", "loads", "probes"):
+            raise RuntimeError(f"Frozen 0.14 editor action gating mismatch: {enabled_editor_groups}")
+        if buttons["shaft"]["add"].isEnabled() or buttons["shaft"]["delete"].isEnabled():
+            raise RuntimeError("Frozen shaft add/delete bypassed the absolute-coordinate remapping gate.")
+        if any(button.isEnabled() for button in buttons["ump"].values()):
+            raise RuntimeError("Frozen UMP page exposed a detached duplicate editor.")
+
+        base["model_builder_014"] = {
+            "status": "PASS",
+            "transaction_contract": "preview -> domain validation -> engineering validation -> strict ROSS -> stale-check -> commit",
+            "transaction_nodes": transaction_nodes,
+            "enabled_editor_groups": list(enabled_editor_groups),
+            "concent_table_visible": concent_table_visible,
+            "concent_sketch_visible": concent_sketch_visible,
+            "concent_inertias_preserved": True,
+            "seal_native_class": "SealElement",
+            "coupling_native_mapping": "BLOCKED_PENDING_TWO_NODE_CONTRACT",
+            "load_realization": "ANALYSIS_INPUT_EXACT_NODE",
+            "unresolved_positions_mm": final.unresolved_positions_mm,
+        }
+        return FrozenGuiSmokeResult(base)
     finally:
         WORKSPACE_SELECTION.clear()
         window.close()
