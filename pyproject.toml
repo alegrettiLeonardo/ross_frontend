@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ross-studio"
-version = "0.15.0"
+version = "0.16.0"
 description = "Rotordynamics Design Platform for Rotating Electrical Machines"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -27,6 +27,7 @@ ross-studio = "ross_studio.frozen_entry:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ross_studio"]
+include = ["src/ross_studio/assets/bearings/*.svg"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
