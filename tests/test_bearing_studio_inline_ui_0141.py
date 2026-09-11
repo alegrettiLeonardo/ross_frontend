@@ -10,7 +10,7 @@ from ross_studio.icons import engineering_icon
 from ross_studio.theme import APP_STYLESHEET
 
 
-def test_bearing_studio_uses_light_inline_model_driven_workspace(qtbot) -> None:
+def test_bearing_studio_uses_requested_model_tree_and_vertical_workspace(qtbot) -> None:
     pytest.importorskip("ross")
     window = RossStudioWindow()
     qtbot.addWidget(window)
@@ -18,22 +18,29 @@ def test_bearing_studio_uses_light_inline_model_driven_workspace(qtbot) -> None:
     window._navigate("bearings")
 
     page = window.bearing_page
+    assert page.__class__.__module__.endswith("bearing_workspace_page")
     assert page.workspace_scroll.widgetResizable()
-    assert page.group_selector.isHidden()  # family is classification, not duplicate navigation
+    assert page.group_selector.isHidden()
     assert page.input_card.isVisible()
     assert not page.result_card.isVisible()
-    assert not page.results_button.isEnabled()
+    assert hasattr(page, "bearing_rail")
+    assert "exact ROSS node" in page.target_node_label.text()
 
-    # Every qualified/blocked model is directly discoverable through its own icon.
-    assert len(page.type_buttons) == 9
+    # Calculation-model surface requested for 0.15. Direct BearingElement K/C is an
+    # application/persistence class, not a Bearing Studio model tile.
+    assert set(page.type_buttons) == {
+        "ball", "roller", "cyl", "plain", "tilting", "thrust", "sfd", "amb"
+    }
+    assert len(page.type_buttons) == 8
+    assert "kc" not in page.type_buttons
     assert all(not button.isHidden() for button in page.type_buttons.values())
     for icon_name in (
-        "bearing_kc", "ball_bearing", "roller_bearing", "cylindrical_bearing",
+        "ball_bearing", "roller_bearing", "cylindrical_bearing",
         "plain_journal", "tilting_pad", "thrust_pad", "sfd", "amb",
     ):
         assert not engineering_icon(icon_name, 42).isNull()
 
-    # The popup/dialog visibility regression is prevented by explicit light Qt styling.
+    # Popup/dialog visibility remains explicitly light and readable.
     assert "QComboBox QAbstractItemView" in APP_STYLESHEET
     assert "background: #ffffff" in APP_STYLESHEET
     assert "QDialog" in APP_STYLESHEET
@@ -46,6 +53,7 @@ def test_bearing_studio_uses_light_inline_model_driven_workspace(qtbot) -> None:
         "speed_rpm", "journal_diameter_mm", "radial_clearance_um", "lubricant",
         "axial_length_mm", "eccentricity_ratio", "geometry", "cavitation",
     }.issubset(page.input_panel.fields)
+    assert page.output_dimensional_button.isEnabled() is False  # result not solved yet
     assert window.project.engineering == original
 
     qtbot.mouseClick(page.type_buttons["tilting"], Qt.MouseButton.LeftButton)
@@ -62,12 +70,6 @@ def test_bearing_studio_uses_light_inline_model_driven_workspace(qtbot) -> None:
     }
     assert window.project.engineering == original
 
-    qtbot.mouseClick(page.type_buttons["kc"], Qt.MouseButton.LeftButton)
-    assert window._selected_bearing_class() == "BearingElement"
-    assert page.input_panel.kc_table is not None
-    assert page.input_panel.kc_table.rowCount() == len(original.bearings[0].coefficients)
-    assert window.project.engineering == original
-
     qtbot.mouseClick(page.type_buttons["amb"], Qt.MouseButton.LeftButton)
     assert window._selected_bearing_class() == "MagneticBearingElement"
     assert not page.calculate_button.isEnabled()
@@ -75,7 +77,7 @@ def test_bearing_studio_uses_light_inline_model_driven_workspace(qtbot) -> None:
     assert window.project.engineering == original
 
 
-def test_results_live_below_inputs_and_toggle_without_losing_inline_values(qtbot) -> None:
+def test_general_bearing_exposes_kc_values_but_never_thd_dimensional_output_or_curves(qtbot) -> None:
     pytest.importorskip("ross")
     window = RossStudioWindow()
     qtbot.addWidget(window)
@@ -92,15 +94,19 @@ def test_results_live_below_inputs_and_toggle_without_losing_inline_values(qtbot
     assert window.bearing_calculation is not None
     assert page.apply_button.isEnabled()
     assert page.results_button.isEnabled()
+    assert page.output_kc_button.isEnabled()
+    assert not page.output_dimensional_button.isEnabled()
     assert not page.result_card.isVisible()
-    assert page.input_panel.values() == before  # Calculate does not rebuild/erase the editor.
+    assert page.input_panel.values() == before
+    assert page.kc_table.rowCount() == 1
+    assert page.kc_native_view.figure is None
+    assert "only for calculated THD bearings" in page.kc_native_view._message.text()
 
-    qtbot.mouseClick(page.results_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(page.output_kc_button, Qt.MouseButton.LeftButton)
     assert page.result_card.isVisible()
-    assert page.results_button.text() == "Hide Results"
+    assert page.tabs.currentIndex() == 0
     assert page.input_panel.values() == before
 
-    qtbot.mouseClick(page.results_button, Qt.MouseButton.LeftButton)
+    page.set_results_visible(False)
     assert not page.result_card.isVisible()
-    assert page.results_button.text() == "View Results"
     assert page.input_panel.values() == before
