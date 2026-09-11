@@ -69,8 +69,11 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
         note="Independent Modal/Campbell transaction; torsional modes come from ROSS shape.mode_type and retain native 3D animation.",
     ),
     "analysis.time_frequency": PageRouteSpec(
-        "analysis.time_frequency", "analysis", title="Time & Frequency", implementation_phase="0.21.0", operational=False,
-        note="Frequency response, unbalance, time response, HBM, UCS and faults will be independently executable here.",
+        "analysis.time_frequency", "analysis", title="Time & Frequency", implementation_phase="0.21.0", operational=True,
+        note=(
+            "Independent native ROSS run_freq_response(), run_unbalance_response(), run_time_response(), "
+            "run_harmonic_balance_response(), run_ucs() and run_clearance_analysis() transactions with native plots."
+        ),
     ),
     "analysis.stochastic": PageRouteSpec(
         "analysis.stochastic", "analysis", title="Stochastic", implementation_phase="0.24.0", operational=False,
