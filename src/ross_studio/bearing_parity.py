@@ -5,8 +5,11 @@ from enum import Enum
 
 
 class BearingAnalysisFormulation(str, Enum):
-    DIMENSIONAL_CONSTANT_VISCOSITY = "Dimensional · Constant Viscosity"
+    # The executable ROSS 2.3 THD contract is the default selection. Keeping this
+    # first prevents an event-loop race when the user moves directly from a General
+    # bearing to PlainJournal/TiltingPad and immediately presses Calculate.
     DIMENSIONAL_HEAT_BALANCE = "Dimensional · Heat Balance / THD"
+    DIMENSIONAL_CONSTANT_VISCOSITY = "Dimensional · Constant Viscosity"
     NON_DIMENSIONAL = "Non-Dimensional"
 
 
