@@ -59,14 +59,14 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
     ),
     "model.probes": PageRouteSpec("model.probes", "rotor", editor_key="probes", title="Probes"),
     "analysis.static_modal.lateral": PageRouteSpec(
-        "analysis.static_modal.lateral", "analysis", title="Lateral Analysis", implementation_phase="0.19.0",
+        "analysis.static_modal.lateral", "analysis", title="Lateral Analysis", implementation_phase="0.20.0",
         operational=True,
-        note="Native Rotor.run_static(), Rotor.run_modal() and Rotor.run_campbell() with native ROSS plots.",
+        note="Decoupled native ROSS transactions: Static owns only run_static(); Modal owns run_modal()/run_campbell() with independent caches.",
     ),
     "analysis.static_modal.torsional": PageRouteSpec(
-        "analysis.static_modal.torsional", "analysis", title="Torsional Analysis", implementation_phase="0.19.0",
+        "analysis.static_modal.torsional", "analysis", title="Torsional Analysis", implementation_phase="0.20.0",
         operational=True,
-        note="Consumes native Rotor.run_modal(); torsional modes are selected by ROSS shape.mode_type and can be animated in 3D.",
+        note="Independent Modal/Campbell transaction; torsional modes come from ROSS shape.mode_type and retain native 3D animation.",
     ),
     "analysis.time_frequency": PageRouteSpec(
         "analysis.time_frequency", "analysis", title="Time & Frequency", implementation_phase="0.21.0", operational=False,

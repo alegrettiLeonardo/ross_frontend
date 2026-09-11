@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-"""ROSS Studio 0.19 application composition root.
+"""ROSS Studio 0.20 application composition root.
 
 The qualified 0.15 scientific transaction logic remains in ``app_legacy`` while
-0.17 owns hierarchical navigation, 0.18 adds local Engineering Outputs, and 0.19
-activates dedicated Static & Modal native ROSS workspaces without introducing a
-public/global Results route in the sidebar.
+0.17 owns hierarchical navigation, 0.18 adds local Engineering Outputs, 0.19 adds
+native Static/Modal plots, and 0.20 decouples Static from Modal/Campbell into
+independent scientific transactions and caches without introducing a public/global
+Results route in the sidebar.
 """
 
 import sys
@@ -39,7 +40,7 @@ TitleBar = _legacy.TitleBar
 
 
 class RossStudioWindow(_legacy.RossStudioWindow):
-    """0.19 shell with native Static/Modal/Campbell analysis workspaces."""
+    """0.20 shell with independently executable native Static and Modal/Campbell workspaces."""
 
     def __init__(self) -> None:
         self._architecture_pages: dict[str, QWidget] = {}
@@ -115,11 +116,13 @@ class RossStudioWindow(_legacy.RossStudioWindow):
 
         if spec.owner in {"foundation", "analysis"}:
             self.stack.setCurrentWidget(self._architecture_page(route))
+            if route.startswith("analysis.static_modal."):
+                detail = "Independent native ROSS Static and Modal/Campbell transactions with separate caches"
+            else:
+                detail = "Dedicated route owner established" if spec.operational else spec.note
             self.status.set_status(
                 spec.title,
-                "Native ROSS Static/Modal/Campbell workspace" if route.startswith("analysis.static_modal.") else (
-                    "Dedicated route owner established" if spec.operational else spec.note
-                ),
+                detail,
                 units=f"Scientific execution gate: {spec.implementation_phase}",
             )
             return
