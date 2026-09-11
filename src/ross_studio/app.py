@@ -14,6 +14,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication, QWidget
 
 from . import app_legacy as _legacy
+from .engineering_report_pdf import install_engineering_report_export
 from .navigation_registry import canonical_route
 from .page_registry import route_spec
 from .pages import bearing_studio as _bearing_base_module
@@ -24,6 +25,11 @@ from .pages.engineering_results import EngineeringAnalysisResultsPage
 from .pages.project_home import ProjectHomePage
 from .pages.rotor_workspace import RotorModelPage
 from .theme import APP_STYLESHEET
+
+# Install the bounded landscape-A4 report composer before any GUI export is invoked.
+# This changes presentation only; the report still consumes the exact retained
+# EngineeringOutputsSnapshot and native ROSS image exports.
+install_engineering_report_export()
 
 # app_legacy resolves these module globals when a window/page is constructed or
 # refreshed. Redirect them to the qualified workspaces without duplicating solver logic.

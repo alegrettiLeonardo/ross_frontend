@@ -12,11 +12,16 @@ from PySide6.QtWidgets import QApplication
 from ross_studio.analysis_pipeline import AnalysisPipelineService
 from ross_studio.engineering_figures import EngineeringFigureCatalog
 from ross_studio.engineering_outputs import EngineeringOutputsService
+from ross_studio.engineering_report_pdf import install_engineering_report_export
 from ross_studio.models import load_reference_project_model
 from ross_studio.pages.engineering_results import EngineeringAnalysisResultsPage
 
 
 def main() -> int:
+    # Presentation-only PDF fix: install the bounded/wrapped report composer before
+    # exercising the exact same Engineering Outputs service used by the GUI.
+    install_engineering_report_export()
+
     project = load_reference_project_model()
     if project.engineering is None:
         raise RuntimeError("Reference project lost its engineering domain.")
@@ -26,6 +31,8 @@ def main() -> int:
     snapshot = service.build(project, result)
     figures = EngineeringFigureCatalog(project, result)
 
+    if getattr(service, "PDF_LAYOUT_POLICY", None) != "LANDSCAPE_A4_FIT_AND_WRAP":
+        raise RuntimeError("Engineering Outputs PDF fit/wrap policy is not installed.")
     if snapshot.summary["unresolved_positions_mm"] != []:
         raise RuntimeError("Engineering Outputs contains unresolved positions.")
     if snapshot.provenance["ross_version"] != "2.3.0":
@@ -151,6 +158,7 @@ def main() -> int:
         "qualification_manifest": str(package.qualification_manifest),
         "xlsx": str(package.workbook),
         "pdf": str(package.report),
+        "pdf_layout_policy": service.PDF_LAYOUT_POLICY,
         "csv_files": {key: str(path) for key, path in package.tables.items()},
         "gui_entry_point": "Engineering Outputs button on local analysis result page",
         "global_results_sidebar_route_added": False,

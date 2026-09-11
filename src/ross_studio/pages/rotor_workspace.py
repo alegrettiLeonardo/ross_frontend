@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QTableWidgetItem
+
 from ..bearing_node_inspector import BearingNodeInspector
 from ..rotor_selection import RotorEntityRef
+from ..shaft_geometry import display_shaft_geometry
+from ..shaft_section_dialog import GuidedShaftSectionEditorDialog
 from ..workspace_commands import WORKSPACE_COMMANDS
+from . import rotor_model as _legacy_rotor_module
 from .rotor_model import RotorModelPage as _LegacyRotorModelPage
+
+# Keep the historical editor transaction owner and monkeypatch point intact. The
+# legacy page resolves this module-global class when Edit is clicked, so existing
+# tests/callers that monkeypatch ``pages.rotor_model.ShaftSectionEditorDialog`` keep
+# working while production uses the guided ROSS tutorial editor.
+_legacy_rotor_module.ShaftSectionEditorDialog = GuidedShaftSectionEditorDialog
 
 
 class RotorModelPage(_LegacyRotorModelPage):
@@ -14,6 +26,11 @@ class RotorModelPage(_LegacyRotorModelPage):
     discretization toggle. Selecting a bearing keeps the engineer in this model flow
     and replaces the generic model summary with the applied node K/C context;
     Bearing Studio opens only through an explicit action.
+
+    Shaft editing is additionally guided by the four explicit geometries documented
+    in the ROSS Modeling tutorial: solid cylindrical, solid conical, hollow
+    cylindrical and hollow conical. The existing strict preview/commit transaction
+    remains the scientific gate; no shaft equation is duplicated in the GUI.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -50,6 +67,33 @@ class RotorModelPage(_LegacyRotorModelPage):
         current = self.selection.current
         if current is not None and current.kind == "bearings":
             self._show_bearing_context(current)
+
+    def _segments_page(self):
+        """Decorate the qualified shaft table with the explicit ROSS geometry family.
+
+        The legacy column order is intentionally preserved so existing FE-mesh
+        automation and golden tests retain their column contracts. The geometry type
+        is appended as a read-only engineering classification.
+        """
+
+        page = super()._segments_page()
+        table = self.segment_table
+        geometry_column = table.columnCount()
+        table.insertColumn(geometry_column)
+        table.setHorizontalHeaderItem(geometry_column, QTableWidgetItem("ROSS Shaft Type"))
+
+        engineering = self.project.engineering
+        if engineering is not None:
+            for row, section in enumerate(engineering.shaft_sections):
+                geometry_item = QTableWidgetItem(display_shaft_geometry(section))
+                geometry_item.setFlags(geometry_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                geometry_item.setToolTip(
+                    "Guided type follows the ROSS Modeling tutorial. Edit this section to choose "
+                    "Solid cylindrical, Solid conical, Hollow cylindrical or Hollow conical."
+                )
+                table.setItem(row, geometry_column, geometry_item)
+        table.resizeColumnsToContents()
+        return page
 
     def set_view_mode(self, mode: str) -> None:
         # Compatibility shim for stale programmatic callers. There is no global
