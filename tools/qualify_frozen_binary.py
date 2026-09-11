@@ -6,6 +6,7 @@ import platform
 import subprocess
 import sys
 
+EXPECTED_ROSS_STUDIO_VERSION = "0.15.1"
 EXPECTED_EXECUTABLE = {
     "BearingElement",
     "BallBearingElement",
@@ -93,7 +94,7 @@ def main() -> int:
         "project file I/O",
     )
     assert io_payload["ross_version"] == "2.3.0", io_payload
-    assert io_payload["ross_studio_version"] == "0.14.2", io_payload
+    assert io_payload["ross_studio_version"] == EXPECTED_ROSS_STUDIO_VERSION, io_payload
     assert io_payload["irdin_sections"] == 15, io_payload
     assert io_payload["irdin_shaft_elements"] == 27, io_payload
     assert io_payload["irdin_bearings"] == 2, io_payload
