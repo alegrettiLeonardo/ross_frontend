@@ -254,9 +254,11 @@ def test_switching_station_invalidates_unapplied_preview(qtbot) -> None:
     before = deepcopy(engineering.bearings)
 
     window._select_bearing(1)
-    kc_key = window._bearing_key_for_class(window.bearing_page, "BearingElement")
-    assert kc_key is not None
-    window.bearing_page._select_type(kc_key, announce=False)
+    # 0.15 removes direct BearingElement/K-C as a calculation tile. Use a fast
+    # qualified General model to exercise the same transaction invalidation gate.
+    ball_key = window._bearing_key_for_class(window.bearing_page, "BallBearingElement")
+    assert ball_key is not None
+    window.bearing_page._select_type(ball_key, announce=False)
     window._calculate_bearing()
     assert window.bearing_context is not None
     assert window.bearing_page.apply_button.isEnabled()
