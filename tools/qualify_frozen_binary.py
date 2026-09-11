@@ -130,7 +130,9 @@ def main() -> int:
     assert set(gui_payload["general_executable"]) == EXPECTED_GENERAL, gui_payload
     assert set(gui_payload["thd_executable"]) == EXPECTED_THD, gui_payload
     assert gui_payload["amb_blocked"] == ["MagneticBearingElement"], gui_payload
-    assert {"ump", "probes", "shaft", "bearings"}.issubset(set(gui_payload["sidebar_routes"])), gui_payload
+    sidebar_routes = set(gui_payload["sidebar_routes"])
+    assert {"rotor", "ump", "probes", "bearings"}.issubset(sidebar_routes), gui_payload
+    assert "shaft" not in sidebar_routes, gui_payload
 
     model_builder = gui_payload["model_builder_014"]
     assert model_builder["status"] == "PASS", model_builder
