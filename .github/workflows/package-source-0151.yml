@@ -1,0 +1,205 @@
+name: ROSS Studio 0.15.1 source package
+
+on:
+  push:
+    branches:
+      - build/windows-executable-0.15.1
+    paths:
+      - '.github/workflows/package-source-0151.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-source:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+
+      - name: Verify release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          grep -q 'version = "0.15.1"' pyproject.toml
+          grep -q '__version__ = "0.15.1"' src/ross_studio/__init__.py
+          grep -q 'ross-rotordynamics==2.3.0' pyproject.toml
+          test -f packaging/ROSS-Studio.spec
+          test -f tools/qualify_frozen_binary.py
+
+      - name: Create Windows build helpers
+        shell: bash
+        run: |
+          cat > /tmp/WINDOWS_BUILD_COMMANDS.txt <<'EOF'
+          ROSS Studio 0.15.1 - build do executavel Windows
+          =================================================
+
+          PRE-REQUISITOS
+          --------------
+          - Windows 10/11 64-bit
+          - Python 3.12 64-bit instalado do python.org
+          - Opcional: Git, se o projeto for obtido por clone em vez deste ZIP
+
+          IMPORTANTE
+          ----------
+          Use Python 3.12 para reproduzir o ambiente qualificado.
+          O projeto fixa ross-rotordynamics==2.3.0 e plotly==5.24.1.
+          Nao instale outra versao do ROSS por cima do ambiente virtual.
+
+          POWERSHELL - BUILD COMPLETO
+          ---------------------------
+          cd C:\caminho\para\ROSS-Studio-0.15.1
+
+          py -3.12 -m venv .venv
+          .\.venv\Scripts\Activate.ps1
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,package]"
+
+          # Testes Python antes do congelamento
+          $env:QT_QPA_PLATFORM="offscreen"
+          python -m pytest -q
+
+          # Build PyInstaller
+          python -m PyInstaller --clean --noconfirm packaging\ROSS-Studio.spec
+
+          # Gate no executavel congelado
+          python tools\qualify_frozen_binary.py dist artifacts\frozen_selftest_Windows.json
+
+          # Voltar ao modo grafico normal
+          Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+
+          # Executar
+          .\dist\ROSS-Studio\ROSS-Studio.exe
+
+          SAIDA
+          -----
+          dist\ROSS-Studio\ROSS-Studio.exe
+          dist\ROSS-Studio\_internal\...
+
+          A distribuicao e PyInstaller one-folder. Mantenha toda a pasta
+          dist\ROSS-Studio junta; nao copie apenas o .exe.
+
+          BUILD RAPIDO SEM RODAR PYTEST
+          -----------------------------
+          py -3.12 -m venv .venv
+          .\.venv\Scripts\Activate.ps1
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,package]"
+          python -m PyInstaller --clean --noconfirm packaging\ROSS-Studio.spec
+          $env:QT_QPA_PLATFORM="offscreen"
+          python tools\qualify_frozen_binary.py dist artifacts\frozen_selftest_Windows.json
+          Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+
+          SE O POWERSHELL BLOQUEAR Activate.ps1
+          -------------------------------------
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+          .\.venv\Scripts\Activate.ps1
+
+          ALTERNATIVA CMD.EXE
+          -------------------
+          py -3.12 -m venv .venv
+          .venv\Scripts\activate.bat
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,package]"
+          python -m PyInstaller --clean --noconfirm packaging\ROSS-Studio.spec
+          set QT_QPA_PLATFORM=offscreen
+          python tools\qualify_frozen_binary.py dist artifacts\frozen_selftest_Windows.json
+          set QT_QPA_PLATFORM=
+          dist\ROSS-Studio\ROSS-Studio.exe
+          EOF
+
+          cat > /tmp/build_windows.ps1 <<'EOF'
+          $ErrorActionPreference = "Stop"
+          Set-Location $PSScriptRoot
+
+          py -3.12 -m venv .venv
+          & .\.venv\Scripts\Activate.ps1
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,package]"
+
+          $env:QT_QPA_PLATFORM = "offscreen"
+          python -m pytest -q
+          python -m PyInstaller --clean --noconfirm packaging\ROSS-Studio.spec
+          python tools\qualify_frozen_binary.py dist artifacts\frozen_selftest_Windows.json
+          Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "BUILD PASS" -ForegroundColor Green
+          Write-Host "Executavel: $PSScriptRoot\dist\ROSS-Studio\ROSS-Studio.exe"
+          EOF
+
+          cat > /tmp/build_windows.bat <<'EOF'
+          @echo off
+          setlocal
+          cd /d "%~dp0"
+          py -3.12 -m venv .venv || exit /b 1
+          call .venv\Scripts\activate.bat || exit /b 1
+          python -m pip install --upgrade pip || exit /b 1
+          python -m pip install -e ".[dev,package]" || exit /b 1
+          set QT_QPA_PLATFORM=offscreen
+          python -m pytest -q || exit /b 1
+          python -m PyInstaller --clean --noconfirm packaging\ROSS-Studio.spec || exit /b 1
+          python tools\qualify_frozen_binary.py dist artifacts\frozen_selftest_Windows.json || exit /b 1
+          set QT_QPA_PLATFORM=
+          echo.
+          echo BUILD PASS
+          echo Executavel: %CD%\dist\ROSS-Studio\ROSS-Studio.exe
+          endlocal
+          EOF
+
+      - name: Build deterministic source project archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/ROSS-Studio-0.15.1"
+          mkdir -p "$ROOT"
+          rsync -a ./ "$ROOT/" \
+            --exclude '.git/' \
+            --exclude '.venv/' \
+            --exclude '__pycache__/' \
+            --exclude '.pytest_cache/' \
+            --exclude 'build/' \
+            --exclude 'dist/' \
+            --exclude 'artifacts/' \
+            --exclude '*.pyc'
+
+          cp /tmp/WINDOWS_BUILD_COMMANDS.txt "$ROOT/WINDOWS_BUILD_COMMANDS.txt"
+          cp /tmp/build_windows.ps1 "$ROOT/build_windows.ps1"
+          cp /tmp/build_windows.bat "$ROOT/build_windows.bat"
+
+          python - <<'PY'
+          import json, os, pathlib
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'ROSS-Studio-0.15.1'
+          payload = {
+              'product': 'ROSS Studio',
+              'version': '0.15.1',
+              'ross_version': '2.3.0',
+              'source_sha': os.environ['GITHUB_SHA'],
+              'source_branch': os.environ['GITHUB_REF_NAME'],
+              'target_environment': 'Windows 10/11 x86_64, Python 3.12',
+              'package_type': 'source-project-with-windows-build-helpers',
+              'pyinstaller_spec': 'packaging/ROSS-Studio.spec',
+              'qualification': 'tools/qualify_frozen_binary.py',
+          }
+          (root / 'BUILD_INFO.json').write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
+          PY
+
+          cd "$RUNNER_TEMP"
+          zip -qr "$GITHUB_WORKSPACE/ROSS-Studio-0.15.1-project.zip" ROSS-Studio-0.15.1
+          cd "$GITHUB_WORKSPACE"
+          sha256sum ROSS-Studio-0.15.1-project.zip > ROSS-Studio-0.15.1-project.zip.sha256
+          cp /tmp/WINDOWS_BUILD_COMMANDS.txt ./ROSS-Studio-0.15.1-WINDOWS-BUILD-COMMANDS.txt
+          unzip -tq ROSS-Studio-0.15.1-project.zip
+
+      - name: Upload source project
+        uses: actions/upload-artifact@v4
+        with:
+          name: ROSS-Studio-0.15.1-project-source
+          path: |
+            ROSS-Studio-0.15.1-project.zip
+            ROSS-Studio-0.15.1-project.zip.sha256
+            ROSS-Studio-0.15.1-WINDOWS-BUILD-COMMANDS.txt
+          if-no-files-found: error
+          compression-level: 0
