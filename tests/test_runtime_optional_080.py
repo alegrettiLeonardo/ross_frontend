@@ -208,7 +208,7 @@ def test_qt_engineering_routes_and_bearing_studio_2_workspace() -> None:
     assert window.project.name == "OP-W60-500-60Hz-IC611-P3"
 
     expected_workspaces = {
-        "shaft": 0,
+        "shaft": 0,  # compatibility alias; there is no visible Shaft navigation state
         "disks": 1,
         "supports": 2,
         "seals": 3,
@@ -222,24 +222,25 @@ def test_qt_engineering_routes_and_bearing_studio_2_workspace() -> None:
         assert window.stack.currentWidget() is window.rotor_page
         assert window.rotor_page.editor_stack.currentIndex() == workspace_index
 
+    assert "shaft" not in window.sidebar.buttons
     assert window.rotor_page.findChildren(QTabWidget) == []
+    assert not hasattr(window.toolbar, "view_combo")
+    assert hasattr(window.toolbar, "full_rotor_button")
 
     window._navigate("bearings")
     assert window.stack.currentWidget() is window.bearing_page
     assert window.stack.count() == 3
     assert not hasattr(window, "bearing_groups_page")
+    assert window.bearing_page.__class__.__module__.endswith("bearing_workspace_page")
     assert window.bearing_page.bearing_selector.count() == len(window.project.engineering.bearings) == 2
     assert window.bearing_page.group_selector.isHidden()
 
-    # 0.14.1 removes the redundant family-navigation step: every bearing model is
-    # directly discoverable, while scientific execution status remains independently gated.
     visible_classes = {
         window.bearing_page.type_metadata[key][1]
         for key, button in window.bearing_page.type_buttons.items()
         if not button.isHidden()
     }
     assert visible_classes == {
-        "BearingElement",
         "BallBearingElement",
         "RollerBearingElement",
         "CylindricalBearing",
@@ -249,6 +250,7 @@ def test_qt_engineering_routes_and_bearing_studio_2_workspace() -> None:
         "SqueezeFilmDamper",
         "MagneticBearingElement",
     }
+    assert "kc" not in window.bearing_page.type_buttons
 
     for key, (_title, ross_class, _group) in window.bearing_page.type_metadata.items():
         window.bearing_page._select_type(key, announce=False)
