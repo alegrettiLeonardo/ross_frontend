@@ -17,8 +17,8 @@ ccp_datas, ccp_binaries, ccp_hiddenimports = collect_all("ccp")
 hiddenimports = list(dict.fromkeys([
     *ross_hiddenimports,
     *ccp_hiddenimports,
-    # Loaded lazily by RossNativeRotorView; explicit inclusion is required so the
-    # packaged executable preserves the native Plotly/Qt audit view.
+    # Loaded lazily by RossNativeRotorView / NativeRossFigureView. Explicit
+    # inclusion keeps desktop native Plotly views available in the frozen build.
     "PySide6.QtWebEngineCore",
     "PySide6.QtWebEngineWidgets",
     "PySide6.QtWebChannel",
@@ -28,6 +28,9 @@ datas = [
     *ross_datas,
     *ccp_datas,
     (str(SRC / "ross_studio" / "resources"), "ross_studio/resources"),
+    # Bearing Studio 0.16 uses deterministic local SVG assets rather than font or
+    # emoji glyphs. They must resolve identically in editable and frozen installs.
+    (str(SRC / "ross_studio" / "assets"), "ross_studio/assets"),
 ]
 binaries = [*ross_binaries, *ccp_binaries]
 
