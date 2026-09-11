@@ -6,6 +6,8 @@ import platform
 import subprocess
 import sys
 
+from ross_studio import __version__ as EXPECTED_STUDIO_VERSION
+
 EXPECTED_EXECUTABLE = {
     "BearingElement",
     "BallBearingElement",
@@ -37,6 +39,17 @@ EXPECTED_TRANSACTION_KINDS = {
     "coupling",
     "load",
     "probe",
+}
+EXPECTED_LEGACY_SIDEBAR_COMPAT = {
+    "rotor",
+    "disks",
+    "bearings",
+    "seals",
+    "supports",
+    "couplings",
+    "loads",
+    "ump",
+    "probes",
 }
 
 
@@ -93,7 +106,7 @@ def main() -> int:
         "project file I/O",
     )
     assert io_payload["ross_version"] == "2.3.0", io_payload
-    assert io_payload["ross_studio_version"] == "0.14.2", io_payload
+    assert io_payload["ross_studio_version"] == EXPECTED_STUDIO_VERSION, io_payload
     assert io_payload["irdin_sections"] == 15, io_payload
     assert io_payload["irdin_shaft_elements"] == 27, io_payload
     assert io_payload["irdin_bearings"] == 2, io_payload
@@ -117,7 +130,8 @@ def main() -> int:
         "GUI startup and model-builder smoke",
     )
     assert gui_payload["project"] == "OP-W60-500-60Hz-IC611-P3", gui_payload
-    assert gui_payload["view_modes"] == ["Engineering 2D", "ROSS Native"], gui_payload
+    # 0.15 removed the obsolete view selector; 0.17 preserves that qualified shell.
+    assert gui_payload["view_modes"] == [], gui_payload
     assert gui_payload["rotor_editor_count"] == 8, gui_payload
     assert gui_payload["bearing_station_count"] == 2, gui_payload
     assert gui_payload["bearing_direct_route"] is True, gui_payload
@@ -126,7 +140,11 @@ def main() -> int:
     assert set(gui_payload["general_executable"]) == EXPECTED_GENERAL, gui_payload
     assert set(gui_payload["thd_executable"]) == EXPECTED_THD, gui_payload
     assert gui_payload["amb_blocked"] == ["MagneticBearingElement"], gui_payload
-    assert {"ump", "probes", "shaft", "bearings"}.issubset(set(gui_payload["sidebar_routes"])), gui_payload
+    assert set(gui_payload["sidebar_routes"]) == EXPECTED_LEGACY_SIDEBAR_COMPAT, gui_payload
+    assert "shaft" not in set(gui_payload["sidebar_routes"]), gui_payload
+    assert gui_payload["bearing_model_icon_count"] == 8, gui_payload
+    assert gui_payload["bearing_inline_input"] is True, gui_payload
+    assert gui_payload["bearing_results_below"] is True, gui_payload
 
     model_builder = gui_payload["model_builder_014"]
     assert model_builder["status"] == "PASS", model_builder
@@ -144,6 +162,7 @@ def main() -> int:
     combined = {
         "status": "PASS",
         "platform": platform.system(),
+        "ross_studio_version": EXPECTED_STUDIO_VERSION,
         "executable": str(exe),
         "scientific": self_payload,
         "project_io": io_payload,
