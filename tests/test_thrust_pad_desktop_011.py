@@ -7,15 +7,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 import ross as rs
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
 
 from ross_studio.app import RossStudioWindow
 from ross_studio.analysis_backend import RossAnalysisBackend
 from ross_studio.domain import AdapterStatus, BearingGroup
 from ross_studio.ross_backend import RossModelBuilder
 from ross_studio.thd_results import UNAVAILABLE, native_field
-from ross_studio.thrust_pad_input_dialog import ThrustPadInputDialog
 from ross_studio.thrust_pad_service import ThrustPadCalculationResult
 
 
@@ -41,12 +39,13 @@ def test_promoted_registry_enables_thrust_pad(qtbot):
         window.bearing_page._select_type("thrust", announce=False)
         assert window.bearing_page.calculate_button.isEnabled()
         assert not window.bearing_page.apply_button.isEnabled()
+        assert "axial" in window.bearing_page.input_panel.description.text().lower()
     finally:
         window.close()
 
 
-def test_real_qt_thrust_pad_calculate_preview_apply_strict_modal(qtbot, monkeypatch):
-    """Exercise the complete promoted ThrustPad desktop path with no execution bypass."""
+def test_real_qt_thrust_pad_inline_calculate_preview_apply_strict_modal(qtbot, monkeypatch):
+    """Exercise complete ThrustPad path through visible inline engineering inputs."""
     assert rs.__version__ == "2.3.0"
     window = RossStudioWindow()
     qtbot.addWidget(window)
@@ -56,6 +55,8 @@ def test_real_qt_thrust_pad_calculate_preview_apply_strict_modal(qtbot, monkeypa
     assert window._selected_bearing_class() == "ThrustPad"
     assert window.catalog.registry.effective_status("ThrustPad")[0] == AdapterStatus.VALIDATED
     assert window.bearing_page.calculate_button.isEnabled()
+    assert window.bearing_page.input_card.isVisible()
+    assert not window.bearing_page.result_card.isVisible()
 
     original = deepcopy(window.project.engineering)
     calls: list[tuple[str, str]] = []
@@ -80,17 +81,9 @@ def test_real_qt_thrust_pad_calculate_preview_apply_strict_modal(qtbot, monkeypa
     monkeypatch.setattr(window.bearing_service, "calculate", wrong_service)
     monkeypatch.setattr(window.bearing_service, "apply", wrong_service)
 
-    entered: dict[str, object] = {}
-
-    def fill_dialog():
-        dialog = QApplication.activeModalWidget()
-        assert isinstance(dialog, ThrustPadInputDialog)
-        # Explicit canonical ROSS 2.3 speed station keeps the qualification deterministic.
-        dialog.fields["speed_rpm"].setText("90")
-        entered.update(dialog.values())
-        dialog.accept()
-
-    QTimer.singleShot(0, fill_dialog)
+    panel = window.bearing_page.input_panel
+    panel.fields["speed_rpm"].setText("90")
+    entered = panel.values()
     qtbot.mouseClick(window.bearing_page.calculate_button, Qt.MouseButton.LeftButton)
 
     result = window.bearing_calculation
@@ -106,9 +99,8 @@ def test_real_qt_thrust_pad_calculate_preview_apply_strict_modal(qtbot, monkeypa
     assert len(result.axial_coefficients) == 1
     assert np.isfinite(result.axial_coefficients[0].kzz)
     assert np.isfinite(result.axial_coefficients[0].czz)
-    assert window.project.engineering == original  # Calculate is preview-only.
+    assert window.project.engineering == original
 
-    # Preview is an explicit axial table; no Kzz/Czz is inserted in lateral columns.
     assert window.bearing_page.kc_table.rowCount() == 1
     assert window.bearing_page.kc_table.columnCount() == 3
     assert "Kzz" in window.bearing_page.kc_table.horizontalHeaderItem(1).text()
@@ -121,6 +113,10 @@ def test_real_qt_thrust_pad_calculate_preview_apply_strict_modal(qtbot, monkeypa
     )
     assert not window.bearing_page.chart_card.isVisible()
     assert window.bearing_page.apply_button.isEnabled()
+    assert window.bearing_page.results_button.isEnabled()
+    assert not window.bearing_page.result_card.isVisible()
+    qtbot.mouseClick(window.bearing_page.results_button, Qt.MouseButton.LeftButton)
+    assert window.bearing_page.result_card.isVisible()
 
     pressure_tab = window.bearing_page.result_tabs["Pressure"]
     temperature_tab = window.bearing_page.result_tabs["Temperature"]
@@ -171,7 +167,7 @@ def test_real_qt_thrust_pad_calculate_preview_apply_strict_modal(qtbot, monkeypa
 
     modal = RossAnalysisBackend(rs).run_modal_build(build, 90.0, num_modes=12)
     assert len(modal.wn) > 0 and np.all(np.isfinite(np.asarray(modal.wn, dtype=float)))
-    assert calls == [("calculate", "ThrustPad"), ("apply", "ThrustPad")]  # no THD re-solve
+    assert calls == [("calculate", "ThrustPad"), ("apply", "ThrustPad")]
 
     payload = {
         "status": "PASS",
@@ -192,6 +188,7 @@ def test_real_qt_thrust_pad_calculate_preview_apply_strict_modal(qtbot, monkeypa
         "native_fields_retained_after_apply": window.bearing_field_result is result,
         "capability_status_post_promotion": AdapterStatus.VALIDATED.value,
         "can_execute_post_promotion": True,
+        "input_mode": "inline Bearing Studio engineering panel",
     }
     out = ROOT / "artifacts" / "thrust_pad_desktop_qualification.json"
     out.parent.mkdir(exist_ok=True)

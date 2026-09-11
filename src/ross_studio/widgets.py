@@ -1,7 +1,9 @@
 from .charts import BearingCoefficientChart, CampbellChart, RotorSketch
+from .file_toolbar import AppToolbar, QuickActionsCard
+from .navigation import Sidebar
 from .ui_shell import (
-    AppToolbar, Card, LabelValueGrid, ModelSummaryCard, ProjectInfoCard,
-    QuickActionsCard, SectionCard, Sidebar, StatusBar, configure_table, item,
+    Card, LabelValueGrid, ModelSummaryCard, ProjectInfoCard,
+    SectionCard, StatusBar, configure_table, item,
 )
 
 __all__ = [

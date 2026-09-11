@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "purpose": "DyRoBeS import regression corpus with explicit provenance and no guessed vendor fields",
+  "entries": [
+    {
+      "id": "SMASS_6ST_COMP_Sect4_public_model_summary",
+      "path": "public_manual/SMASS_6ST_COMP_Sect4_model_summary.rot",
+      "provenance": "Public DyRoBeS training/documentation MODEL SUMMARY for SMASS_6ST_COMP_Sect4.rot",
+      "source_url": "https://dyrobes.com/wp-content/uploads/2016/04/Introduction-to-Rotor-Dynamics-Critical-Speed-and-Unbalance-Response-Analysis-E.-J.-Gunter_linked.pdf",
+      "source_kind": "public_model_summary_transcription",
+      "raw_vendor_rot": false,
+      "qualification": "LABELLED_MODEL_SUMMARY_IMPORT"
+    }
+  ],
+  "raw_vendor_rot_gate": {
+    "status": "WAITING_FOR_REPRESENTATIVE_FILES",
+    "minimum_required_cases": 3,
+    "required_coverage": [
+      "single-shaft cylindrical/conical shaft elements",
+      "rigid disk plus speed-dependent linear bearings",
+      "flexible support or foundation association"
+    ],
+    "policy": "Raw vendor .rot layouts are accepted only after byte-for-byte provenance, version identification, parser fixtures and scientific round-trip checks. Unknown layouts fail closed."
+  }
+}

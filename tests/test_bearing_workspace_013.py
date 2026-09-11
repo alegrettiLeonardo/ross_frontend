@@ -4,7 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QDialog, QLabel
+from PySide6.QtWidgets import QLabel
 
 from ross_studio.bearing_workspace import BearingWorkspaceService
 from ross_studio.domain import BearingSpec, EngineeringError
@@ -52,8 +52,6 @@ def test_axial_auxiliary_is_not_a_new_selectable_bearing_station() -> None:
 
     stations = BearingWorkspaceService.stations(project)
     assert [station.index for station in stations] == [0, 1]
-    # A visible axial auxiliary belongs to the DE physical station and must map
-    # back to that anchor for sketch/UI selection without becoming a third station.
     assert BearingWorkspaceService.anchor_index(project, 2) == 0
     with pytest.raises(EngineeringError, match="axial auxiliary"):
         BearingWorkspaceService.resolve_index(project, 2)
@@ -159,8 +157,6 @@ def test_rotor_selection_drives_bearing_station_and_axial_selection_canonicalize
     assert window.stack.currentWidget() is window.bearing_page
     assert window.bearing_page.bearing_selector.currentData() == 1
 
-    # Add an axial auxiliary at DE and deliberately select its element identity.
-    # Bearing Studio must expose it as station content but keep the edit anchor DE.
     de = engineering.bearings[0]
     engineering.bearings.append(
         BearingSpec(
@@ -192,32 +188,12 @@ def test_rotor_selection_drives_bearing_station_and_axial_selection_canonicalize
     WORKSPACE_SELECTION.clear()
 
 
-def test_nde_ball_calculate_preview_apply_isolated_from_de(qtbot, monkeypatch) -> None:
+def test_nde_ball_calculate_preview_apply_isolated_from_de(qtbot) -> None:
     rs = pytest.importorskip("ross")
-    import ross_studio.app as app_module
+    from ross_studio.app import RossStudioWindow
 
     WORKSPACE_SELECTION.clear()
-    captured: dict[str, object] = {}
-
-    class FakeBearingInputDialog:
-        def __init__(self, project, index, ross_class, parent=None):
-            captured["index"] = index
-            captured["ross_class"] = ross_class
-
-        def exec(self):
-            return QDialog.DialogCode.Accepted
-
-        def values(self):
-            return {
-                "n_balls": 9,
-                "d_balls_m": 0.028,
-                "static_load_n": 900.0,
-                "contact_angle_rad": 0.15,
-            }
-
-    monkeypatch.setattr(app_module, "BearingInputDialog", FakeBearingInputDialog)
-
-    window = app_module.RossStudioWindow()
+    window = RossStudioWindow()
     qtbot.addWidget(window)
     engineering = window.project.engineering
     assert engineering is not None
@@ -228,12 +204,21 @@ def test_nde_ball_calculate_preview_apply_isolated_from_de(qtbot, monkeypatch) -
     window._select_bearing(1)
     key = window._bearing_key_for_class(window.bearing_page, "BallBearingElement")
     assert key is not None
-    window.bearing_page.set_group("General / Parametric", announce=False)
     window.bearing_page._select_type(key, announce=False)
+
+    panel = window.bearing_page.input_panel
+    panel.fields["n_balls"].setValue(9)
+    panel.fields["d_balls_mm"].setValue(28.0)
+    panel.fields["static_load_n"].setValue(900.0)
+    panel.fields["contact_angle_deg"].setValue(0.15 * 180.0 / 3.141592653589793)
+    entered = panel.values()
+    assert entered["n_balls"] == 9
+    assert entered["d_balls_m"] == pytest.approx(0.028)
+    assert entered["static_load_n"] == pytest.approx(900.0)
+    assert entered["contact_angle_rad"] == pytest.approx(0.15)
 
     window._calculate_bearing()
 
-    assert captured == {"index": 1, "ross_class": "BallBearingElement"}
     assert window.bearing_context is not None
     assert window.bearing_context.bearing_index == 1
     assert window.bearing_calculation is not None
@@ -241,6 +226,7 @@ def test_nde_ball_calculate_preview_apply_isolated_from_de(qtbot, monkeypatch) -
     assert engineering.bearings[0] == de_before
     assert engineering.bearings[1] == nde_before
     assert window.bearing_page.apply_button.isEnabled()
+    assert window.bearing_page.results_button.isEnabled()
 
     window._apply_bearing()
 
@@ -268,10 +254,11 @@ def test_switching_station_invalidates_unapplied_preview(qtbot) -> None:
     before = deepcopy(engineering.bearings)
 
     window._select_bearing(1)
-    window.bearing_page.set_group("General / Parametric", announce=False)
-    kc_key = window._bearing_key_for_class(window.bearing_page, "BearingElement")
-    assert kc_key is not None
-    window.bearing_page._select_type(kc_key, announce=False)
+    # 0.15 removes direct BearingElement/K-C as a calculation tile. Use a fast
+    # qualified General model to exercise the same transaction invalidation gate.
+    ball_key = window._bearing_key_for_class(window.bearing_page, "BallBearingElement")
+    assert ball_key is not None
+    window.bearing_page._select_type(ball_key, announce=False)
     window._calculate_bearing()
     assert window.bearing_context is not None
     assert window.bearing_page.apply_button.isEnabled()

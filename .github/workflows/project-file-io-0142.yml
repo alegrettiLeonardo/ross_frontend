@@ -1,0 +1,52 @@
+name: ROSS Studio 0.14.2 project file qualification
+
+on:
+  push:
+    branches:
+      - feature/project-file-io-dyrobes-0.14.2
+  workflow_dispatch:
+
+jobs:
+  project-file-io:
+    runs-on: ubuntu-24.04
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install Qt headless system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0
+
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Compile project-file sources
+        run: python -m compileall -q src/ross_studio/project_io.py src/ross_studio/project_file_service.py src/ross_studio/project_file_controller.py src/ross_studio/file_toolbar.py src/ross_studio/dyrobes_import.py tests/test_project_file_io_0142.py
+
+      - name: Qualify persistence and external-format parsing
+        run: |
+          python -m pytest -vv \
+            tests/test_project_file_io_0142.py::test_native_rossproj_roundtrip_is_lossless_for_qualified_op_w60 \
+            tests/test_project_file_io_0142.py::test_empty_native_project_roundtrip_does_not_invent_rotor_geometry \
+            tests/test_project_file_io_0142.py::test_open_dispatcher_imports_real_irdin_resource_and_never_marks_source_as_native \
+            tests/test_project_file_io_0142.py::test_imported_irdin_can_be_saved_as_native_without_changing_engineering \
+            tests/test_project_file_io_0142.py::test_dyrobes_labelled_ascii_model_summary_imports_units_mesh_and_disk \
+            tests/test_project_file_io_0142.py::test_unknown_raw_dyrobes_layout_fails_closed_instead_of_guessing
+
+      - name: Qualify File menu in isolated Qt process
+        run: python -m pytest -vv tests/test_project_file_io_0142.py::test_arquivo_menu_and_toolbar_expose_required_commands_and_shortcuts
+
+      - name: Qualify Open workspace rebuild in isolated Qt process
+        run: python -m pytest -vv tests/test_project_file_io_0142.py::test_controller_open_path_rebuilds_workspace_and_updates_identity
+
+      - name: Qualify New workspace in isolated Qt process
+        run: python -m pytest -vv tests/test_project_file_io_0142.py::test_controller_new_creates_truthful_empty_workspace

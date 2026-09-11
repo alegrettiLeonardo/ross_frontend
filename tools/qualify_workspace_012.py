@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib.metadata import version as distribution_version
 import json
 from pathlib import Path
 
@@ -30,10 +31,10 @@ READY = {
 
 
 def main() -> int:
-    # This is the inherited 0.12 mesh/workspace regression gate executed against
-    # the current 0.14 release candidate. The mesh/native-view scientific contract
-    # is unchanged; this assertion only guards release metadata consistency.
-    assert ross_studio.__version__ == "0.14.0"
+    # This is an inherited 0.12 mesh/workspace regression gate. It must validate
+    # the currently installed ROSS Studio release candidate rather than pinning an
+    # obsolete application version. Package metadata and import metadata must agree.
+    assert ross_studio.__version__ == distribution_version("ross-studio")
     assert ross.__version__ == "2.3.0"
 
     project = load_irdin_project(FIXTURE)

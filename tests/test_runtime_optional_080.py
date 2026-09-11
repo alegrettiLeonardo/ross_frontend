@@ -208,7 +208,7 @@ def test_qt_engineering_routes_and_bearing_studio_2_workspace() -> None:
     assert window.project.name == "OP-W60-500-60Hz-IC611-P3"
 
     expected_workspaces = {
-        "shaft": 0,
+        "shaft": 0,  # compatibility alias; there is no visible Shaft navigation state
         "disks": 1,
         "supports": 2,
         "seals": 3,
@@ -222,27 +222,43 @@ def test_qt_engineering_routes_and_bearing_studio_2_workspace() -> None:
         assert window.stack.currentWidget() is window.rotor_page
         assert window.rotor_page.editor_stack.currentIndex() == workspace_index
 
+    assert "shaft" not in window.sidebar.buttons
     assert window.rotor_page.findChildren(QTabWidget) == []
+    assert not hasattr(window.toolbar, "view_combo")
+    assert hasattr(window.toolbar, "full_rotor_button")
 
     window._navigate("bearings")
     assert window.stack.currentWidget() is window.bearing_page
     assert window.stack.count() == 3
     assert not hasattr(window, "bearing_groups_page")
+    assert window.bearing_page.__class__.__module__.endswith("bearing_workspace_page")
     assert window.bearing_page.bearing_selector.count() == len(window.project.engineering.bearings) == 2
+    assert window.bearing_page.group_selector.isHidden()
 
-    window._open_bearing_group("THD")
-    assert window.stack.currentWidget() is window.bearing_page
     visible_classes = {
         window.bearing_page.type_metadata[key][1]
         for key, button in window.bearing_page.type_buttons.items()
         if not button.isHidden()
     }
-    assert visible_classes == {"PlainJournal", "TiltingPad", "ThrustPad", "SqueezeFilmDamper"}
+    assert visible_classes == {
+        "BallBearingElement",
+        "RollerBearingElement",
+        "CylindricalBearing",
+        "PlainJournal",
+        "TiltingPad",
+        "ThrustPad",
+        "SqueezeFilmDamper",
+        "MagneticBearingElement",
+    }
+    assert "kc" not in window.bearing_page.type_buttons
+
     for key, (_title, ross_class, _group) in window.bearing_page.type_metadata.items():
-        if ross_class in {"PlainJournal", "TiltingPad", "ThrustPad", "SqueezeFilmDamper"}:
-            window.bearing_page._select_type(key, announce=False)
+        window.bearing_page._select_type(key, announce=False)
+        if ross_class == "MagneticBearingElement":
+            assert not window.bearing_page.calculate_button.isEnabled()
+        else:
             assert window.bearing_page.calculate_button.isEnabled()
-            assert not window.bearing_page.apply_button.isEnabled()
+        assert not window.bearing_page.apply_button.isEnabled()
 
     window.close()
     app.processEvents()
