@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from contextlib import redirect_stdout
+from dataclasses import dataclass, field
 from importlib import import_module
+from io import StringIO
 import inspect
 from typing import Any, Mapping
 
@@ -19,86 +21,176 @@ def _require_ross_230() -> Any:
 
 
 def _call_supported(callable_obj: Any, **kwargs: Any) -> Any:
-    """Call a ROSS plot API using only parameters present in the pinned signature."""
+    """Call a ROSS API using only parameters present in the pinned 2.3 signature."""
     signature = inspect.signature(callable_obj)
     accepted = {name: value for name, value in kwargs.items() if name in signature.parameters}
     return callable_obj(**accepted)
+
+
+def _capture_console(callable_obj: Any, **kwargs: Any) -> str:
+    buffer = StringIO()
+    with redirect_stdout(buffer):
+        _call_supported(callable_obj, **kwargs)
+    return buffer.getvalue().strip()
+
+
+def _append_figures(target: dict[str, Any], label: str, value: Any) -> None:
+    """Normalize one ROSS Plotly figure, a mapping or a list of native figures."""
+    if value is None:
+        return
+    if hasattr(value, "to_html"):
+        target.setdefault(label, value)
+        return
+    if isinstance(value, Mapping):
+        for key, figure in value.items():
+            _append_figures(target, str(key).replace("_", " ").title(), figure)
+        return
+    if isinstance(value, (list, tuple)):
+        for index, figure in enumerate(value, 1):
+            _append_figures(target, f"{label} · {index}", figure)
 
 
 @dataclass(slots=True, frozen=True)
 class NativeFigureSet:
     source: str
     figures: Mapping[str, Any]
+    text_outputs: Mapping[str, str] = field(default_factory=dict)
+    diagnostics: tuple[str, ...] = ()
 
     @property
     def available(self) -> bool:
-        return bool(self.figures)
+        return bool(self.figures or self.text_outputs)
 
 
 class RossBearingNativePlotService:
-    """Expose plots owned by ROSS BearingElement/BearingResults only."""
+    """Expose post-processing owned by the pinned ROSS BearingResults implementation.
 
-    def figures(self, native_element: Any, *, freq_index: int = 0) -> NativeFigureSet:
+    ROSS Studio does not recreate THD pressure/temperature/convergence semantics.
+    It hosts the Plotly figures returned by ROSS 2.3.0 and captures the formatted
+    ``show_*`` output produced by the same retained native bearing object.
+    """
+
+    THD_CLASSES = {"PlainJournal", "TiltingPad", "ThrustPad", "SqueezeFilmDamper"}
+
+    # Additional ROSS 2.3.0 plot methods that are not always included by plot_results().
+    EXTRA_DIMENSIONAL_PLOTS = (
+        ("Bearing Representation", "plot_bearing_representation"),
+        ("Pressure Distribution", "plot_pressure_distribution"),
+        ("Pad Pressure", "plot_pad_pressure"),
+        ("Film Temperature", "plot_film_temperature_results"),
+        ("Solid Pad Temperature", "plot_solid_pad_results"),
+        ("Film Average Temperature", "plot_film_average_temperature"),
+        ("Babbitt Surface Temperature", "plot_babbitt_surface_temperature"),
+        # Forward-compatible names are dynamically gated; they are ignored on 2.3
+        # when unavailable and never substitute application-side plots.
+        ("Film Thickness", "plot_film_thickness_2d"),
+        ("Pad Temperature 3D", "plot_pad_temperature_3d"),
+        ("SFD Coefficients", "plot_coefficients"),
+    )
+
+    TEXT_OUTPUTS = (
+        ("Results Summary", "show_results", {}),
+        ("K/C Comparison", "show_coefficients_comparison", {}),
+        ("Execution Time", "show_execution_time", {}),
+        ("Optimization Convergence", "show_optimization_convergence", {"show_plots": False, "by": "value"}),
+    )
+
+    def kc_figure(self, native_element: Any) -> Any | None:
+        """Return the native BearingElement K/C figure when ROSS exposes one."""
+        _require_ross_230()
+        if native_element is None:
+            return None
+        coefficient_plot = getattr(native_element, "plot", None)
+        if not callable(coefficient_plot):
+            return None
+        try:
+            figure = _call_supported(
+                coefficient_plot,
+                frequency_units="RPM",
+                stiffness_units="N/m",
+                damping_units="N*s/m",
+            )
+        except Exception as exc:
+            raise NativeRossPlotUnavailable(f"ROSS bearing coefficient plot failed: {exc}") from exc
+        return figure if figure is not None and hasattr(figure, "to_html") else None
+
+    def dimensional_outputs(self, native_element: Any, *, freq_index: int = 0) -> NativeFigureSet:
+        """Return every qualified native dimensional output available for one THD bearing."""
         _require_ross_230()
         if native_element is None:
             raise NativeRossPlotUnavailable("Bearing calculation has no retained native ROSS element.")
+        source = type(native_element).__name__
+        if source not in self.THD_CLASSES:
+            raise NativeRossPlotUnavailable(
+                f"Dimensional bearing post-processing is THD-only; received {source}."
+            )
 
         figures: dict[str, Any] = {}
-        coefficient_plot = getattr(native_element, "plot", None)
-        if callable(coefficient_plot):
-            try:
-                fig = _call_supported(
-                    coefficient_plot,
-                    frequency_units="RPM",
-                    stiffness_units="N/m",
-                    damping_units="N*s/m",
-                )
-                if fig is not None and hasattr(fig, "to_html"):
-                    figures["Dynamic K/C"] = fig
-            except Exception as exc:
-                raise NativeRossPlotUnavailable(f"ROSS bearing coefficient plot failed: {exc}") from exc
+        text_outputs: dict[str, str] = {}
+        diagnostics: list[str] = []
 
         plot_results = getattr(native_element, "plot_results", None)
         if callable(plot_results):
             try:
                 result = _call_supported(plot_results, show_plots=False, freq_index=int(freq_index))
-                if isinstance(result, Mapping):
-                    for key, fig in result.items():
-                        if fig is not None and hasattr(fig, "to_html"):
-                            figures[str(key).replace("_", " ").title()] = fig
+                _append_figures(figures, "ROSS Results", result)
             except NotImplementedError:
-                # ROSS 2.3.0 SFD intentionally has no pressure/temperature fields.
-                pass
+                diagnostics.append(f"{source}: plot_results is not defined for this analytical model.")
             except Exception as exc:
-                # A coefficient figure remains scientifically useful; a field plot
-                # failure must be visible to the caller rather than replaced by a
-                # synthetic Studio chart.
-                if not figures:
-                    raise NativeRossPlotUnavailable(f"ROSS bearing field plot failed: {exc}") from exc
+                diagnostics.append(f"{source}: plot_results unavailable: {exc}")
 
-        # Some 2.3 classes expose bearing-specific native figures in addition to
-        # the standardized BearingResults plot_results contract.
-        for label, method_name in (
-            ("Pressure Distribution", "plot_pressure_distribution"),
-            ("Pad Results", "plot_pad_results"),
-        ):
+        for label, method_name in self.EXTRA_DIMENSIONAL_PLOTS:
             method = getattr(native_element, method_name, None)
             if not callable(method):
                 continue
             try:
-                fig = _call_supported(method, freq_index=int(freq_index))
-            except (NotImplementedError, TypeError, ValueError):
+                result = _call_supported(method, freq_index=int(freq_index))
+            except (NotImplementedError, TypeError, ValueError, AttributeError) as exc:
+                diagnostics.append(f"{method_name}: {exc}")
                 continue
-            if fig is not None and hasattr(fig, "to_html"):
-                figures.setdefault(label, fig)
+            except Exception as exc:
+                diagnostics.append(f"{method_name}: {type(exc).__name__}: {exc}")
+                continue
+            _append_figures(figures, label, result)
 
-        return NativeFigureSet(type(native_element).__name__, figures)
+        for label, method_name, kwargs in self.TEXT_OUTPUTS:
+            method = getattr(native_element, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                text = _capture_console(method, **kwargs)
+            except (NotImplementedError, TypeError, ValueError, AttributeError) as exc:
+                diagnostics.append(f"{method_name}: {exc}")
+                continue
+            except Exception as exc:
+                diagnostics.append(f"{method_name}: {type(exc).__name__}: {exc}")
+                continue
+            if text:
+                text_outputs[label] = text
+
+        return NativeFigureSet(source, figures, text_outputs, tuple(diagnostics))
+
+    def figures(self, native_element: Any, *, freq_index: int = 0) -> NativeFigureSet:
+        """Compatibility facade: native K/C plus THD dimensional figures/text."""
+        _require_ross_230()
+        if native_element is None:
+            raise NativeRossPlotUnavailable("Bearing calculation has no retained native ROSS element.")
+        figures: dict[str, Any] = {}
+        kc = self.kc_figure(native_element)
+        if kc is not None:
+            figures["Dynamic K/C"] = kc
+        source = type(native_element).__name__
+        if source in self.THD_CLASSES:
+            dimensional = self.dimensional_outputs(native_element, freq_index=freq_index)
+            figures.update(dimensional.figures)
+            return NativeFigureSet(source, figures, dimensional.text_outputs, dimensional.diagnostics)
+        return NativeFigureSet(source, figures)
 
 
 class RossAnalysisNativePlotService:
     """Map Studio analysis result objects to their native ROSS Plotly methods.
 
-    The service does not reconstruct traces from numpy arrays.  If the pinned ROSS
+    The service does not reconstruct traces from numpy arrays. If the pinned ROSS
     result object has no applicable plot method, the plot is reported unavailable.
     """
 
@@ -203,7 +295,6 @@ class RossAnalysisNativePlotService:
                 "ROSS ForcedResponseResults requires probes for plot()/plot_bode() or an exact response speed for plot_deflected_shape()."
             )
 
-        # Future Analysis Studio adapters can pass native result objects directly.
         result = getattr(pipeline_result, key, None)
         method = getattr(result, "plot", None) if result is not None else None
         if callable(method):
