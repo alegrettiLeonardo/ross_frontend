@@ -106,6 +106,7 @@ class RossBearingNativePlotService:
         ("Pressure Distribution", "plot_pressure_distribution"),
         ("Pad Pressure", "plot_pad_pressure"),
         ("Film Temperature", "plot_film_temperature_results"),
+        ("Thermal Pad Results (ROSS alias)", "plot_thermal_pad_results"),
         ("Solid Pad Temperature", "plot_solid_pad_results"),
         ("Film Average Temperature", "plot_film_average_temperature"),
         ("Babbitt Surface Temperature", "plot_babbitt_surface_temperature"),
