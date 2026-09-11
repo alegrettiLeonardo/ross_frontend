@@ -31,12 +31,12 @@ class FrozenGuiSmokeResult:
 
 
 def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
-    """Construct the production Qt window and qualify the current non-modal workflow.
+    """Construct the frozen desktop and qualify the 0.15 model/Bearing Studio UX.
 
-    The scientific self-test validates the backend. This companion gate proves the
-    frozen desktop shell exposes the physical bearing stations and the 0.14.1 inline
-    Bearing Studio: direct model icons, visible engineering inputs and results below
-    the editor. No legacy bearing-input modal is allowed on the production path.
+    Scientific solver qualification remains in the frozen self-test. This companion
+    gate verifies that packaging preserves one Rotor Model navigation state, removes
+    the obsolete Engineering-2D/ROSS selector, exposes Rotor Completo explicitly and
+    ships the requested Bearing Studio model/output contract.
     """
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -55,13 +55,15 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
             raise RuntimeError("GUI startup did not load the OP-W60 engineering model.")
 
         expected_routes = {
-            "rotor", "shaft", "disks", "bearings", "seals", "supports",
+            "rotor", "disks", "bearings", "seals", "supports",
             "couplings", "loads", "ump", "probes",
         }
         available_routes = set(window.sidebar.buttons)
         missing_routes = expected_routes - available_routes
         if missing_routes:
             raise RuntimeError(f"Frozen sidebar is missing model routes: {sorted(missing_routes)}")
+        if "shaft" in available_routes:
+            raise RuntimeError("Frozen sidebar reintroduced the duplicate Shaft navigation state.")
 
         if window.rotor_page.findChildren(QTabWidget):
             raise RuntimeError("Frozen Rotor workspace unexpectedly contains a duplicate QTabWidget model navigator.")
@@ -70,9 +72,11 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
                 f"Frozen Rotor workspace expected 8 engineering editor pages, received {window.rotor_page.editor_stack.count()}."
             )
 
-        view_modes = tuple(window.toolbar.view_combo.itemText(i) for i in range(window.toolbar.view_combo.count()))
-        if view_modes != ("Engineering 2D", "ROSS Native"):
-            raise RuntimeError(f"Frozen model-view selector mismatch: {view_modes}")
+        if hasattr(window.toolbar, "view_combo"):
+            raise RuntimeError("Frozen toolbar reintroduced the obsolete Engineering 2D / ROSS Native selector.")
+        if not hasattr(window.toolbar, "full_rotor_button"):
+            raise RuntimeError("Frozen toolbar is missing the explicit Rotor Completo action.")
+        view_modes: tuple[str, ...] = ()
 
         executable_by_group: dict[BearingGroup, list[str]] = {}
         blocked_by_group: dict[BearingGroup, list[str]] = {}
@@ -83,26 +87,29 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
 
         if len(executable_by_group[BearingGroup.GENERAL]) != 4:
             raise RuntimeError(
-                "Frozen General Bearing Studio did not expose 4 executable adapters: "
+                "Frozen General registry did not retain 4 qualified adapters: "
                 f"{executable_by_group[BearingGroup.GENERAL]}"
             )
         if len(executable_by_group[BearingGroup.THD]) != 4:
             raise RuntimeError(
-                "Frozen THD Bearing Studio did not expose 4 executable adapters: "
+                "Frozen THD registry did not retain 4 qualified adapters: "
                 f"{executable_by_group[BearingGroup.THD]}"
             )
         if blocked_by_group[BearingGroup.AMB] != ["MagneticBearingElement"]:
             raise RuntimeError(f"Frozen AMB gate mismatch: {blocked_by_group[BearingGroup.AMB]}")
 
         for route in ("shaft", "disks", "supports", "loads", "ump", "probes"):
+            # shaft remains a programmatic alias to the single Rotor Model page.
             window._navigate(route)
             if window.stack.currentWidget() is not window.rotor_page:
-                raise RuntimeError(f"Frozen route {route!r} did not open the Rotor engineering workspace.")
+                raise RuntimeError(f"Frozen route {route!r} did not open the unified Rotor workspace.")
 
         window._navigate("bearings")
         bearing_direct_route = window.stack.currentWidget() is window.bearing_page
         if not bearing_direct_route:
-            raise RuntimeError("Frozen Bearings route did not open Bearing Studio 2.0 directly.")
+            raise RuntimeError("Frozen Bearings route did not open Bearing Studio directly.")
+        if not window.bearing_page.__class__.__module__.endswith("bearing_workspace_page"):
+            raise RuntimeError("Frozen application is not composed with the 0.15 Bearing Studio workspace.")
         stations = window.bearing_workspace.stations(project.engineering)
         expected_stations = len(stations)
         station_count = window.bearing_page.bearing_selector.count()
@@ -136,10 +143,17 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
         page = window.bearing_page
         if not page.group_selector.isHidden():
             raise RuntimeError("Frozen Bearing Studio reintroduced the redundant visible family selector.")
-        if len(page.type_buttons) != 9 or any(button.isHidden() for button in page.type_buttons.values()):
-            raise RuntimeError("Frozen Bearing Studio must expose all nine bearing model icons directly.")
+        expected_models = {"ball", "roller", "cyl", "plain", "tilting", "thrust", "sfd", "amb"}
+        if set(page.type_buttons) != expected_models or any(button.isHidden() for button in page.type_buttons.values()):
+            raise RuntimeError(
+                f"Frozen Bearing Studio model surface mismatch: {sorted(page.type_buttons)}"
+            )
+        if "kc" in page.type_buttons:
+            raise RuntimeError("Direct BearingElement K/C must not appear as a Bearing Studio calculation-model tile.")
         if page.result_card.isVisible() or not page.result_card.isHidden():
-            raise RuntimeError("Frozen Bearing Studio results must start collapsed below the engineering inputs.")
+            raise RuntimeError("Frozen Bearing Studio output must start collapsed below the engineering inputs.")
+        if "exact ROSS node" not in page.target_node_label.text():
+            raise RuntimeError("Frozen Bearing Studio does not expose the exact target node.")
 
         expected_fields = {
             "ball": {"n_balls", "d_balls_mm", "static_load_n", "contact_angle_deg"},
@@ -152,25 +166,30 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
             if not required.issubset(actual):
                 raise RuntimeError(f"Frozen inline {key} editor missing fields: {sorted(required - actual)}")
 
-        # A fast General model proves the production Calculate path consumes the
-        # visible inline controls and does not require a modal input dialog.
+        # Fast General calculation: K/C values are available; THD-only dimensional
+        # output and K/C curves stay unavailable.
         page._select_type("ball", announce=False)
         page.input_panel.fields["n_balls"].setValue(9)
         page.input_panel.fields["d_balls_mm"].setValue(28.0)
         window._calculate_bearing()
         if window.bearing_calculation is None or window.bearing_calculation.source_model != "BallBearingElement":
             raise RuntimeError("Frozen inline BallBearing calculation did not reach the qualified service.")
-        if not page.results_button.isEnabled() or not page.result_card.isHidden():
-            raise RuntimeError("Frozen result disclosure must be enabled after Calculate and remain collapsed initially.")
-        page.set_results_visible(True)
-        app.processEvents()
-        if page.result_card.isHidden():
-            raise RuntimeError("Frozen View Results did not reveal the result section below the input editor.")
-        page.set_results_visible(False)
-        if not page.result_card.isHidden():
-            raise RuntimeError("Frozen Hide Results did not collapse the result section.")
+        if not page.output_kc_button.isEnabled() or page.output_dimensional_button.isEnabled():
+            raise RuntimeError("Frozen General bearing output contract is not K/C-only.")
+        if page.kc_native_view.figure is not None:
+            raise RuntimeError("Frozen General bearing unexpectedly exposes a THD K/C curve.")
 
-        # Capability gating remains scientific: AMB is visible but not executable.
+        # Model-flow bearing node must remain inspectable without navigating away.
+        window._navigate("rotor")
+        first = stations[0]
+        WORKSPACE_SELECTION.select(RotorEntityRef("bearings", first.index, first.name, first.position_mm))
+        app.processEvents()
+        inspector = window.rotor_page.bearing_node_inspector
+        if inspector.station_index != first.index:
+            raise RuntimeError("Frozen Rotor workspace did not expose the selected bearing-node inspector.")
+        if inspector.curves_button.isVisible():
+            raise RuntimeError("Imported/General K/C bearing node must not expose THD K/C curves.")
+
         page._select_type("amb", announce=False)
         if page.calculate_button.isEnabled():
             raise RuntimeError("Frozen AMB became executable without a qualified controller-domain contract.")
