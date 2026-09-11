@@ -77,8 +77,7 @@ jobs:
             artifacts/model_builder_014_qualification.json
             artifacts/navigation_017_qualification.json
             artifacts/engineering_outputs_018_qualification.json
-            artifacts/engineering_outputs_018/engineering_outputs_manifest.json
-            artifacts/engineering_outputs_018/tables/*.csv
+            artifacts/engineering_outputs_018/**
             artifacts/op_w60_pipeline_summary.json
             artifacts/op_w60_ross_vs_rotordin_correlation.json
             artifacts/op_w60_ross_vs_rotordin_correlation.csv

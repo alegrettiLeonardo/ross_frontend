@@ -41,7 +41,7 @@ jobs:
       - name: Build production-style windowed executable
         run: python -m PyInstaller --clean --noconfirm packaging/ROSS-Studio.spec
 
-      - name: Qualify exact frozen binary including project I/O
+      - name: Qualify exact frozen binary including project I/O and Engineering Outputs
         run: python tools/qualify_frozen_binary.py dist artifacts/frozen_selftest_${{ runner.os }}.json
 
       - name: Upload frozen executable and qualification evidence
@@ -53,4 +53,5 @@ jobs:
             artifacts/frozen_selftest_${{ runner.os }}.json
             artifacts/frozen_selftest_${{ runner.os }}_project_io.json
             artifacts/frozen_selftest_${{ runner.os }}_gui.json
+            artifacts/frozen_selftest_${{ runner.os }}_engineering_outputs.json
           if-no-files-found: error

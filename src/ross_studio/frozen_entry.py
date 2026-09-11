@@ -85,6 +85,22 @@ def frozen_gui_smoke_main(argv: list[str]) -> int:
         return 3
 
 
+def frozen_engineering_outputs_main(argv: list[str]) -> int:
+    output_path = _option_value(argv, "--engineering-outputs-output")
+    try:
+        from ross_studio.frozen_engineering_outputs import run_frozen_engineering_outputs_test
+
+        result = run_frozen_engineering_outputs_test()
+        payload: dict[str, object] = result.to_dict()
+        payload["executable"] = str(Path(sys.executable).resolve())
+        payload["frozen"] = bool(getattr(sys, "frozen", False))
+        _write_payload(output_path, payload)
+        return 0
+    except Exception as exc:
+        _write_payload(output_path, _failure_payload(exc))
+        return 5
+
+
 def main() -> int:
     argv = list(sys.argv[1:])
     if "--self-test" in argv or "--self-test-output" in argv:
@@ -93,6 +109,8 @@ def main() -> int:
         return frozen_project_io_main(argv)
     if "--gui-smoke" in argv or "--gui-smoke-output" in argv:
         return frozen_gui_smoke_main(argv)
+    if "--engineering-outputs-self-test" in argv or "--engineering-outputs-output" in argv:
+        return frozen_engineering_outputs_main(argv)
 
     # Keep heavy Qt imports out of scientific and I/O packaging self-test bootstraps.
     # Normal desktop execution still enters the exact production application.

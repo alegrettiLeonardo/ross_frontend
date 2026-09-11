@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import csv
+import hashlib
 import json
 from pathlib import Path
-from typing import Any, Iterable
+import re
+from typing import Any, Iterable, TYPE_CHECKING
 
 import ross
 
@@ -14,6 +16,9 @@ from .analysis_pipeline import AnalysisPipelineResult
 from .domain import EngineeringError
 from .models import ProjectModel
 from .project_io import project_fingerprint
+
+if TYPE_CHECKING:
+    from .engineering_figures import EngineeringFigureCatalog
 
 
 STATUS_AVAILABLE = "AVAILABLE"
@@ -74,18 +79,23 @@ class EngineeringPackage:
     root: Path
     manifest: Path
     tables: dict[str, Path]
+    workbook: Path | None = None
+    report: Path | None = None
+    figures: dict[str, Path] | None = None
+    qualification_manifest: Path | None = None
 
 
 class EngineeringOutputsService:
-    """Create auditable engineering deliverables from already-computed ROSS results.
+    """Create auditable deliverables from already-computed ROSS results.
 
-    This service never re-runs an analysis and never synthesizes missing engineering
-    quantities. It only packages the qualified ``AnalysisPipelineResult`` together
-    with the exact model/build trace that produced it. Capabilities not present in
-    the current pipeline are reported explicitly as not qualified/available.
+    The numerical pipeline remains the single owner of the scientific solve. This
+    service packages retained result objects, tables and figures. Native images are
+    produced by ROSS' own Plotly ``plot_*`` methods through ``EngineeringFigureCatalog``;
+    no engineering curve is rebuilt in ROSS Studio.
     """
 
     SCHEMA_VERSION = 1
+    QUALIFICATION_SCHEMA_VERSION = 1
 
     @staticmethod
     def _require_engineering(project: ProjectModel):
@@ -235,10 +245,7 @@ class EngineeringOutputsService:
             "natural_frequencies",
             "Natural Frequencies at Rated Speed",
             ("mode", "wn_hz", "wd_hz", "damping_ratio", "log_dec", "whirl"),
-            (
-                (item.mode, item.wn_hz, item.wd_hz, item.damping_ratio, item.log_dec, item.whirl)
-                for item in result.modal_modes
-            ),
+            ((item.mode, item.wn_hz, item.wd_hz, item.damping_ratio, item.log_dec, item.whirl) for item in result.modal_modes),
         )
 
     @staticmethod
@@ -247,10 +254,7 @@ class EngineeringOutputsService:
             "critical_speeds",
             "Critical Speed Map",
             ("mode", "speed_rpm", "frequency_hz", "damping_ratio", "log_dec", "whirl", "method"),
-            (
-                (item.mode, item.speed_rpm, item.frequency_hz, item.damping_ratio, item.log_dec, item.whirl, item.method)
-                for item in result.critical_speeds
-            ),
+            ((item.mode, item.speed_rpm, item.frequency_hz, item.damping_ratio, item.log_dec, item.whirl, item.method) for item in result.critical_speeds),
         )
 
     @staticmethod
@@ -303,12 +307,21 @@ class EngineeringOutputsService:
             "support_audit": STATUS_AVAILABLE,
             "natural_frequencies": STATUS_AVAILABLE,
             "critical_speed_map": STATUS_AVAILABLE,
+            "rotor_model_plot": STATUS_AVAILABLE,
+            "static_native_plots": STATUS_AVAILABLE,
+            "modal_mode_shapes": STATUS_AVAILABLE,
             "campbell": STATUS_AVAILABLE,
             "unbalance_response": STATUS_AVAILABLE,
+            "unbalance_native_plots": STATUS_AVAILABLE,
+            "xlsx_export": STATUS_AVAILABLE,
+            "pdf_export": STATUS_AVAILABLE,
+            "png_export": STATUS_AVAILABLE,
+            "qualification_manifest": STATUS_AVAILABLE,
             "orbit": STATUS_NOT_QUALIFIED,
             "amplification_factor": STATUS_NOT_QUALIFIED,
             "separation_margin": STATUS_NOT_QUALIFIED,
             "stability": STATUS_NOT_QUALIFIED,
+            "frequency_response": STATUS_NOT_AVAILABLE,
             "transient_metrics": STATUS_NOT_AVAILABLE,
             "engineering_warnings": STATUS_AVAILABLE,
             "assumptions": STATUS_AVAILABLE,
@@ -328,11 +341,11 @@ class EngineeringOutputsService:
         )
         warnings = tuple(asdict(item) for item in result.audits if item.severity == "warning")
         limitations = (
-            "Orbit output is not exported until a qualified orbit extraction contract is implemented.",
-            "Amplification factor and separation margin are not inferred from peaks; dedicated qualified rules are required.",
-            "Stability output is not promoted from modal damping alone; a dedicated stability analysis contract is required.",
-            "Transient metrics are unavailable because the current qualified pipeline does not execute run_time_response().",
-            "PDF/XLSX rendering is outside this first 0.18 tranche; JSON manifest and lossless CSV tables are the qualified package formats.",
+            "Orbit output remains NOT_QUALIFIED until a dedicated forced/time-response orbit contract is implemented.",
+            "Amplification factor and separation margin are not inferred from response peaks; dedicated qualified rules are required.",
+            "Stability is not promoted from modal damping alone; a dedicated stability analysis contract is required.",
+            "Frequency-response and transient figures are unavailable because the current 0.18 pipeline does not execute run_freq_response() or run_time_response().",
+            "THD pressure/temperature fields remain owned by Bearing Studio because RotorProject stores the applied K/C contract, not the complete solved THD field object.",
         )
 
         summary = {
@@ -358,6 +371,7 @@ class EngineeringOutputsService:
             "lateral_convention": engineering.lateral_convention.value,
             "probe_angle_contract": engineering.probe_angle_contract.value,
             "analysis_result_type": type(result).__name__,
+            "plot_policy": "Native ROSS Plotly figures from retained result objects; no run_* recomputation in Engineering Outputs",
         }
         project_data = {
             "name": project.name,
@@ -384,15 +398,8 @@ class EngineeringOutputsService:
         )
 
     @staticmethod
-    def export_package(snapshot: EngineeringOutputsSnapshot, root: str | Path) -> EngineeringPackage:
-        target = Path(root)
-        target.mkdir(parents=True, exist_ok=True)
-        table_dir = target / "tables"
+    def _write_csv_tables(snapshot: EngineeringOutputsSnapshot, table_dir: Path) -> dict[str, Path]:
         table_dir.mkdir(parents=True, exist_ok=True)
-
-        manifest = target / "engineering_outputs_manifest.json"
-        manifest.write_text(json.dumps(snapshot.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
         table_paths: dict[str, Path] = {}
         for table in snapshot.tables:
             path = table_dir / f"{table.key}.csv"
@@ -401,7 +408,320 @@ class EngineeringOutputsService:
                 writer.writerow(table.columns)
                 writer.writerows(table.rows)
             table_paths[table.key] = path
-        return EngineeringPackage(root=target, manifest=manifest, tables=table_paths)
+        return table_paths
+
+    @staticmethod
+    def export_xlsx(snapshot: EngineeringOutputsSnapshot, path: str | Path) -> Path:
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill
+            from openpyxl.utils import get_column_letter
+        except Exception as exc:
+            raise EngineeringError(f"XLSX export requires openpyxl: {exc}") from exc
+
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        wb = Workbook()
+        wb.remove(wb.active)
+
+        def metadata_sheet(name: str, mapping: dict[str, object]) -> None:
+            ws = wb.create_sheet(name)
+            ws.append(["Key", "Value"])
+            for key, value in mapping.items():
+                ws.append([key, json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list, tuple)) else value])
+            for cell in ws[1]:
+                cell.font = Font(bold=True)
+                cell.fill = PatternFill(fill_type="solid", fgColor="D9EAF7")
+            ws.freeze_panes = "A2"
+            ws.column_dimensions["A"].width = 34
+            ws.column_dimensions["B"].width = 80
+
+        metadata_sheet("Summary", {**snapshot.project, **snapshot.summary})
+        metadata_sheet("Provenance", snapshot.provenance)
+        metadata_sheet("Capabilities", snapshot.capabilities)
+        metadata_sheet("Limitations", {f"limitation_{i+1}": value for i, value in enumerate(snapshot.limitations)})
+
+        invalid = re.compile(r"[\\/*?:\[\]]")
+        used: set[str] = set(wb.sheetnames)
+        for table in snapshot.tables:
+            base = invalid.sub("_", table.key)[:31] or "Table"
+            name = base
+            counter = 2
+            while name in used:
+                suffix = f"_{counter}"
+                name = base[: 31 - len(suffix)] + suffix
+                counter += 1
+            used.add(name)
+            ws = wb.create_sheet(name)
+            ws.append(list(table.columns))
+            for row in table.rows:
+                ws.append(list(row))
+            for cell in ws[1]:
+                cell.font = Font(bold=True)
+                cell.fill = PatternFill(fill_type="solid", fgColor="D9EAF7")
+            ws.freeze_panes = "A2"
+            ws.auto_filter.ref = ws.dimensions
+            for index, column in enumerate(table.columns, 1):
+                width = min(48, max(12, len(column) + 2))
+                for row in table.rows[:100]:
+                    value = row[index - 1] if index - 1 < len(row) else None
+                    width = min(48, max(width, len(str(value)) + 2 if value is not None else width))
+                ws.column_dimensions[get_column_letter(index)].width = width
+        wb.save(target)
+        return target
+
+    @staticmethod
+    def export_figures(
+        figure_catalog: "EngineeringFigureCatalog",
+        directory: str | Path,
+        *,
+        keys: Iterable[str] | None = None,
+        width: int = 1600,
+        height: int = 900,
+        scale: float = 1.0,
+    ) -> dict[str, Path]:
+        target = Path(directory)
+        target.mkdir(parents=True, exist_ok=True)
+        selected = tuple(keys) if keys is not None else figure_catalog.keys
+        paths: dict[str, Path] = {}
+        for key in selected:
+            figure = figure_catalog.figure(key)
+            path = target / f"{key}.png"
+            try:
+                figure.write_image(str(path), format="png", width=width, height=height, scale=scale)
+            except Exception as exc:
+                spec = figure_catalog.spec(key)
+                raise EngineeringError(
+                    f"PNG export failed for native ROSS figure {key!r} ({spec.source_method}). "
+                    f"The Plotly/Kaleido frozen image backend must be available: {exc}"
+                ) from exc
+            if not path.is_file() or path.stat().st_size == 0:
+                raise EngineeringError(f"PNG export did not produce a valid file for native ROSS figure {key!r}.")
+            paths[key] = path
+        return paths
+
+    @staticmethod
+    def export_pdf(
+        snapshot: EngineeringOutputsSnapshot,
+        path: str | Path,
+        *,
+        figure_paths: dict[str, Path] | None = None,
+        figure_catalog: "EngineeringFigureCatalog | None" = None,
+    ) -> Path:
+        try:
+            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib.units import mm
+            from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+        except Exception as exc:
+            raise EngineeringError(f"PDF export requires reportlab: {exc}") from exc
+
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        styles = getSampleStyleSheet()
+        document = SimpleDocTemplate(
+            str(target),
+            pagesize=landscape(A4),
+            rightMargin=12 * mm,
+            leftMargin=12 * mm,
+            topMargin=12 * mm,
+            bottomMargin=12 * mm,
+            title=f"ROSS Studio Engineering Outputs — {snapshot.project.get('name', '')}",
+            author="ROSS Studio",
+        )
+        story: list[Any] = []
+        story.append(Paragraph("ROSS Studio — Engineering Outputs", styles["Title"]))
+        story.append(Paragraph(str(snapshot.project.get("name", "")), styles["Heading2"]))
+        story.append(Paragraph(
+            f"ROSS {snapshot.provenance.get('ross_version')} · ROSS Studio {snapshot.provenance.get('ross_studio_version')} · "
+            f"Project fingerprint {snapshot.provenance.get('project_fingerprint_sha256')}",
+            styles["BodyText"],
+        ))
+        story.append(Spacer(1, 6 * mm))
+
+        summary_rows = [["Quantity", "Value"]] + [[str(k), str(v)] for k, v in snapshot.summary.items()]
+        summary_table = Table(summary_rows, repeatRows=1, colWidths=[70 * mm, 150 * mm])
+        summary_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9EAF7")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#AAB7C4")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(summary_table)
+        story.append(PageBreak())
+
+        for table in snapshot.tables:
+            story.append(Paragraph(table.title, styles["Heading2"]))
+            data = [list(table.columns)] + [["" if value is None else str(value) for value in row] for row in table.rows]
+            pdf_table = Table(data, repeatRows=1)
+            pdf_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9EAF7")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("GRID", (0, 0), (-1, -1), 0.2, colors.HexColor("#BBC5CE")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("FONTSIZE", (0, 0), (-1, -1), 6.5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            story.append(pdf_table)
+            story.append(Spacer(1, 5 * mm))
+
+        if figure_paths:
+            story.append(PageBreak())
+            story.append(Paragraph("Native ROSS Figures", styles["Heading1"]))
+            for key, image_path in figure_paths.items():
+                title = key
+                source = "ROSS native Plotly figure"
+                basis = ""
+                if figure_catalog is not None:
+                    spec = figure_catalog.spec(key)
+                    title = spec.title
+                    source = spec.source_method
+                    basis = spec.tutorial_basis
+                block: list[Any] = [
+                    Paragraph(title, styles["Heading2"]),
+                    Paragraph(f"Source: {source}", styles["BodyText"]),
+                ]
+                if basis:
+                    block.append(Paragraph(f"Tutorial basis: {basis}", styles["BodyText"]))
+                block.append(Spacer(1, 2 * mm))
+                block.append(Image(str(image_path), width=240 * mm, height=135 * mm, kind="proportional"))
+                block.append(Spacer(1, 5 * mm))
+                story.append(KeepTogether(block))
+
+        story.append(PageBreak())
+        story.append(Paragraph("Limitations", styles["Heading1"]))
+        for item in snapshot.limitations:
+            story.append(Paragraph(f"• {item}", styles["BodyText"]))
+        document.build(story)
+        if not target.is_file() or target.stat().st_size == 0:
+            raise EngineeringError("PDF export did not produce a valid report file.")
+        return target
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def build_qualification_manifest(
+        self,
+        snapshot: EngineeringOutputsSnapshot,
+        *,
+        assets: dict[str, Path] | None = None,
+        figure_catalog: "EngineeringFigureCatalog | None" = None,
+    ) -> dict[str, object]:
+        inventory = []
+        for logical_name, path in sorted((assets or {}).items()):
+            if path.is_file():
+                inventory.append({
+                    "name": logical_name,
+                    "path": str(path),
+                    "bytes": path.stat().st_size,
+                    "sha256": self._sha256(path),
+                })
+        figures = figure_catalog.inventory() if figure_catalog is not None else []
+        return {
+            "schema_version": self.QUALIFICATION_SCHEMA_VERSION,
+            "status": "PASS",
+            "generated_utc": datetime.now(timezone.utc).isoformat(),
+            "project": snapshot.project,
+            "provenance": snapshot.provenance,
+            "capabilities": snapshot.capabilities,
+            "native_ross_figures": figures,
+            "assets": inventory,
+            "limitations": list(snapshot.limitations),
+            "qualification_policy": {
+                "scientific_recompute": False,
+                "figure_owner": "ROSS native result plot methods",
+                "table_owner": "qualified AnalysisPipelineResult + exact strict build trace",
+                "missing_quantities": "fail closed / explicitly NOT_QUALIFIED or NOT_AVAILABLE",
+            },
+        }
+
+    def export_qualification_manifest(
+        self,
+        snapshot: EngineeringOutputsSnapshot,
+        path: str | Path,
+        *,
+        assets: dict[str, Path] | None = None,
+        figure_catalog: "EngineeringFigureCatalog | None" = None,
+    ) -> Path:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = self.build_qualification_manifest(snapshot, assets=assets, figure_catalog=figure_catalog)
+        target.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return target
+
+    @classmethod
+    def export_package(
+        cls,
+        snapshot: EngineeringOutputsSnapshot,
+        root: str | Path,
+        *,
+        figure_catalog: "EngineeringFigureCatalog | None" = None,
+        figure_keys: Iterable[str] | None = None,
+        include_xlsx: bool = False,
+        include_pdf: bool = False,
+        include_images: bool = False,
+        include_qualification_manifest: bool = True,
+    ) -> EngineeringPackage:
+        target = Path(root)
+        target.mkdir(parents=True, exist_ok=True)
+        table_paths = cls._write_csv_tables(snapshot, target / "tables")
+
+        manifest = target / "engineering_outputs_manifest.json"
+        manifest.write_text(json.dumps(snapshot.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        workbook: Path | None = None
+        if include_xlsx:
+            workbook = cls.export_xlsx(snapshot, target / "engineering_outputs.xlsx")
+
+        figures: dict[str, Path] = {}
+        if include_images:
+            if figure_catalog is None:
+                raise EngineeringError("PNG Engineering Outputs export requires the native ROSS EngineeringFigureCatalog.")
+            figures = cls.export_figures(figure_catalog, target / "figures", keys=figure_keys)
+
+        report: Path | None = None
+        if include_pdf:
+            report = cls.export_pdf(
+                snapshot,
+                target / "engineering_outputs_report.pdf",
+                figure_paths=figures or None,
+                figure_catalog=figure_catalog,
+            )
+
+        assets: dict[str, Path] = {"engineering_outputs_manifest": manifest}
+        assets.update({f"csv:{key}": path for key, path in table_paths.items()})
+        if workbook is not None:
+            assets["xlsx"] = workbook
+        if report is not None:
+            assets["pdf"] = report
+        assets.update({f"png:{key}": path for key, path in figures.items()})
+
+        qualification_manifest: Path | None = None
+        if include_qualification_manifest:
+            qualification_manifest = cls().export_qualification_manifest(
+                snapshot,
+                target / "qualification_manifest.json",
+                assets=assets,
+                figure_catalog=figure_catalog,
+            )
+
+        return EngineeringPackage(
+            root=target,
+            manifest=manifest,
+            tables=table_paths,
+            workbook=workbook,
+            report=report,
+            figures=figures,
+            qualification_manifest=qualification_manifest,
+        )
 
 
 __all__ = [

@@ -116,9 +116,6 @@ def main() -> int:
     assert io_payload["dyrobes_model_summary_sections"] == 4, io_payload
     assert io_payload["dyrobes_model_summary_base_elements"] == 8, io_payload
     assert io_payload["dyrobes_model_summary_disks"] == 1, io_payload
-    # This gate distinguishes the public labelled Model Summary corpus from raw
-    # vendor .rot files. Raw layouts remain fail-closed until representative files
-    # with provenance are supplied; a frozen build must never silently promote them.
     assert io_payload["dyrobes_raw_vendor_cases"] == 0, io_payload
     assert io_payload["dyrobes_raw_vendor_gate"] == "WAITING_FOR_REPRESENTATIVE_FILES", io_payload
 
@@ -130,7 +127,6 @@ def main() -> int:
         "GUI startup and model-builder smoke",
     )
     assert gui_payload["project"] == "OP-W60-500-60Hz-IC611-P3", gui_payload
-    # 0.15 removed the obsolete view selector; 0.17 preserves that qualified shell.
     assert gui_payload["view_modes"] == [], gui_payload
     assert gui_payload["rotor_editor_count"] == 8, gui_payload
     assert gui_payload["bearing_station_count"] == 2, gui_payload
@@ -159,6 +155,20 @@ def main() -> int:
     assert model_builder["load_realization"] == "ANALYSIS_INPUT_EXACT_NODE", model_builder
     assert model_builder["unresolved_positions_mm"] == [], model_builder
 
+    outputs_output = output.with_name(output.stem + "_engineering_outputs" + output.suffix)
+    outputs_payload = _run_json_gate(
+        exe,
+        ["--engineering-outputs-self-test", "--engineering-outputs-output"],
+        outputs_output,
+        "Engineering Outputs rich export runtime",
+    )
+    assert outputs_payload["ross_version"] == "2.3.0", outputs_payload
+    assert outputs_payload["ross_studio_version"] == EXPECTED_STUDIO_VERSION, outputs_payload
+    assert outputs_payload["native_ross_plot_traces"] > 0, outputs_payload
+    assert outputs_payload["png_bytes"] > 0, outputs_payload
+    assert outputs_payload["xlsx_bytes"] > 0, outputs_payload
+    assert outputs_payload["pdf_bytes"] > 0, outputs_payload
+
     combined = {
         "status": "PASS",
         "platform": platform.system(),
@@ -167,6 +177,7 @@ def main() -> int:
         "scientific": self_payload,
         "project_io": io_payload,
         "gui": gui_payload,
+        "engineering_outputs": outputs_payload,
     }
     print(json.dumps(combined, indent=2, ensure_ascii=False))
     return 0

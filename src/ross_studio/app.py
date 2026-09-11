@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-"""ROSS Studio 0.17 application composition root.
+"""ROSS Studio 0.18 application composition root.
 
 The qualified 0.15 scientific transaction logic remains in ``app_legacy`` while
-0.17 replaces flat navigation ownership with stable architecture routes. ROTOR MODEL
-continues to build the physical model; ANALYSIS routes are dedicated owners and are
-only made executable when their native ROSS services are qualified.
+0.17 replaces flat navigation ownership with stable architecture routes. 0.18 adds
+Engineering Outputs as a local analysis-result capability; it does not introduce a
+public/global Results route in the sidebar.
 """
 
 import sys
@@ -20,6 +20,7 @@ from .pages import bearing_studio as _bearing_base_module
 from .pages import rotor_model as _rotor_base_module
 from .pages.architecture_workspaces import AnalysisRoutePage, FoundationWorkspacePage
 from .pages.bearing_workspace_page import BearingStudioPage
+from .pages.engineering_results import EngineeringAnalysisResultsPage
 from .pages.project_home import ProjectHomePage
 from .pages.rotor_workspace import RotorModelPage
 from .theme import APP_STYLESHEET
@@ -28,6 +29,7 @@ from .theme import APP_STYLESHEET
 # refreshed. Redirect them to the qualified workspaces without duplicating solver logic.
 _legacy.BearingStudioPage = BearingStudioPage
 _legacy.RotorModelPage = RotorModelPage
+_legacy.AnalysisResultsPage = EngineeringAnalysisResultsPage
 
 # ProjectFileController imports the historical module paths lazily after Open/New.
 # Publish the same composition there so startup and file replacement cannot diverge.
@@ -38,7 +40,7 @@ TitleBar = _legacy.TitleBar
 
 
 class RossStudioWindow(_legacy.RossStudioWindow):
-    """0.17 shell with registry-driven model/analysis navigation."""
+    """0.18 shell with registry-driven navigation and local Engineering Outputs."""
 
     def __init__(self) -> None:
         # ``app_legacy.__init__`` emits its initial navigation signal. Prepare the
@@ -122,11 +124,11 @@ class RossStudioWindow(_legacy.RossStudioWindow):
         raise KeyError(route)
 
     def run_analysis(self) -> None:
-        """Preserve the qualified legacy pipeline while it is decoupled in later tranches."""
+        """Preserve the qualified pipeline and expose its local Engineering Outputs."""
         super().run_analysis()
         # The historical method activates the compatibility alias ``results``.
-        # There is intentionally no public global Results route in 0.17. Keep the
-        # real legacy result visible after the alias updates sidebar selection.
+        # There is intentionally no public global Results route in 0.18. Keep the
+        # real result page visible; its local Engineering Outputs button owns export.
         if self.results_page.result is not None:
             self.stack.setCurrentWidget(self.results_page)
 
