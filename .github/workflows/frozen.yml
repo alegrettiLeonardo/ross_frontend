@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/ross-architecture-0.17.0
+      - feature/engineering-outputs-0.18.0
   workflow_dispatch:
 
 jobs:
@@ -46,7 +47,7 @@ jobs:
       - name: Upload frozen executable and qualification evidence
         uses: actions/upload-artifact@v4
         with:
-          name: ross-studio-0.17.0-${{ runner.os }}
+          name: ross-studio-0.18.0-${{ runner.os }}
           path: |
             dist/ROSS-Studio/
             artifacts/frozen_selftest_${{ runner.os }}.json
