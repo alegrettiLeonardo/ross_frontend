@@ -14,10 +14,21 @@ ENTRY = SRC / "ross_studio" / "frozen_entry.py"
 ross_datas, ross_binaries, ross_hiddenimports = collect_all("ross")
 ccp_datas, ccp_binaries, ccp_hiddenimports = collect_all("ccp")
 
+# Engineering Outputs 0.18 writes XLSX/PDF and static PNGs from the exact native
+# Plotly figures returned by ROSS. Kaleido carries an external renderer binary/data;
+# reportlab/openpyxl also have runtime resources and lazy imports. Collect each
+# package as a complete unit so the same export gates hold in the frozen app.
+kaleido_datas, kaleido_binaries, kaleido_hiddenimports = collect_all("kaleido")
+reportlab_datas, reportlab_binaries, reportlab_hiddenimports = collect_all("reportlab")
+openpyxl_datas, openpyxl_binaries, openpyxl_hiddenimports = collect_all("openpyxl")
+
 hiddenimports = list(dict.fromkeys([
     *ross_hiddenimports,
     *ccp_hiddenimports,
-    # Loaded lazily by RossNativeRotorView; explicit inclusion is required so the
+    *kaleido_hiddenimports,
+    *reportlab_hiddenimports,
+    *openpyxl_hiddenimports,
+    # Loaded lazily by NativeRossFigureView; explicit inclusion is required so the
     # packaged executable preserves the native Plotly/Qt audit view.
     "PySide6.QtWebEngineCore",
     "PySide6.QtWebEngineWidgets",
@@ -27,9 +38,18 @@ hiddenimports = list(dict.fromkeys([
 datas = [
     *ross_datas,
     *ccp_datas,
+    *kaleido_datas,
+    *reportlab_datas,
+    *openpyxl_datas,
     (str(SRC / "ross_studio" / "resources"), "ross_studio/resources"),
 ]
-binaries = [*ross_binaries, *ccp_binaries]
+binaries = [
+    *ross_binaries,
+    *ccp_binaries,
+    *kaleido_binaries,
+    *reportlab_binaries,
+    *openpyxl_binaries,
+]
 
 a = Analysis(
     [str(ENTRY)],
