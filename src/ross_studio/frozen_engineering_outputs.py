@@ -27,14 +27,13 @@ class FrozenEngineeringOutputsResult:
 
 
 def _shutdown_kaleido_scope() -> None:
-    """Close the legacy Kaleido 0.2.1 subprocess deterministically.
+    """Close the legacy process-backed Kaleido scope deterministically.
 
-    Plotly 5.24.1 keeps one process-backed global Kaleido scope.  In frozen
-    Windows builds the image can be written successfully while that child
-    process keeps the parent executable alive long enough for the packaging
-    qualification timeout to fire.  Kaleido 0.x owns subprocess cleanup in
-    ``BaseScope.__del__``; invoking it explicitly makes the frozen self-test
-    deterministic without weakening the PNG export gate.
+    Plotly 5.24.1 keeps one global process-backed Kaleido scope.  Windows uses
+    the qualified 0.1.0.post1 renderer because 0.2.1 can hang indefinitely in
+    ``write_image()`` under Python 3.12 / windowed frozen executables; Linux and
+    macOS retain 0.2.1.  Explicit teardown is still useful on every platform so
+    the renderer child cannot keep a successful qualification process alive.
     """
 
     try:
