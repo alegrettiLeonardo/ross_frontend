@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from ross_studio import __version__
 from ross_studio.analysis_pipeline import AnalysisPipelineService
 from ross_studio.domain import EngineeringError
 from ross_studio.engineering_outputs import (
@@ -30,7 +31,7 @@ def test_engineering_outputs_018_inventory_is_traceable_and_non_synthetic(qualif
     project, result, snapshot = qualified_outputs
 
     assert snapshot.provenance["ross_version"] == "2.3.0"
-    assert snapshot.provenance["ross_studio_version"] == "0.18.0"
+    assert snapshot.provenance["ross_studio_version"] == __version__
     assert snapshot.provenance["analysis_result_type"] == "AnalysisPipelineResult"
     assert len(snapshot.provenance["project_fingerprint_sha256"]) == 64
     assert snapshot.summary["strict_build"] is True
@@ -125,7 +126,7 @@ def test_engineering_outputs_export_package_is_lossless_csv_plus_manifest(qualif
     assert package.manifest.is_file()
     payload = json.loads(package.manifest.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 1
-    assert payload["provenance"]["ross_studio_version"] == "0.18.0"
+    assert payload["provenance"]["ross_studio_version"] == __version__
     assert payload["summary"]["unresolved_positions_mm"] == []
 
     assert set(package.tables) == {table.key for table in snapshot.tables}

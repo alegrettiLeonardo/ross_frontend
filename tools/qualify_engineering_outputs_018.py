@@ -9,6 +9,7 @@ os.environ.setdefault("ROSS_STUDIO_DISABLE_WEBENGINE", "1")
 
 from PySide6.QtWidgets import QApplication
 
+from ross_studio import __version__
 from ross_studio.analysis_pipeline import AnalysisPipelineService
 from ross_studio.engineering_figures import EngineeringFigureCatalog
 from ross_studio.engineering_outputs import EngineeringOutputsService
@@ -18,8 +19,6 @@ from ross_studio.pages.engineering_results import EngineeringAnalysisResultsPage
 
 
 def main() -> int:
-    # Presentation-only PDF fix: install the bounded/wrapped report composer before
-    # exercising the exact same Engineering Outputs service used by the GUI.
     install_engineering_report_export()
 
     project = load_reference_project_model()
@@ -37,8 +36,10 @@ def main() -> int:
         raise RuntimeError("Engineering Outputs contains unresolved positions.")
     if snapshot.provenance["ross_version"] != "2.3.0":
         raise RuntimeError(f"ROSS version drift: {snapshot.provenance['ross_version']}")
-    if snapshot.provenance["ross_studio_version"] != "0.18.0":
-        raise RuntimeError(f"ROSS Studio version drift: {snapshot.provenance['ross_studio_version']}")
+    if snapshot.provenance["ross_studio_version"] != __version__:
+        raise RuntimeError(
+            f"ROSS Studio version drift: snapshot={snapshot.provenance['ross_studio_version']}, package={__version__}"
+        )
 
     required_tables = {
         "node_map",
@@ -77,8 +78,6 @@ def main() -> int:
     if not any(key.startswith("modal_mode_") and key.endswith("_3d") for key in figures.keys):
         raise RuntimeError("Native modal 3D output is missing.")
 
-    # Exercise representative native ROSS figures from each currently qualified
-    # analysis family. The full GUI catalog exposes every solved modal 2D/3D shape.
     representative = (
         "rotor_model",
         "static_deformation",
