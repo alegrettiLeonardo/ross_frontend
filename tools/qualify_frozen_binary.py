@@ -6,6 +6,7 @@ import platform
 import subprocess
 import sys
 
+EXPECTED_ROSS_STUDIO_VERSION = "0.15.1"
 EXPECTED_EXECUTABLE = {
     "BearingElement",
     "BallBearingElement",
@@ -93,7 +94,7 @@ def main() -> int:
         "project file I/O",
     )
     assert io_payload["ross_version"] == "2.3.0", io_payload
-    assert io_payload["ross_studio_version"] == "0.14.2", io_payload
+    assert io_payload["ross_studio_version"] == EXPECTED_ROSS_STUDIO_VERSION, io_payload
     assert io_payload["irdin_sections"] == 15, io_payload
     assert io_payload["irdin_shaft_elements"] == 27, io_payload
     assert io_payload["irdin_bearings"] == 2, io_payload
@@ -117,7 +118,10 @@ def main() -> int:
         "GUI startup and model-builder smoke",
     )
     assert gui_payload["project"] == "OP-W60-500-60Hz-IC611-P3", gui_payload
-    assert gui_payload["view_modes"] == ["Engineering 2D", "ROSS Native"], gui_payload
+    # ROSS Studio 0.15 intentionally removed the duplicate Engineering 2D / ROSS
+    # Native selector. The production GUI smoke independently fails if view_combo
+    # reappears, so an empty view_modes list is the qualified 0.15 contract.
+    assert gui_payload["view_modes"] == [], gui_payload
     assert gui_payload["rotor_editor_count"] == 8, gui_payload
     assert gui_payload["bearing_station_count"] == 2, gui_payload
     assert gui_payload["bearing_direct_route"] is True, gui_payload
@@ -126,7 +130,9 @@ def main() -> int:
     assert set(gui_payload["general_executable"]) == EXPECTED_GENERAL, gui_payload
     assert set(gui_payload["thd_executable"]) == EXPECTED_THD, gui_payload
     assert gui_payload["amb_blocked"] == ["MagneticBearingElement"], gui_payload
-    assert {"ump", "probes", "shaft", "bearings"}.issubset(set(gui_payload["sidebar_routes"])), gui_payload
+    sidebar_routes = set(gui_payload["sidebar_routes"])
+    assert {"rotor", "ump", "probes", "bearings"}.issubset(sidebar_routes), gui_payload
+    assert "shaft" not in sidebar_routes, gui_payload
 
     model_builder = gui_payload["model_builder_014"]
     assert model_builder["status"] == "PASS", model_builder
