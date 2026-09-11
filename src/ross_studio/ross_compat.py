@@ -92,37 +92,102 @@ def _init_orbit_symmetric(ru_e: complex, rv_e: complex):
     )
 
 
-def install_ross_compatibility(ross_module: Any) -> tuple[RossCompatibilityNote, ...]:
-    """Install narrowly-scoped compatibility fixes required by the pinned ROSS.
+def _ucs_plot_mode_2d_230(
+    self,
+    critical_mode,
+    fig=None,
+    frequency_type="wd",
+    title=None,
+    length_units="m",
+    frequency_units="rad/s",
+    **kwargs,
+):
+    """ROSS 2.3 UCS 2D plot wrapper without the invalid ``length_units`` forwarding.
 
-    ROSS Studio 0.8 pins ``ross-rotordynamics==2.3.0``. That release's modal
-    post-processing can fail with current NumPy/Numba when an orbit's symmetric
-    eigenproblem is returned with complex dtype. Upstream ROSS subsequently changed
-    this calculation to a symmetric ``eigh`` formulation. We apply the equivalent
-    geometry-only fix at runtime for 2.3.0 so public ``run_modal``/``run_campbell``
-    remain usable while preserving the exact ROSS 2.3 numerical rotor solution.
+    ``UCSResults.plot_mode_2d`` in ROSS 2.3.0 accepts ``length_units`` and forwards it
+    to ``ModalResults.plot_mode_2d``. The latter has no ``length_units`` parameter, so
+    the value reaches ``Plotly.Figure.update_layout`` and raises ``ValueError`` for the
+    invalid layout property. This shim reproduces the upstream UCS critical-mode
+    selection exactly and calls the same native ``ModalResults.plot_mode_2d`` without
+    forwarding that unsupported keyword. It is post-processing only: no M/C/G/K,
+    eigenvalue, Campbell or UCS calculation is changed.
+
+    ROSS 2.3's underlying 2D modal plot is expressed in metres and has no conversion
+    hook. Reject non-metre requests rather than silently labelling unconverted data.
+    """
+    if str(length_units).strip().lower() not in {"m", "meter", "metre"}:
+        raise ValueError(
+            "ROSS 2.3 UCS plot_mode_2d cannot convert rotor length units. "
+            "Use length_units='m'; 3D UCS mode plots retain native unit conversion."
+        )
+
+    modal_critical = self.critical_points_modal[critical_mode]
+    forward_frequencies = modal_critical.wd[
+        modal_critical.whirl_direction() == "Forward"
+    ]
+    idx_forward = (np.abs(forward_frequencies - modal_critical.speed)).argmin()
+    forward_frequency = forward_frequencies[idx_forward]
+    idx = (np.abs(modal_critical.wd - forward_frequency)).argmin()
+    return modal_critical.plot_mode_2d(
+        idx,
+        fig=fig,
+        frequency_type=frequency_type,
+        title=title,
+        frequency_units=frequency_units,
+        **kwargs,
+    )
+
+
+def install_ross_compatibility(ross_module: Any) -> tuple[RossCompatibilityNote, ...]:
+    """Install narrowly-scoped post-processing fixes required by pinned ROSS 2.3.0.
+
+    The compatibility layer is intentionally limited to published-result plotting and
+    orbit geometry defects. It never alters rotor assembly, M/C/G/K matrices, forcing,
+    numerical integration, eigenvalues, eigenvectors, frequency response, HBM or UCS
+    solution data.
     """
     version = str(getattr(ross_module, "__version__", ""))
     if version != "2.3.0":
         return ()
 
     results = import_module("ross.results")
+    notes: list[RossCompatibilityNote] = []
+
     if getattr(results, "_ross_studio_orbit_compat_installed", False):
-        return (
+        notes.append(
             RossCompatibilityNote(
                 "ROSS_230_ORBIT_COMPAT",
                 "ROSS 2.3 orbit post-processing compatibility shim already active; rotor matrices and eigensolver are unchanged.",
-            ),
+            )
+        )
+    else:
+        results._init_orbit = _init_orbit_symmetric
+        results._ross_studio_orbit_compat_installed = True
+        notes.append(
+            RossCompatibilityNote(
+                "ROSS_230_ORBIT_COMPAT",
+                "Applied the symmetric-eigh orbit post-processing fix required by ROSS 2.3 with current NumPy/Numba. Only orbit geometry initialization is replaced; M/C/G/K assembly and the ROSS eigensolver are unchanged.",
+            )
         )
 
-    results._init_orbit = _init_orbit_symmetric
-    results._ross_studio_orbit_compat_installed = True
-    return (
-        RossCompatibilityNote(
-            "ROSS_230_ORBIT_COMPAT",
-            "Applied the symmetric-eigh orbit post-processing fix required by ROSS 2.3 with current NumPy/Numba. Only orbit geometry initialization is replaced; M/C/G/K assembly and the ROSS eigensolver are unchanged.",
-        ),
-    )
+    if getattr(results, "_ross_studio_ucs_2d_compat_installed", False):
+        notes.append(
+            RossCompatibilityNote(
+                "ROSS_230_UCS_2D_PLOT_COMPAT",
+                "ROSS 2.3 UCS 2D plotting compatibility shim already active; UCS and modal solution data are unchanged.",
+            )
+        )
+    else:
+        results.UCSResults.plot_mode_2d = _ucs_plot_mode_2d_230
+        results._ross_studio_ucs_2d_compat_installed = True
+        notes.append(
+            RossCompatibilityNote(
+                "ROSS_230_UCS_2D_PLOT_COMPAT",
+                "Removed ROSS 2.3's invalid length_units forwarding from UCSResults.plot_mode_2d. The native critical-mode selection and ModalResults plot are preserved; this changes plotting only.",
+            )
+        )
+
+    return tuple(notes)
 
 
 __all__ = [
