@@ -9,48 +9,14 @@ import sys
 from ross_studio import __version__ as EXPECTED_STUDIO_VERSION
 
 EXPECTED_EXECUTABLE = {
-    "BearingElement",
-    "BallBearingElement",
-    "RollerBearingElement",
-    "CylindricalBearing",
-    "PlainJournal",
-    "TiltingPad",
-    "SqueezeFilmDamper",
-    "ThrustPad",
+    "BearingElement", "BallBearingElement", "RollerBearingElement", "CylindricalBearing",
+    "PlainJournal", "TiltingPad", "SqueezeFilmDamper", "ThrustPad",
 }
-EXPECTED_GENERAL = {
-    "BearingElement",
-    "BallBearingElement",
-    "RollerBearingElement",
-    "CylindricalBearing",
-}
-EXPECTED_THD = {
-    "PlainJournal",
-    "TiltingPad",
-    "SqueezeFilmDamper",
-    "ThrustPad",
-}
+EXPECTED_GENERAL = {"BearingElement", "BallBearingElement", "RollerBearingElement", "CylindricalBearing"}
+EXPECTED_THD = {"PlainJournal", "TiltingPad", "SqueezeFilmDamper", "ThrustPad"}
 EXPECTED_MODEL_BUILDERS = {"disks", "seals", "couplings", "loads", "probes"}
-EXPECTED_TRANSACTION_KINDS = {
-    "distributed_mass",
-    "disk",
-    "point_mass",
-    "seal",
-    "coupling",
-    "load",
-    "probe",
-}
-EXPECTED_LEGACY_SIDEBAR_COMPAT = {
-    "rotor",
-    "disks",
-    "bearings",
-    "seals",
-    "supports",
-    "couplings",
-    "loads",
-    "ump",
-    "probes",
-}
+EXPECTED_TRANSACTION_KINDS = {"distributed_mass", "disk", "point_mass", "seal", "coupling", "load", "probe"}
+EXPECTED_LEGACY_SIDEBAR_COMPAT = {"rotor", "disks", "bearings", "seals", "supports", "couplings", "loads", "ump", "probes"}
 
 
 def executable_path(dist_root: Path) -> Path:
@@ -66,9 +32,7 @@ def _run_json_gate(exe: Path, args: list[str], output: Path, label: str) -> dict
         raise SystemExit(f"Frozen executable returned {proc.returncode} without producing {output} for {label}")
     payload = json.loads(output.read_text(encoding="utf-8"))
     if proc.returncode != 0 or payload.get("status") != "PASS":
-        raise SystemExit(
-            f"Frozen executable {label} failed:\n" + json.dumps(payload, indent=2, ensure_ascii=False)
-        )
+        raise SystemExit(f"Frozen executable {label} failed:\n" + json.dumps(payload, indent=2, ensure_ascii=False))
     if payload.get("frozen") is not True:
         raise SystemExit(f"{label} was not executed from a frozen runtime: {payload}")
     return payload
@@ -81,12 +45,7 @@ def main() -> int:
     if not exe.is_file():
         raise SystemExit(f"Frozen executable not found: {exe}")
 
-    self_payload = _run_json_gate(
-        exe,
-        ["--self-test", "--self-test-output"],
-        output,
-        "scientific self-test",
-    )
+    self_payload = _run_json_gate(exe, ["--self-test", "--self-test-output"], output, "scientific self-test")
     assert self_payload["ross_version"] == "2.3.0", self_payload
     assert self_payload["physical_sections"] == 15, self_payload
     assert self_payload["requested_base_elements"] == 15, self_payload
@@ -99,12 +58,7 @@ def main() -> int:
     assert self_payload["validation_errors"] == [], self_payload
 
     io_output = output.with_name(output.stem + "_project_io" + output.suffix)
-    io_payload = _run_json_gate(
-        exe,
-        ["--project-io-self-test", "--project-io-output"],
-        io_output,
-        "project file I/O",
-    )
+    io_payload = _run_json_gate(exe, ["--project-io-self-test", "--project-io-output"], io_output, "project file I/O")
     assert io_payload["ross_version"] == "2.3.0", io_payload
     assert io_payload["ross_studio_version"] == EXPECTED_STUDIO_VERSION, io_payload
     assert io_payload["irdin_sections"] == 15, io_payload
@@ -120,12 +74,7 @@ def main() -> int:
     assert io_payload["dyrobes_raw_vendor_gate"] == "WAITING_FOR_REPRESENTATIVE_FILES", io_payload
 
     gui_output = output.with_name(output.stem + "_gui" + output.suffix)
-    gui_payload = _run_json_gate(
-        exe,
-        ["--gui-smoke", "--gui-smoke-output"],
-        gui_output,
-        "GUI startup and model-builder smoke",
-    )
+    gui_payload = _run_json_gate(exe, ["--gui-smoke", "--gui-smoke-output"], gui_output, "GUI startup and model-builder smoke")
     assert gui_payload["project"] == "OP-W60-500-60Hz-IC611-P3", gui_payload
     assert gui_payload["view_modes"] == [], gui_payload
     assert gui_payload["rotor_editor_count"] == 8, gui_payload
@@ -157,9 +106,7 @@ def main() -> int:
 
     outputs_output = output.with_name(output.stem + "_engineering_outputs" + output.suffix)
     outputs_payload = _run_json_gate(
-        exe,
-        ["--engineering-outputs-self-test", "--engineering-outputs-output"],
-        outputs_output,
+        exe, ["--engineering-outputs-self-test", "--engineering-outputs-output"], outputs_output,
         "Engineering Outputs rich export runtime",
     )
     assert outputs_payload["ross_version"] == "2.3.0", outputs_payload
@@ -171,9 +118,7 @@ def main() -> int:
 
     decoupled_output = output.with_name(output.stem + "_static_modal_020" + output.suffix)
     decoupled_payload = _run_json_gate(
-        exe,
-        ["--static-modal-020-self-test", "--static-modal-020-output"],
-        decoupled_output,
+        exe, ["--static-modal-020-self-test", "--static-modal-020-output"], decoupled_output,
         "Static/Modal decoupled 0.20 runtime",
     )
     assert decoupled_payload["static_after_calls"] == {"build": 1, "static": 1, "modal": 0, "campbell": 0}, decoupled_payload
@@ -182,6 +127,21 @@ def main() -> int:
     assert decoupled_payload["static_unresolved_positions_mm"] == [], decoupled_payload
     assert decoupled_payload["modal_unresolved_positions_mm"] == [], decoupled_payload
     assert decoupled_payload["modal_mode_count"] > 0, decoupled_payload
+
+    tf_output = output.with_name(output.stem + "_time_frequency_021" + output.suffix)
+    tf_payload = _run_json_gate(
+        exe, ["--time-frequency-021-self-test", "--time-frequency-021-output"], tf_output,
+        "Time/Frequency native 0.21 runtime",
+    )
+    assert tf_payload["ross_version"] == "2.3.0", tf_payload
+    assert tf_payload["frequency_traces"] > 0, tf_payload
+    assert tf_payload["unbalance_traces"] > 0, tf_payload
+    assert tf_payload["time_traces"] > 0, tf_payload
+    assert tf_payload["hbm_traces"] > 0, tf_payload
+    assert tf_payload["ucs_traces"] > 0, tf_payload
+    assert tf_payload["clearance_traces"] > 0, tf_payload
+    assert tf_payload["clearance_rows"] == 2, tf_payload
+    assert tf_payload["scientific_recompute"] is False, tf_payload
 
     combined = {
         "status": "PASS",
@@ -193,6 +153,7 @@ def main() -> int:
         "gui": gui_payload,
         "engineering_outputs": outputs_payload,
         "static_modal_020": decoupled_payload,
+        "time_frequency_021": tf_payload,
     }
     print(json.dumps(combined, indent=2, ensure_ascii=False))
     return 0
