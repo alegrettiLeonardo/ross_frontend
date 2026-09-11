@@ -143,6 +143,24 @@ def main() -> int:
     assert tf_payload["clearance_rows"] == 2, tf_payload
     assert tf_payload["scientific_recompute"] is False, tf_payload
 
+    stochastic_output = output.with_name(output.stem + "_stochastic_022" + output.suffix)
+    stochastic_payload = _run_json_gate(
+        exe, ["--stochastic-022-self-test", "--stochastic-022-output"], stochastic_output,
+        "Native ROSS Stochastic 0.22 runtime",
+    )
+    assert stochastic_payload["ross_version"] == "2.3.0", stochastic_payload
+    assert stochastic_payload["sample_count"] == 2, stochastic_payload
+    assert stochastic_payload["native_st_rotor"] is True, stochastic_payload
+    assert stochastic_payload["sample_seed_reproducible"] is True, stochastic_payload
+    assert stochastic_payload["input_histogram_traces"] > 0, stochastic_payload
+    assert stochastic_payload["campbell_traces"] > 0, stochastic_payload
+    assert stochastic_payload["frequency_traces"] > 0, stochastic_payload
+    assert stochastic_payload["unbalance_traces"] > 0, stochastic_payload
+    assert stochastic_payload["time_1d_traces"] > 0, stochastic_payload
+    assert stochastic_payload["time_2d_traces"] > 0, stochastic_payload
+    assert stochastic_payload["time_3d_traces"] > 0, stochastic_payload
+    assert stochastic_payload["scientific_recompute"] is False, stochastic_payload
+
     combined = {
         "status": "PASS",
         "platform": platform.system(),
@@ -154,6 +172,7 @@ def main() -> int:
         "engineering_outputs": outputs_payload,
         "static_modal_020": decoupled_payload,
         "time_frequency_021": tf_payload,
+        "stochastic_022": stochastic_payload,
     }
     print(json.dumps(combined, indent=2, ensure_ascii=False))
     return 0

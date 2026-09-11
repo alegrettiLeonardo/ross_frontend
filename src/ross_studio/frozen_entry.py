@@ -127,6 +127,21 @@ def frozen_time_frequency_021_main(argv: list[str]) -> int:
         return 7
 
 
+def frozen_stochastic_022_main(argv: list[str]) -> int:
+    output_path = _option_value(argv, "--stochastic-022-output")
+    try:
+        from ross_studio.frozen_stochastic_022 import run_frozen_stochastic_022_test
+        result = run_frozen_stochastic_022_test()
+        payload: dict[str, object] = result.to_dict()
+        payload["executable"] = str(Path(sys.executable).resolve())
+        payload["frozen"] = bool(getattr(sys, "frozen", False))
+        _write_payload(output_path, payload)
+        return 0
+    except Exception as exc:
+        _write_payload(output_path, _failure_payload(exc))
+        return 8
+
+
 def main() -> int:
     argv = list(sys.argv[1:])
     if "--self-test" in argv or "--self-test-output" in argv:
@@ -141,6 +156,8 @@ def main() -> int:
         return frozen_static_modal_020_main(argv)
     if "--time-frequency-021-self-test" in argv or "--time-frequency-021-output" in argv:
         return frozen_time_frequency_021_main(argv)
+    if "--stochastic-022-self-test" in argv or "--stochastic-022-output" in argv:
+        return frozen_stochastic_022_main(argv)
 
     # Keep heavy Qt imports out of scientific and I/O packaging self-test bootstraps.
     from ross_studio.app import launch
