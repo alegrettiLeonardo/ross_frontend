@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""ROSS Studio 0.18 application composition root.
+"""ROSS Studio 0.19 application composition root.
 
 The qualified 0.15 scientific transaction logic remains in ``app_legacy`` while
-0.17 replaces flat navigation ownership with stable architecture routes. 0.18 adds
-Engineering Outputs as a local analysis-result capability; it does not introduce a
+0.17 owns hierarchical navigation, 0.18 adds local Engineering Outputs, and 0.19
+activates dedicated Static & Modal native ROSS workspaces without introducing a
 public/global Results route in the sidebar.
 """
 
@@ -24,21 +24,14 @@ from .pages.bearing_workspace_page import BearingStudioPage
 from .pages.engineering_results import EngineeringAnalysisResultsPage
 from .pages.project_home import ProjectHomePage
 from .pages.rotor_workspace import RotorModelPage
+from .pages.static_modal_workspace import StaticModalWorkspacePage
 from .theme import APP_STYLESHEET
 
-# Install the bounded landscape-A4 report composer before any GUI export is invoked.
-# This changes presentation only; the report still consumes the exact retained
-# EngineeringOutputsSnapshot and native ROSS image exports.
 install_engineering_report_export()
 
-# app_legacy resolves these module globals when a window/page is constructed or
-# refreshed. Redirect them to the qualified workspaces without duplicating solver logic.
 _legacy.BearingStudioPage = BearingStudioPage
 _legacy.RotorModelPage = RotorModelPage
 _legacy.AnalysisResultsPage = EngineeringAnalysisResultsPage
-
-# ProjectFileController imports the historical module paths lazily after Open/New.
-# Publish the same composition there so startup and file replacement cannot diverge.
 _bearing_base_module.BearingStudioPage = BearingStudioPage
 _rotor_base_module.RotorModelPage = RotorModelPage
 
@@ -46,11 +39,9 @@ TitleBar = _legacy.TitleBar
 
 
 class RossStudioWindow(_legacy.RossStudioWindow):
-    """0.18 shell with registry-driven navigation and local Engineering Outputs."""
+    """0.19 shell with native Static/Modal/Campbell analysis workspaces."""
 
     def __init__(self) -> None:
-        # ``app_legacy.__init__`` emits its initial navigation signal. Prepare the
-        # cache first so the overridden virtual _navigate() is safe during super().
         self._architecture_pages: dict[str, QWidget] = {}
         super().__init__()
 
@@ -67,9 +58,13 @@ class RossStudioWindow(_legacy.RossStudioWindow):
             page: QWidget = ProjectHomePage(self.project)
         elif spec.owner == "foundation":
             page = FoundationWorkspacePage(self.project)
+        elif route_id == "analysis.static_modal.lateral":
+            page = StaticModalWorkspacePage(self.project, mode_filter="Lateral")
+        elif route_id == "analysis.static_modal.torsional":
+            page = StaticModalWorkspacePage(self.project, mode_filter="Torsional")
         elif spec.owner == "analysis":
             page = AnalysisRoutePage(self.project, spec)
-        else:  # pragma: no cover - guarded by callers/page registry
+        else:
             raise ValueError(f"Route {route_id!r} does not own a standalone architecture page.")
         self.stack.addWidget(page)
         self._architecture_pages[route_id] = page
@@ -122,7 +117,9 @@ class RossStudioWindow(_legacy.RossStudioWindow):
             self.stack.setCurrentWidget(self._architecture_page(route))
             self.status.set_status(
                 spec.title,
-                "Dedicated route owner established" if spec.operational else spec.note,
+                "Native ROSS Static/Modal/Campbell workspace" if route.startswith("analysis.static_modal.") else (
+                    "Dedicated route owner established" if spec.operational else spec.note
+                ),
                 units=f"Scientific execution gate: {spec.implementation_phase}",
             )
             return
@@ -130,11 +127,8 @@ class RossStudioWindow(_legacy.RossStudioWindow):
         raise KeyError(route)
 
     def run_analysis(self) -> None:
-        """Preserve the qualified pipeline and expose its local Engineering Outputs."""
+        """Preserve the historical all-in-one qualification pipeline for compatibility."""
         super().run_analysis()
-        # The historical method activates the compatibility alias ``results``.
-        # There is intentionally no public global Results route in 0.18. Keep the
-        # real result page visible; its local Engineering Outputs button owns export.
         if self.results_page.result is not None:
             self.stack.setCurrentWidget(self.results_page)
 

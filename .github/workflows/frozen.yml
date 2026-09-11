@@ -6,6 +6,7 @@ on:
     branches:
       - feature/ross-architecture-0.17.0
       - feature/engineering-outputs-0.18.0
+      - feature/static-modal-native-0.19.0
   workflow_dispatch:
 
 jobs:
@@ -41,13 +42,13 @@ jobs:
       - name: Build production-style windowed executable
         run: python -m PyInstaller --clean --noconfirm packaging/ROSS-Studio.spec
 
-      - name: Qualify exact frozen binary including project I/O and Engineering Outputs
+      - name: Qualify exact frozen binary including project I/O, Engineering Outputs and native Static/Modal runtime
         run: python tools/qualify_frozen_binary.py dist artifacts/frozen_selftest_${{ runner.os }}.json
 
       - name: Upload frozen executable and qualification evidence
         uses: actions/upload-artifact@v4
         with:
-          name: ross-studio-0.18.0-${{ runner.os }}
+          name: ross-studio-0.19.0-${{ runner.os }}
           path: |
             dist/ROSS-Studio/
             artifacts/frozen_selftest_${{ runner.os }}.json

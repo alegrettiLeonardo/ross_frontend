@@ -15,6 +15,9 @@ class FrozenEngineeringOutputsResult:
     ross_version: str
     ross_studio_version: str
     native_ross_plot_traces: int
+    static_native_plot_traces: int
+    modal_native_plot_traces: int
+    modal_animation_frames: int
     png_bytes: int
     xlsx_bytes: int
     pdf_bytes: int
@@ -24,13 +27,7 @@ class FrozenEngineeringOutputsResult:
 
 
 def run_frozen_engineering_outputs_test() -> FrozenEngineeringOutputsResult:
-    """Exercise rich-export runtime dependencies from the exact frozen executable.
-
-    The normal CI gate validates the full OP-W60 Engineering Outputs pipeline. This
-    frozen gate is intentionally lightweight: it proves that the packaged executable
-    can create a native ROSS Plotly figure and that Kaleido/OpenPyXL/ReportLab runtime
-    resources survived PyInstaller collection on Windows and Linux.
-    """
+    """Exercise rich export plus 0.19 native Static/Modal Plotly runtime in frozen builds."""
 
     from openpyxl import Workbook
     from reportlab.lib.pagesizes import A4
@@ -41,6 +38,25 @@ def run_frozen_engineering_outputs_test() -> FrozenEngineeringOutputsResult:
     traces = len(getattr(figure, "data", ()))
     if traces <= 0:
         raise RuntimeError("Frozen native ROSS plot contains no traces.")
+
+    rotor6 = ross.rotor_example_6dof()
+    static = rotor6.run_static()
+    static_figure = static.plot_deformation()
+    static_traces = len(getattr(static_figure, "data", ()))
+    if static_traces <= 0:
+        raise RuntimeError("Frozen native ROSS StaticResults plot contains no traces.")
+
+    modal = rotor6.run_modal(100.0, num_modes=16)
+    shapes = tuple(modal.shapes)
+    torsional = [index for index, shape in enumerate(shapes) if shape.mode_type == "Torsional"]
+    mode = torsional[0] if torsional else 0
+    modal_figure = modal.plot_mode_3d(mode, animation=True)
+    modal_traces = len(getattr(modal_figure, "data", ()))
+    animation_frames = len(getattr(modal_figure, "frames", ()))
+    if modal_traces <= 0 or animation_frames <= 0:
+        raise RuntimeError(
+            f"Frozen native ROSS animated mode shape is incomplete: traces={modal_traces}, frames={animation_frames}."
+        )
 
     with tempfile.TemporaryDirectory(prefix="ross-studio-frozen-outputs-") as temp:
         root = Path(temp)
@@ -54,6 +70,9 @@ def run_frozen_engineering_outputs_test() -> FrozenEngineeringOutputsResult:
         sheet.append(["ROSS", ross.__version__])
         sheet.append(["ROSS Studio", __version__])
         sheet.append(["Native ROSS plot traces", traces])
+        sheet.append(["Static native plot traces", static_traces])
+        sheet.append(["Modal native plot traces", modal_traces])
+        sheet.append(["Modal animation frames", animation_frames])
         workbook.save(xlsx)
 
         pdf = root / "engineering_outputs.pdf"
@@ -72,6 +91,9 @@ def run_frozen_engineering_outputs_test() -> FrozenEngineeringOutputsResult:
             ross_version=ross.__version__,
             ross_studio_version=__version__,
             native_ross_plot_traces=traces,
+            static_native_plot_traces=static_traces,
+            modal_native_plot_traces=modal_traces,
+            modal_animation_frames=animation_frames,
             png_bytes=png.stat().st_size,
             xlsx_bytes=xlsx.stat().st_size,
             pdf_bytes=pdf.stat().st_size,

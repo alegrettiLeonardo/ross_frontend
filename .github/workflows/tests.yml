@@ -50,6 +50,8 @@ jobs:
         run: python tools/qualify_shaft_geometry_018.py
       - name: Qualify 0.17 navigation architecture and strict rotor baseline
         run: python tools/qualify_navigation_017.py
+      - name: Qualify Static & Modal Native Results 0.19
+        run: python tools/qualify_static_modal_native_019.py
       - name: Qualify Engineering Outputs 0.18 package
         run: python tools/qualify_engineering_outputs_018.py
       - name: Run production-resolution OP-W60 pipeline
@@ -79,6 +81,8 @@ jobs:
             artifacts/model_builder_014_qualification.json
             artifacts/shaft_geometry_018_qualification.json
             artifacts/navigation_017_qualification.json
+            artifacts/static_modal_native_019_qualification.json
+            artifacts/static_modal_native_019/**
             artifacts/engineering_outputs_018_qualification.json
             artifacts/engineering_outputs_018/**
             artifacts/op_w60_pipeline_summary.json
