@@ -81,7 +81,16 @@ def test_real_qt_thd_inline_calculate_preview_apply_strict_modal(qtbot, monkeypa
     assert calls == [("calculate", model)]
     assert result.source_model == model
     assert result.native_element.__class__.__name__ == model
-    assert result.metadata["engineering_input"] == entered
+    # The 0.15 Bearing Studio adds two explicit execution-contract fields at the
+    # UI/scientific boundary.  Keep the user's inline engineering inputs intact and
+    # prove that the qualified formulation/coordinate convention travel with them.
+    expected_engineering_input = dict(entered)
+    if model in {"PlainJournal", "TiltingPad"}:
+        expected_engineering_input.update({
+            "studio_analysis_formulation": "Dimensional · Heat Balance / THD",
+            "studio_coordinate_convention": "Standard Coordinates (X-Y)",
+        })
+    assert result.metadata["engineering_input"] == expected_engineering_input
     assert result.metadata["ross_api_contract"] == "2.3.0"
     assert result.metadata["solved_kc_cache"] == 1
     assert result.metadata["normalized_input"]["journal_diameter_m"] == pytest.approx(entered["journal_diameter_mm"] * 1e-3)
@@ -133,7 +142,7 @@ def test_real_qt_thd_inline_calculate_preview_apply_strict_modal(qtbot, monkeypa
     out.parent.mkdir(exist_ok=True)
     payload = json.loads(out.read_text()) if out.exists() else {}
     payload[model] = {
-        "status": "PASS", "ross_version": rs.__version__, "engineering_input": entered,
+        "status": "PASS", "ross_version": rs.__version__, "engineering_input": expected_engineering_input,
         "metadata": result.metadata, "speed_rpm": speeds, "application_class": spec.ross_class,
         "n_link": 28, "modal_wn_rad_s": modal.wn.tolist(),
         "convergence": [convergence(result, i) for i in range(len(speeds))],
