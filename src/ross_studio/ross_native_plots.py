@@ -98,6 +98,8 @@ class RossBearingNativePlotService:
     """
 
     THD_CLASSES = {"PlainJournal", "TiltingPad", "ThrustPad", "SqueezeFilmDamper"}
+    K_COEFFICIENTS = ("kxx", "kxy", "kyx", "kyy")
+    C_COEFFICIENTS = ("cxx", "cxy", "cyx", "cyy")
 
     EXTRA_DIMENSIONAL_PLOTS = (
         ("Bearing Representation", "plot_bearing_representation"),
@@ -122,23 +124,63 @@ class RossBearingNativePlotService:
     )
 
     def kc_figure(self, native_element: Any) -> Any | None:
-        """Return the native BearingElement K/C figure when ROSS exposes one."""
+        """Return native ROSS stiffness and damping curves in one hosted figure.
+
+        ROSS 2.3 ``BearingElement.plot`` does not accept ``coefficients=None`` even
+        though the signature makes the argument optional: it immediately iterates
+        over the value.  It also intentionally forbids mixing stiffness and damping
+        coefficients in a single call because they have different dimensions.
+
+        Studio therefore asks ROSS for two *native* figures, one for the four K
+        coefficients and one for the four C coefficients, then composes those exact
+        native traces into two stacked panels.  No coefficient interpolation,
+        sampling, unit conversion or curve reconstruction is performed by Studio;
+        all numerical traces remain owned by ROSS.
+        """
         _require_ross_230()
         if native_element is None:
             return None
         coefficient_plot = getattr(native_element, "plot", None)
         if not callable(coefficient_plot):
             return None
+
         try:
-            figure = _call_supported(
+            stiffness = _call_supported(
                 coefficient_plot,
+                coefficients=list(self.K_COEFFICIENTS),
                 frequency_units="RPM",
                 stiffness_units="N/m",
+            )
+            damping = _call_supported(
+                coefficient_plot,
+                coefficients=list(self.C_COEFFICIENTS),
+                frequency_units="RPM",
                 damping_units="N*s/m",
             )
         except Exception as exc:
             raise NativeRossPlotUnavailable(f"ROSS bearing coefficient plot failed: {exc}") from exc
-        return figure if figure is not None and hasattr(figure, "to_html") else None
+
+        if not (hasattr(stiffness, "to_html") and hasattr(damping, "to_html")):
+            return None
+
+        from plotly.subplots import make_subplots
+
+        figure = make_subplots(
+            rows=2,
+            cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.12,
+            subplot_titles=("Stiffness coefficients K", "Damping coefficients C"),
+        )
+        for trace in stiffness.data:
+            figure.add_trace(trace, row=1, col=1)
+        for trace in damping.data:
+            figure.add_trace(trace, row=2, col=1)
+        figure.update_yaxes(title_text="Stiffness (N/m)", exponentformat="power", row=1, col=1)
+        figure.update_yaxes(title_text="Damping (N·s/m)", exponentformat="power", row=2, col=1)
+        figure.update_xaxes(title_text="Frequency (RPM)", row=2, col=1)
+        figure.update_layout(title="ROSS native dynamic bearing coefficients", hovermode="x unified")
+        return figure
 
     def dimensional_outputs(self, native_element: Any, *, freq_index: int = 0) -> NativeFigureSet:
         """Return every qualified native dimensional output available for one THD bearing."""
