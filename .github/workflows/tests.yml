@@ -52,6 +52,10 @@ jobs:
         run: python tools/qualify_navigation_017.py
       - name: Qualify Static & Modal Native Results 0.19
         run: python tools/qualify_static_modal_native_019.py
+      - name: Qualify Static/Modal independent transactions 0.20
+        run: python tools/qualify_static_modal_decoupled_020.py
+      - name: Qualify native ROSS Time & Frequency outputs 0.21
+        run: python tools/qualify_time_frequency_native_021.py
       - name: Qualify Engineering Outputs 0.18 package
         run: python tools/qualify_engineering_outputs_018.py
       - name: Run production-resolution OP-W60 pipeline
@@ -83,6 +87,9 @@ jobs:
             artifacts/navigation_017_qualification.json
             artifacts/static_modal_native_019_qualification.json
             artifacts/static_modal_native_019/**
+            artifacts/static_modal_decoupled_020_qualification.json
+            artifacts/time_frequency_native_021_qualification.json
+            artifacts/time_frequency_native_021/**
             artifacts/engineering_outputs_018_qualification.json
             artifacts/engineering_outputs_018/**
             artifacts/op_w60_pipeline_summary.json

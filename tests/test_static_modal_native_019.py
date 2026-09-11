@@ -99,7 +99,7 @@ def test_static_modal_019_routes_are_operational_native_workspaces(qtbot, native
     project, result = native_result
     assert route_spec("analysis.static_modal.lateral").operational is True
     assert route_spec("analysis.static_modal.torsional").operational is True
-    assert route_spec("analysis.static_modal.lateral").implementation_phase == "0.19.0"
+    assert route_spec("analysis.static_modal.lateral").implementation_phase in {"0.19.0", "0.20.0"}
 
     window = RossStudioWindow()
     qtbot.addWidget(window)

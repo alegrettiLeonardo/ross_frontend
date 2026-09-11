@@ -41,17 +41,12 @@ class RossUnbalanceRun:
 
 
 class RossAnalysisBackend(RossBackend):
-    """ROSS execution adapter that reuses one strict Rotor build across analyses.
+    """ROSS execution boundary for qualified analysis transactions.
 
-    Engineering-domain values remain in their source units until this class crosses
-    into the ROSS API. Legacy iRdin [Desbal] values are preserved as g*mm and
-    converted to kg*m only immediately before the ROSS unbalance execution.
-
-    Imported RotorDin projects carry an explicit positive-rotation convention.
-    Linearized UMP is implemented as a separate electromagnetic negative-stiffness
-    contribution and is composed with either native ROSS or RotorDin-positive
-    rotation without modifying mass, damping, mechanical shaft stiffness or bearing
-    coefficients.
+    Engineering values stay in their source units until this class crosses into the
+    ROSS API. ROSS 2.3.0 remains the scientific owner of every solver and result
+    object. ROSS Studio only normalizes units, preserves exact-node traceability and
+    retains the native result objects for plotting/export.
     """
 
     def __init__(self, ross_module: Any | None = None) -> None:
@@ -117,6 +112,21 @@ class RossAnalysisBackend(RossBackend):
         return build.rotor.run_campbell(speed_range=speeds, frequencies=frequencies)
 
     @staticmethod
+    def run_frequency_response_build(
+        build: RossBuildResult,
+        frequency_rad_s: list[float] | np.ndarray,
+        *,
+        modes: list[int] | tuple[int, ...] | None = None,
+        free_free: bool = False,
+    ) -> Any:
+        frequency = np.asarray(frequency_rad_s, dtype=float)
+        return build.rotor.run_freq_response(
+            speed_range=frequency,
+            modes=None if modes is None else list(modes),
+            free_free=bool(free_free),
+        )
+
+    @staticmethod
     def _normalize_unbalance_kg_m(magnitude: float, source_unit: str) -> float:
         unit = str(source_unit).replace(" ", "").lower()
         factors = {
@@ -131,6 +141,12 @@ class RossAnalysisBackend(RossBackend):
         if unit not in factors:
             raise EngineeringError(f"Unsupported unbalance unit {source_unit!r} at the ROSS boundary.")
         return float(magnitude) * factors[unit]
+
+    @classmethod
+    def normalize_unbalance_kg_m(cls, magnitude: float, source_unit: str) -> float:
+        """Public unit-boundary helper reused by time/HBM/clearance transactions."""
+
+        return cls._normalize_unbalance_kg_m(magnitude, source_unit)
 
     @classmethod
     def run_unbalance_build(
@@ -160,6 +176,80 @@ class RossAnalysisBackend(RossBackend):
             frequency=frequency,
         )
         return RossUnbalanceRun(response=response, applied_inputs=applied)
+
+    @staticmethod
+    def run_time_response_build(
+        build: RossBuildResult,
+        speed_rad_s: float | np.ndarray,
+        force_time: np.ndarray,
+        time_s: np.ndarray,
+        *,
+        method: str = "default",
+        **kwargs: Any,
+    ) -> Any:
+        return build.rotor.run_time_response(
+            speed=speed_rad_s,
+            F=np.asarray(force_time, dtype=float),
+            t=np.asarray(time_s, dtype=float),
+            method=str(method),
+            **kwargs,
+        )
+
+    @staticmethod
+    def run_harmonic_balance_build(
+        build: RossBuildResult,
+        *,
+        speed_rad_s: float,
+        time_s: np.ndarray,
+        harmonic_forces: list[dict[str, Any]],
+        gravity: bool = False,
+        n_harmonics: int = 1,
+    ) -> Any:
+        return build.rotor.run_harmonic_balance_response(
+            speed=float(speed_rad_s),
+            t=np.asarray(time_s, dtype=float),
+            harmonic_forces=harmonic_forces,
+            gravity=bool(gravity),
+            n_harmonics=int(n_harmonics),
+        )
+
+    @staticmethod
+    def run_ucs_build(
+        build: RossBuildResult,
+        *,
+        stiffness_range: tuple[float, float] | None = None,
+        bearing_frequency_range: tuple[float, float] | None = None,
+        num_modes: int = 16,
+        num: int = 20,
+        synchronous: bool = False,
+    ) -> Any:
+        return build.rotor.run_ucs(
+            stiffness_range=stiffness_range,
+            bearing_frequency_range=bearing_frequency_range,
+            num_modes=int(num_modes),
+            num=int(num),
+            synchronous=bool(synchronous),
+        )
+
+    @staticmethod
+    def run_clearance_build(
+        build: RossBuildResult,
+        *,
+        speed_rad_s: float,
+        nodes: list[int],
+        magnitudes_kg_m: list[float],
+        phases_rad: list[float],
+        frequency_rad_s: np.ndarray | list[float] | None = None,
+        modes: list[int] | tuple[int, ...] | None = None,
+    ) -> Any:
+        return build.rotor.run_clearance_analysis(
+            speed=float(speed_rad_s),
+            node=list(nodes),
+            unbalance_magnitude=list(magnitudes_kg_m),
+            unbalance_phase=list(phases_rad),
+            frequency=None if frequency_rad_s is None else np.asarray(frequency_rad_s, dtype=float),
+            modes=None if modes is None else list(modes),
+        )
 
 
 __all__ = [
