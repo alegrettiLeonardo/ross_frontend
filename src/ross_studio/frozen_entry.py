@@ -101,6 +101,22 @@ def frozen_engineering_outputs_main(argv: list[str]) -> int:
         return 5
 
 
+def frozen_static_modal_020_main(argv: list[str]) -> int:
+    output_path = _option_value(argv, "--static-modal-020-output")
+    try:
+        from ross_studio.frozen_static_modal_020 import run_frozen_static_modal_020_test
+
+        result = run_frozen_static_modal_020_test()
+        payload: dict[str, object] = result.to_dict()
+        payload["executable"] = str(Path(sys.executable).resolve())
+        payload["frozen"] = bool(getattr(sys, "frozen", False))
+        _write_payload(output_path, payload)
+        return 0
+    except Exception as exc:
+        _write_payload(output_path, _failure_payload(exc))
+        return 6
+
+
 def main() -> int:
     argv = list(sys.argv[1:])
     if "--self-test" in argv or "--self-test-output" in argv:
@@ -111,6 +127,8 @@ def main() -> int:
         return frozen_gui_smoke_main(argv)
     if "--engineering-outputs-self-test" in argv or "--engineering-outputs-output" in argv:
         return frozen_engineering_outputs_main(argv)
+    if "--static-modal-020-self-test" in argv or "--static-modal-020-output" in argv:
+        return frozen_static_modal_020_main(argv)
 
     # Keep heavy Qt imports out of scientific and I/O packaging self-test bootstraps.
     # Normal desktop execution still enters the exact production application.

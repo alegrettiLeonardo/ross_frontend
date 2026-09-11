@@ -169,6 +169,20 @@ def main() -> int:
     assert outputs_payload["xlsx_bytes"] > 0, outputs_payload
     assert outputs_payload["pdf_bytes"] > 0, outputs_payload
 
+    decoupled_output = output.with_name(output.stem + "_static_modal_020" + output.suffix)
+    decoupled_payload = _run_json_gate(
+        exe,
+        ["--static-modal-020-self-test", "--static-modal-020-output"],
+        decoupled_output,
+        "Static/Modal decoupled 0.20 runtime",
+    )
+    assert decoupled_payload["static_after_calls"] == {"build": 1, "static": 1, "modal": 0, "campbell": 0}, decoupled_payload
+    assert decoupled_payload["final_calls"] == {"build": 2, "static": 1, "modal": 1, "campbell": 1}, decoupled_payload
+    assert decoupled_payload["independent_strict_builds"] is True, decoupled_payload
+    assert decoupled_payload["static_unresolved_positions_mm"] == [], decoupled_payload
+    assert decoupled_payload["modal_unresolved_positions_mm"] == [], decoupled_payload
+    assert decoupled_payload["modal_mode_count"] > 0, decoupled_payload
+
     combined = {
         "status": "PASS",
         "platform": platform.system(),
@@ -178,6 +192,7 @@ def main() -> int:
         "project_io": io_payload,
         "gui": gui_payload,
         "engineering_outputs": outputs_payload,
+        "static_modal_020": decoupled_payload,
     }
     print(json.dumps(combined, indent=2, ensure_ascii=False))
     return 0
