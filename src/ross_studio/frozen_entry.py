@@ -41,7 +41,6 @@ def frozen_self_test_main(argv: list[str]) -> int:
     output_path = _option_value(argv, "--self-test-output")
     try:
         from ross_studio.frozen_selftest import run_frozen_self_test
-
         result = run_frozen_self_test()
         payload: dict[str, object] = result.to_dict()
         payload["executable"] = str(Path(sys.executable).resolve())
@@ -57,7 +56,6 @@ def frozen_project_io_main(argv: list[str]) -> int:
     output_path = _option_value(argv, "--project-io-output")
     try:
         from ross_studio.frozen_project_io import run_frozen_project_io_test
-
         result = run_frozen_project_io_test()
         payload: dict[str, object] = result.to_dict()
         payload["executable"] = str(Path(sys.executable).resolve())
@@ -73,7 +71,6 @@ def frozen_gui_smoke_main(argv: list[str]) -> int:
     output_path = _option_value(argv, "--gui-smoke-output")
     try:
         from ross_studio.frozen_gui_smoke import run_frozen_gui_smoke
-
         result = run_frozen_gui_smoke()
         payload: dict[str, object] = result.to_dict()
         payload["executable"] = str(Path(sys.executable).resolve())
@@ -89,7 +86,6 @@ def frozen_engineering_outputs_main(argv: list[str]) -> int:
     output_path = _option_value(argv, "--engineering-outputs-output")
     try:
         from ross_studio.frozen_engineering_outputs import run_frozen_engineering_outputs_test
-
         result = run_frozen_engineering_outputs_test()
         payload: dict[str, object] = result.to_dict()
         payload["executable"] = str(Path(sys.executable).resolve())
@@ -105,7 +101,6 @@ def frozen_static_modal_020_main(argv: list[str]) -> int:
     output_path = _option_value(argv, "--static-modal-020-output")
     try:
         from ross_studio.frozen_static_modal_020 import run_frozen_static_modal_020_test
-
         result = run_frozen_static_modal_020_test()
         payload: dict[str, object] = result.to_dict()
         payload["executable"] = str(Path(sys.executable).resolve())
@@ -115,6 +110,21 @@ def frozen_static_modal_020_main(argv: list[str]) -> int:
     except Exception as exc:
         _write_payload(output_path, _failure_payload(exc))
         return 6
+
+
+def frozen_time_frequency_021_main(argv: list[str]) -> int:
+    output_path = _option_value(argv, "--time-frequency-021-output")
+    try:
+        from ross_studio.frozen_time_frequency_021 import run_frozen_time_frequency_021_test
+        result = run_frozen_time_frequency_021_test()
+        payload: dict[str, object] = result.to_dict()
+        payload["executable"] = str(Path(sys.executable).resolve())
+        payload["frozen"] = bool(getattr(sys, "frozen", False))
+        _write_payload(output_path, payload)
+        return 0
+    except Exception as exc:
+        _write_payload(output_path, _failure_payload(exc))
+        return 7
 
 
 def main() -> int:
@@ -129,11 +139,11 @@ def main() -> int:
         return frozen_engineering_outputs_main(argv)
     if "--static-modal-020-self-test" in argv or "--static-modal-020-output" in argv:
         return frozen_static_modal_020_main(argv)
+    if "--time-frequency-021-self-test" in argv or "--time-frequency-021-output" in argv:
+        return frozen_time_frequency_021_main(argv)
 
     # Keep heavy Qt imports out of scientific and I/O packaging self-test bootstraps.
-    # Normal desktop execution still enters the exact production application.
     from ross_studio.app import launch
-
     return int(launch())
 
 
