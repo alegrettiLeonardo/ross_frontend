@@ -65,7 +65,6 @@ def test_ball_bearing_calculation_matches_ross_element() -> None:
     applied = service.apply(project, 0, result)
     assert applied.ross_class == "BallBearingElement"
     assert applied.metadata["n_balls"] == 8
-    # Native BallBearingElement supports n_link, so OP-W60 flexible support remains valid.
     build = RossModelBuilder(rs).build(project, strict=True)
     assert build.rotor.bearing_elements[0].n_link == 28
 
@@ -106,8 +105,6 @@ def test_cylindrical_calculation_generates_finite_speed_dependent_kc() -> None:
     )
 
     assert result.source_model == "CylindricalBearing"
-    # OP-W60 bearing has a flexible support; the calculated hydrodynamic K/C is
-    # therefore applied via BearingElement because ROSS 2.3 CylindricalBearing has no n_link.
     assert result.application_class == "BearingElement"
     assert len(result.coefficients) == 4
     assert [p.rpm for p in result.coefficients] == [900.0, 1800.0, 3600.0, 4500.0]
@@ -134,24 +131,25 @@ def test_thd_and_amb_are_not_silently_enabled_by_general_service() -> None:
             service.calculate(project, 0, ross_class, {})
 
 
-def test_qt_bearing_studio_direct_kc_calculate_preview_apply(qtbot) -> None:
+def test_qt_bearing_studio_hides_direct_kc_as_calculation_model_but_preserves_imported_kc(qtbot) -> None:
+    """0.15 keeps BearingElement as persistence/application class, not a model tile."""
     pytest.importorskip("ross")
     from ross_studio.app import RossStudioWindow
 
     window = RossStudioWindow()
     qtbot.addWidget(window)
     window._open_bearing_group("General / Parametric")
-    assert window._selected_bearing_class() == "BearingElement"
-    original = deepcopy(window.project.engineering.bearings[0].coefficients)
+    assert "kc" not in window.bearing_page.type_buttons
+    assert window._bearing_key_for_class(window.bearing_page, "BearingElement") is None
 
-    window._calculate_bearing()
-    assert window.bearing_calculation is not None
-    assert window.bearing_calculation.source_model == "BearingElement"
-    assert window.bearing_page.apply_button.isEnabled()
-    assert len(window.bearing.coefficients) == len(original)
+    spec = window.project.engineering.bearings[0]
+    original = deepcopy(spec.coefficients)
+    assert spec.ross_class == "BearingElement"
+    assert original
 
-    window._apply_bearing()
-    assert window.bearing_calculation is None
+    # Imported/direct tables remain usable by the qualified scientific service and
+    # are not rewritten merely because the UI calculation surface was simplified.
+    result = window.bearing_service.calculate(window.project.engineering, 0, "BearingElement")
+    assert result.source_model == "BearingElement"
+    assert list(result.coefficients) == original
     assert window.project.engineering.bearings[0].coefficients == original
-    assert window.project.engineering.bearings[0].metadata["input_mode"] == "speed-dependent K/C table"
-    assert not window.bearing_page.apply_button.isEnabled()
