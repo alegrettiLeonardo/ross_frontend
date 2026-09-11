@@ -34,6 +34,33 @@ def _capture_console(callable_obj: Any, **kwargs: Any) -> str:
     return buffer.getvalue().strip()
 
 
+def _capture_native_shown_figures(callable_obj: Any, **kwargs: Any) -> tuple[Any, ...]:
+    """Capture figures that ROSS 2.3 creates internally and sends to ``Figure.show``.
+
+    ``BearingResults.show_optimization_convergence(show_plots=True)`` builds the
+    native Plotly figure inside ROSS, calls ``fig.show()`` and returns ``None``.
+    Reimplementing that graph in ROSS Studio would duplicate solver post-processing.
+    Instead, for the duration of this synchronous UI call only, intercept Plotly's
+    ``Figure.show`` and retain the exact native figures that ROSS produced.
+    """
+    from plotly import graph_objects as go
+
+    captured: list[Any] = []
+    original_show = go.Figure.show
+
+    def retain(figure, *args, **show_kwargs):
+        del args, show_kwargs
+        captured.append(figure)
+        return None
+
+    go.Figure.show = retain
+    try:
+        _call_supported(callable_obj, **kwargs)
+    finally:
+        go.Figure.show = original_show
+    return tuple(captured)
+
+
 def _append_figures(target: dict[str, Any], label: str, value: Any) -> None:
     """Normalize one ROSS Plotly figure, a mapping or a list of native figures."""
     if value is None:
@@ -66,13 +93,12 @@ class RossBearingNativePlotService:
     """Expose post-processing owned by the pinned ROSS BearingResults implementation.
 
     ROSS Studio does not recreate THD pressure/temperature/convergence semantics.
-    It hosts the Plotly figures returned by ROSS 2.3.0 and captures the formatted
-    ``show_*`` output produced by the same retained native bearing object.
+    It hosts the Plotly figures returned or displayed by ROSS 2.3.0 and captures
+    the formatted ``show_*`` output produced by the same retained native object.
     """
 
     THD_CLASSES = {"PlainJournal", "TiltingPad", "ThrustPad", "SqueezeFilmDamper"}
 
-    # Additional ROSS 2.3.0 plot methods that are not always included by plot_results().
     EXTRA_DIMENSIONAL_PLOTS = (
         ("Bearing Representation", "plot_bearing_representation"),
         ("Pressure Distribution", "plot_pressure_distribution"),
@@ -81,8 +107,8 @@ class RossBearingNativePlotService:
         ("Solid Pad Temperature", "plot_solid_pad_results"),
         ("Film Average Temperature", "plot_film_average_temperature"),
         ("Babbitt Surface Temperature", "plot_babbitt_surface_temperature"),
-        # Forward-compatible names are dynamically gated; they are ignored on 2.3
-        # when unavailable and never substitute application-side plots.
+        # Forward-compatible names are dynamically gated. They are used only if
+        # they exist on the pinned native object; no Studio-side substitute exists.
         ("Film Thickness", "plot_film_thickness_2d"),
         ("Pad Temperature 3D", "plot_pad_temperature_3d"),
         ("SFD Coefficients", "plot_coefficients"),
@@ -152,6 +178,25 @@ class RossBearingNativePlotService:
                 diagnostics.append(f"{method_name}: {type(exc).__name__}: {exc}")
                 continue
             _append_figures(figures, label, result)
+
+        # In ROSS 2.3 this method owns the convergence plot but calls fig.show()
+        # instead of returning the figure. Capture that exact native figure rather
+        # than recreating residual history in the Studio.
+        convergence_method = getattr(native_element, "show_optimization_convergence", None)
+        if callable(convergence_method):
+            try:
+                convergence_figures = _capture_native_shown_figures(
+                    convergence_method,
+                    show_plots=True,
+                    by="value",
+                )
+                _append_figures(figures, "Optimization Convergence", convergence_figures)
+            except (NotImplementedError, TypeError, ValueError, AttributeError) as exc:
+                diagnostics.append(f"show_optimization_convergence plot: {exc}")
+            except Exception as exc:
+                diagnostics.append(
+                    f"show_optimization_convergence plot: {type(exc).__name__}: {exc}"
+                )
 
         for label, method_name, kwargs in self.TEXT_OUTPUTS:
             method = getattr(native_element, method_name, None)
