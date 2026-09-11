@@ -75,7 +75,9 @@ def test_real_qt_thd_inline_calculate_preview_apply_strict_modal(qtbot, monkeypa
     entered = panel.values()
     qtbot.mouseClick(window.bearing_page.calculate_button, Qt.MouseButton.LeftButton)
     result = window.bearing_calculation
-    assert result is not None, window.status
+    assert result is not None, (
+        f"{window.status.message.text()} | {window.status.detail.text()} | calls={calls} | entered={entered}"
+    )
     assert calls == [("calculate", model)]
     assert result.source_model == model
     assert result.native_element.__class__.__name__ == model
