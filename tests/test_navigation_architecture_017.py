@@ -148,6 +148,7 @@ def test_home_foundation_and_analysis_have_dedicated_page_owners(qtbot) -> None:
     from ross_studio.app import RossStudioWindow
     from ross_studio.pages.architecture_workspaces import AnalysisRoutePage, FoundationWorkspacePage
     from ross_studio.pages.project_home import ProjectHomePage
+    from ross_studio.pages.stochastic_workspace import StochasticWorkspacePage
 
     window = RossStudioWindow()
     qtbot.addWidget(window)
@@ -170,8 +171,12 @@ def test_home_foundation_and_analysis_have_dedicated_page_owners(qtbot) -> None:
     ):
         window._navigate(route)
         page = window.stack.currentWidget()
-        assert isinstance(page, AnalysisRoutePage)
-        assert page.spec.route_id == route
+        if route == "analysis.stochastic":
+            assert isinstance(page, StochasticWorkspacePage)
+            assert route_spec(route).operational is True
+        else:
+            assert isinstance(page, AnalysisRoutePage)
+            assert page.spec.route_id == route
         assert page is not window.results_page
         analysis_pages.append(page)
     assert len({id(page) for page in analysis_pages}) == len(analysis_pages)
