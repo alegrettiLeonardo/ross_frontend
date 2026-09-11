@@ -57,6 +57,25 @@ def traces(fig) -> int:
     return len(getattr(fig, "data", ()))
 
 
+def _studio_version_tuple(version: str) -> tuple[int, int, int]:
+    """Return the numeric release core used by this historical feature gate.
+
+    The Time/Frequency 0.21 qualification is a regression gate and must keep
+    running in later ROSS Studio releases.  It therefore verifies that the
+    runtime is at least 0.21 instead of pinning the application forever to the
+    release in which the feature first shipped.
+    """
+    core = version.split("+", 1)[0].split("-", 1)[0]
+    parts = core.split(".")
+    try:
+        numbers = tuple(int(part) for part in parts[:3])
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid ROSS Studio version {version!r}.") from exc
+    if len(numbers) < 3:
+        numbers = numbers + (0,) * (3 - len(numbers))
+    return numbers
+
+
 def main() -> int:
     import ross
 
@@ -130,8 +149,11 @@ def main() -> int:
     }
     if payload["ross_version"] != "2.3.0":
         raise RuntimeError(f"0.21 is qualified only for ROSS 2.3.0; received {payload['ross_version']}.")
-    if payload["ross_studio_version"] != "0.21.0":
-        raise RuntimeError(f"Expected ROSS Studio 0.21.0; received {payload['ross_studio_version']}.")
+    if _studio_version_tuple(str(payload["ross_studio_version"])) < (0, 21, 0):
+        raise RuntimeError(
+            "The Time/Frequency 0.21 regression gate requires ROSS Studio >= 0.21.0; "
+            f"received {payload['ross_studio_version']}."
+        )
     if payload["scientific_recompute_from_plotting"]:
         raise RuntimeError("Native plot catalog unexpectedly reports scientific recomputation.")
 
