@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-"""ROSS Studio 0.21 application composition root.
+"""ROSS Studio 0.22 application composition root.
 
 The qualified 0.15 scientific transaction logic remains in ``app_legacy`` while
 0.17 owns hierarchical navigation, 0.18 adds local Engineering Outputs, 0.19 adds
-native Static/Modal plots, 0.20 decouples Static from Modal/Campbell, and 0.21 adds
-independent native ROSS Time & Frequency transactions without introducing a
-public/global Results route in the sidebar.
+native Static/Modal plots, 0.20 decouples Static from Modal/Campbell, 0.21 adds
+independent native ROSS Time & Frequency transactions, and 0.22 adds the native
+ROSS ``ross.stochastic`` ST_* workflow without introducing a public/global Results
+route in the sidebar.
 """
 
 import sys
@@ -26,6 +27,7 @@ from .pages.engineering_results import EngineeringAnalysisResultsPage
 from .pages.project_home import ProjectHomePage
 from .pages.rotor_workspace import RotorModelPage
 from .pages.static_modal_workspace import StaticModalWorkspacePage
+from .pages.stochastic_workspace import StochasticWorkspacePage
 from .pages.time_frequency_workspace import TimeFrequencyWorkspacePage
 from .theme import APP_STYLESHEET
 
@@ -41,7 +43,7 @@ TitleBar = _legacy.TitleBar
 
 
 class RossStudioWindow(_legacy.RossStudioWindow):
-    """0.21 shell with independent native ROSS analysis workspaces."""
+    """0.22 shell with independent deterministic and stochastic ROSS workspaces."""
 
     def __init__(self) -> None:
         self._architecture_pages: dict[str, QWidget] = {}
@@ -66,6 +68,8 @@ class RossStudioWindow(_legacy.RossStudioWindow):
             page = StaticModalWorkspacePage(self.project, mode_filter="Torsional")
         elif route_id == "analysis.time_frequency":
             page = TimeFrequencyWorkspacePage(self.project)
+        elif route_id == "analysis.stochastic":
+            page = StochasticWorkspacePage(self.project)
         elif spec.owner == "analysis":
             page = AnalysisRoutePage(self.project, spec)
         else:
@@ -125,6 +129,11 @@ class RossStudioWindow(_legacy.RossStudioWindow):
                 detail = (
                     "Independent native ROSS Frequency, Unbalance, Time, HBM, UCS and Clearance transactions "
                     "with per-analysis caches and plot-only post-processing"
+                )
+            elif route == "analysis.stochastic":
+                detail = (
+                    "Native ross.stochastic ST_* sampling with independent Campbell, Frequency Response, "
+                    "Unbalance Response and Time Response transactions; mean/percentile/confidence plots are post-processing"
                 )
             else:
                 detail = "Dedicated route owner established" if spec.operational else spec.note
