@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from ross_studio.domain import BearingSpec, DiskSpec, OperatingCase, RotorProject, ShaftSection
+from ross_studio.domain import BearingSpec, DiskSpec, EngineeringError, OperatingCase, RotorProject, ShaftSection
 from ross_studio.models import ProjectModel
 from ross_studio.page_registry import route_spec
 from ross_studio.stochastic_analysis import (
