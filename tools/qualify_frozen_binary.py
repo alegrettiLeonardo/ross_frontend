@@ -118,7 +118,10 @@ def main() -> int:
         "GUI startup and model-builder smoke",
     )
     assert gui_payload["project"] == "OP-W60-500-60Hz-IC611-P3", gui_payload
-    assert gui_payload["view_modes"] == ["Engineering 2D", "ROSS Native"], gui_payload
+    # ROSS Studio 0.15 intentionally removed the duplicate Engineering 2D / ROSS
+    # Native selector. The production GUI smoke independently fails if view_combo
+    # reappears, so an empty view_modes list is the qualified 0.15 contract.
+    assert gui_payload["view_modes"] == [], gui_payload
     assert gui_payload["rotor_editor_count"] == 8, gui_payload
     assert gui_payload["bearing_station_count"] == 2, gui_payload
     assert gui_payload["bearing_direct_route"] is True, gui_payload
