@@ -40,18 +40,18 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
         "model.supports.flexible", "rotor", editor_key="supports", title="Bearing / Flexible Supports"
     ),
     "model.supports.foundation": PageRouteSpec(
-        "model.supports.foundation", "foundation", title="Foundation", implementation_phase="0.24.0",
+        "model.supports.foundation", "foundation", title="Foundation", implementation_phase="0.19.0",
         operational=False,
-        note="Navigation/domain ownership is established; the Foundation 0.24 tranche adds the qualified K/C/M adapter.",
+        note="Architecture ownership was introduced in 0.19; the scientific Foundation K/C/M adapter remains a later tranche.",
     ),
     "model.couplings": PageRouteSpec("model.couplings", "rotor", editor_key="couplings", title="Couplings"),
     "model.loads.unbalance": PageRouteSpec(
-        "model.loads.unbalance", "rotor", editor_key="loads", title="Unbalance", implementation_phase="0.26.0",
+        "model.loads.unbalance", "rotor", editor_key="loads", title="Unbalance", implementation_phase="0.18.0",
         note="Qualified legacy LoadSpec editor retained pending typed load schemas.",
     ),
     "model.loads.harmonic": PageRouteSpec(
         "model.loads.harmonic", "rotor", editor_key="loads", title="Harmonic / External Force",
-        implementation_phase="0.26.0", note="Routes to the existing load workspace without inventing a new force model.",
+        implementation_phase="0.18.0", note="Routes to the existing qualified load workspace without inventing a new force model.",
     ),
     "model.loads.electromagnetic": PageRouteSpec(
         "model.loads.electromagnetic", "rotor", editor_key="ump", title="Electromagnetic / UMP",

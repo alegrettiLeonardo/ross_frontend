@@ -29,12 +29,12 @@ class MultiRotorBuildResult:
 
 
 class MultiRotorBuilder:
-    """Build native ROSS ``MultiRotor`` objects from independent strict rotors.
+    """Build native ROSS 2.3 ``MultiRotor`` objects from strict rotors.
 
-    No gear field is added to ``RotorProject``. Each single-rotor project first
-    passes the existing strict ``RossModelBuilder`` gate; only then are native
-    ``GearElement``/``GearElementTVMS`` objects added and the rotors nested with
-    ROSS ``MultiRotor``. Gear placement is exact-node only.
+    Each single rotor is first created by the already-qualified strict builder.
+    Gear placement is exact-node only. The adapter intentionally follows the
+    public v2.3.0 ``MultiRotor`` constructor rather than unreleased/newer source
+    parameters; unsupported backlash requests are blocked instead of discarded.
     """
 
     def __init__(self, rotor_builder: RossModelBuilder | None = None, ross_module: Any | None = None) -> None:
@@ -45,7 +45,6 @@ class MultiRotorBuilder:
         if self._ross_module is not None:
             return self._ross_module
         import ross as rs
-
         return rs
 
     @staticmethod
@@ -96,6 +95,8 @@ class MultiRotorBuilder:
             return rs.GearElement(**kwargs)
 
         if spec.model == GearModel.TVMS:
+            if not hasattr(rs, "GearElementTVMS"):
+                raise EngineeringError("Pinned ROSS runtime does not expose GearElementTVMS; TVMS is blocked.")
             return rs.GearElementTVMS(
                 n=node,
                 material=self._material(project, spec.material_name),
@@ -114,9 +115,6 @@ class MultiRotorBuilder:
     def _rotor_with_gears(self, project, build: RossBuildResult, gears: list[tuple[int, GearSpec]]):
         rs = self._ross()
         rotor = build.rotor
-        # Reconstructing an unknown Rotor subclass could silently drop custom
-        # stiffness/force physics (for example a future extension). Block such
-        # cases until that subclass has an explicit gear-preserving adapter.
         if rotor.__class__ is not rs.Rotor:
             raise EngineeringError(
                 f"MultiRotor 0.23 cannot safely insert GearElement into custom rotor class "
@@ -139,20 +137,19 @@ class MultiRotorBuilder:
 
     @staticmethod
     def _connection_kwargs(connection: GearConnection) -> dict[str, Any]:
+        # Public ROSS 2.3.0 signature:
+        # gear_mesh_stiffness, update_mesh_stiffness, square_varying_stiffness,
+        # square_stiffness_amplitude_ratio, orientation_angle, position, tag.
+        if connection.backlash_enable or connection.backlash_initial_value_m or connection.backlash_error_amp_m:
+            raise EngineeringError(
+                "Backlash/mesh-error dynamics are not exposed by the pinned public ROSS 2.3.0 MultiRotor constructor; "
+                "the request is blocked rather than silently ignored."
+            )
         return {
             "gear_mesh_stiffness": connection.gear_mesh_stiffness,
             "update_mesh_stiffness": connection.update_mesh_stiffness,
-            "square_varying_stiffness": {
-                "enable": connection.square_varying_stiffness_enable,
-                "amplitude_ratio": connection.square_varying_stiffness_amplitude_ratio,
-            },
-            "backlash": {
-                "enable": connection.backlash_enable,
-                "initial_value": connection.backlash_initial_value_m,
-                "error_amp": connection.backlash_error_amp_m,
-                "smooth_operator": connection.backlash_smooth_operator,
-                "sigma": connection.backlash_sigma,
-            },
+            "square_varying_stiffness": connection.square_varying_stiffness_enable,
+            "square_stiffness_amplitude_ratio": connection.square_varying_stiffness_amplitude_ratio,
             "orientation_angle": connection.orientation_angle_deg * pi / 180.0,
             "position": connection.position,
         }
@@ -189,13 +186,8 @@ class MultiRotorBuilder:
         audits: list[str] = []
 
         for order, connection in enumerate(project.connections):
-            if order == 0:
-                driving_local_node = gear_local_nodes[connection.driving_gear_index]
-                driving_global_node = driving_local_node
-            else:
-                driving_local_node = gear_local_nodes[connection.driving_gear_index]
-                driving_global_node = node_map[(connection.driving_rotor_index, driving_local_node)]
-
+            driving_local_node = gear_local_nodes[connection.driving_gear_index]
+            driving_global_node = driving_local_node if order == 0 else node_map[(connection.driving_rotor_index, driving_local_node)]
             driven_rotor = native_rotors[connection.driven_rotor_index]
             driven_local_node = gear_local_nodes[connection.driven_gear_index]
             before_driven_nodes = list(driven_rotor.nodes)
@@ -207,13 +199,6 @@ class MultiRotorBuilder:
                 tag=project.name if order == len(project.connections) - 1 else f"{project.name} / stage {order + 1}",
                 **self._connection_kwargs(connection),
             )
-            # ROSS renumbers a newly driven rotor and clears element tags. Nested
-            # MultiRotor uses the target gear tag again in the next coupling stage,
-            # so restore a deterministic tag on every native gear before nesting.
-            for disk in aggregate.disk_elements:
-                if isinstance(disk, (rs.GearElement, rs.GearElementTVMS)) and disk.tag is None:
-                    disk.tag = f"MultiRotor Gear @ node {disk.n}"
-
             ratios.append(float(aggregate.mesh.gear_ratio))
             attached.add(connection.driven_rotor_index)
             node_map.update(
@@ -228,7 +213,7 @@ class MultiRotorBuilder:
                 f"driven_local_node={driven_local_node}; gear_ratio={aggregate.mesh.gear_ratio:.12g}"
             )
 
-        if attached != set(range(len(project.rotors))):  # pragma: no cover - domain validation already guards
+        if attached != set(range(len(project.rotors))):
             raise EngineeringError("Nested MultiRotor assembly did not attach every rotor.")
 
         return MultiRotorBuildResult(
