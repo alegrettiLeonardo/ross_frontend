@@ -1,0 +1,32 @@
+name: Bootstrap native ROSS completion 0.30
+
+on:
+  push:
+    branches:
+      - feature/ross-native-completion-030
+    paths:
+      - tools/bootstrap_ross_native_completion_030.py
+      - .github/workflows/bootstrap-native-completion-030.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply repository-wide native ROSS patch
+        run: python tools/bootstrap_ross_native_completion_030.py
+      - name: Compile patched sources before commit
+        run: python -m compileall -q src tests tools
+      - name: Commit generated implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "ROSS Studio 0.30 - native ROSS completion"
+          git push origin HEAD:feature/ross-native-completion-030
