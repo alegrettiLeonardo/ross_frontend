@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Full-suite gate: tests.yml qualifies the complete 0.30 branch HEAD before PR creation.
+
 import inspect
 import numpy as np
 import ross as rs
