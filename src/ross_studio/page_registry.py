@@ -6,7 +6,7 @@ from typing import Literal
 from .navigation_registry import public_routes
 
 
-PageOwner = Literal["home", "rotor", "bearing", "foundation", "analysis"]
+PageOwner = Literal["home", "rotor", "bearing", "foundation", "seal", "analysis"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,9 +33,15 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
     ),
     "model.bearings.amb": PageRouteSpec(
         "model.bearings.amb", "bearing", bearing_group="AMB", title="Active Magnetic Bearings", operational=False,
-        note="Blocked until the AMB actuator/sensor/controller/Newmark feedback contract is qualified.",
+        note="Blocked until the AMB controller/sensor/Newmark contract is qualified in its planned tranche.",
     ),
-    "model.seals": PageRouteSpec("model.seals", "rotor", editor_key="seals", title="Seals"),
+    "model.seals": PageRouteSpec(
+        "model.seals", "seal", title="Seal Studio", implementation_phase="0.25.0", operational=False,
+        note=(
+            "Seal Studio 0.25 integrates native ROSS SealElement, LabyrinthSeal, HolePatternSeal and HybridSeal with "
+            "Calculate → Preview → Apply. The route remains release-locked until same-HEAD tests plus Linux/Windows frozen gates pass."
+        ),
+    ),
     "model.supports.flexible": PageRouteSpec(
         "model.supports.flexible", "rotor", editor_key="supports", title="Bearing / Flexible Supports"
     ),
