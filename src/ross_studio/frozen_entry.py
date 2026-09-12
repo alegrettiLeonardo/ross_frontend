@@ -50,10 +50,9 @@ def _run_callable(
 ) -> int:
     """Execute one frozen qualification with a statically discoverable runner.
 
-    The caller imports the runner explicitly.  This is deliberate: PyInstaller
-    cannot reliably discover the previous string-based ``__import__`` calls,
-    which allowed the executable to build successfully while omitting the
-    qualification modules themselves.
+    The caller imports the runner explicitly. This is deliberate: PyInstaller
+    cannot reliably discover string-based dynamic imports, which can allow an
+    executable to build while omitting its qualification module.
     """
 
     output_path = _option_value(argv, output_flag)
@@ -142,6 +141,17 @@ def frozen_multirotor_023_main(argv: list[str]) -> int:
     )
 
 
+def frozen_foundation_024_main(argv: list[str]) -> int:
+    from ross_studio.frozen_foundation_024 import run_frozen_foundation_024_test
+
+    return _run_callable(
+        argv,
+        "--foundation-024-output",
+        run_frozen_foundation_024_test,
+        10,
+    )
+
+
 def main() -> int:
     argv = list(sys.argv[1:])
     if "--self-test" in argv or "--self-test-output" in argv:
@@ -160,6 +170,8 @@ def main() -> int:
         return frozen_stochastic_022_main(argv)
     if "--multirotor-023-self-test" in argv or "--multirotor-023-output" in argv:
         return frozen_multirotor_023_main(argv)
+    if "--foundation-024-self-test" in argv or "--foundation-024-output" in argv:
+        return frozen_foundation_024_main(argv)
 
     from ross_studio.app import launch
 
