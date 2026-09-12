@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-"""ROSS Studio 0.23 application composition root.
+"""ROSS Studio 0.24 application composition root.
 
 The qualified 0.15 scientific transaction logic remains in ``app_legacy`` while
 0.17 owns hierarchical navigation, 0.18 adds local Engineering Outputs, 0.19 adds
 native Static/Modal plots, 0.20 decouples Static from Modal/Campbell, 0.21 adds
 independent native ROSS Time & Frequency transactions, 0.22 adds native
-``ross.stochastic`` ST_* workflows, and 0.23 adds native ROSS ``MultiRotor``
-without introducing a public/global Results route in the sidebar.
+``ross.stochastic`` ST_* workflows, 0.23 adds native ROSS ``MultiRotor`` and 0.24
+adds the editable Foundation Studio without introducing a public/global Results route.
 """
 
 import sys
@@ -21,9 +21,10 @@ from .navigation_registry import canonical_route
 from .page_registry import route_spec
 from .pages import bearing_studio as _bearing_base_module
 from .pages import rotor_model as _rotor_base_module
-from .pages.architecture_workspaces import AnalysisRoutePage, FoundationWorkspacePage
+from .pages.architecture_workspaces import AnalysisRoutePage
 from .pages.bearing_workspace_page import BearingStudioPage
 from .pages.engineering_results import EngineeringAnalysisResultsPage
+from .pages.foundation_workspace import FoundationWorkspacePage
 from .pages.multirotor_workspace import MultiRotorWorkspacePage
 from .pages.project_home import ProjectHomePage
 from .pages.rotor_workspace import RotorModelPage
@@ -44,7 +45,7 @@ TitleBar = _legacy.TitleBar
 
 
 class RossStudioWindow(_legacy.RossStudioWindow):
-    """0.23 shell with deterministic, stochastic and MultiRotor workspaces."""
+    """0.24 shell with deterministic, stochastic, MultiRotor and Foundation workspaces."""
 
     def __init__(self) -> None:
         self._architecture_pages: dict[str, QWidget] = {}
@@ -126,7 +127,12 @@ class RossStudioWindow(_legacy.RossStudioWindow):
 
         if spec.owner in {"foundation", "analysis"}:
             self.stack.setCurrentWidget(self._architecture_page(route))
-            if route.startswith("analysis.static_modal."):
+            if route == "model.supports.foundation":
+                detail = (
+                    "Editable Foundation Studio 0.24 · strict support ownership · 2-DOF Rigid, lumped K/C, "
+                    "lumped K/C/M and frequency-dependent K/C contracts"
+                )
+            elif route.startswith("analysis.static_modal."):
                 detail = "Independent native ROSS Static and Modal/Campbell transactions with separate caches"
             elif route == "analysis.time_frequency":
                 detail = (
