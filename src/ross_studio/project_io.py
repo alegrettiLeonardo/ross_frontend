@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime
 from enum import Enum
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .domain import (
+    AdapterStatus,
     BearingCoefficientPoint,
     BearingGroup,
     BearingSpec,
@@ -34,7 +36,8 @@ from .domain import (
 from .models import ProjectModel
 
 FORMAT_NAME = "ROSS Studio Project"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_SUPPORTED_SCHEMA_VERSIONS = (1, SCHEMA_VERSION)
 NATIVE_EXTENSION = ".rossproj"
 
 
@@ -84,6 +87,22 @@ def _project_payload(model: ProjectModel) -> dict[str, Any]:
         },
         "engineering": engineering,
     }
+
+
+def _migrate_payload(payload: dict[str, Any], schema: int) -> dict[str, Any]:
+    """Migrate older native projects without inventing physical foundation data.
+
+    Schema 1 predates Foundation Studio. Its exact semantic migration is therefore an
+    empty ``foundations`` collection. Existing supports remain supports; they are never
+    silently reclassified as foundations.
+    """
+    migrated = deepcopy(payload)
+    if schema == 1:
+        engineering = migrated.get("engineering")
+        if isinstance(engineering, dict):
+            engineering.setdefault("foundations", [])
+        migrated["schema_version"] = SCHEMA_VERSION
+    return migrated
 
 
 def project_fingerprint(model: ProjectModel) -> str:
@@ -150,8 +169,6 @@ def _foundation(row: dict[str, Any]) -> FoundationSpec:
     data = dict(row)
     data["model_type"] = FoundationModel(data.get("model_type", FoundationModel.RIGID.value))
     data["coefficients"] = [_foundation_point(point) for point in data.get("coefficients", [])]
-    from .domain import AdapterStatus
-
     data["status"] = AdapterStatus(data.get("status", AdapterStatus.VALIDATED.value))
     return FoundationSpec(**data)
 
@@ -220,11 +237,15 @@ def load_project(path: str | Path) -> ProjectModel:
         raise ProjectFormatError(f"Cannot read ROSS Studio project {source}: {exc}") from exc
     if not isinstance(payload, dict) or payload.get("format") != FORMAT_NAME:
         raise ProjectFormatError(f"{source.name} is not a {FORMAT_NAME} file.")
+
     schema = payload.get("schema_version")
-    if schema != SCHEMA_VERSION:
+    if isinstance(schema, bool) or not isinstance(schema, int) or schema not in _SUPPORTED_SCHEMA_VERSIONS:
+        supported = ", ".join(str(value) for value in _SUPPORTED_SCHEMA_VERSIONS)
         raise ProjectFormatError(
-            f"Unsupported ROSS Studio project schema {schema!r}; supported schema is {SCHEMA_VERSION}."
+            f"Unsupported ROSS Studio project schema {schema!r}; supported schemas are {supported}."
         )
+    payload = _migrate_payload(payload, schema)
+
     meta = payload.get("project_meta") or {}
     raw_engineering = payload.get("engineering")
     if raw_engineering is None:
