@@ -16,6 +16,9 @@ from .domain import (
     CouplingSpec,
     DiskSpec,
     DistributedMassSpec,
+    FoundationCoefficientPoint,
+    FoundationModel,
+    FoundationSpec,
     LateralConvention,
     LoadSpec,
     MaterialSpec,
@@ -72,7 +75,7 @@ def _project_payload(model: ProjectModel) -> dict[str, Any]:
     return {
         "format": FORMAT_NAME,
         "schema_version": SCHEMA_VERSION,
-        "app_version": "0.14.2",
+        "app_version": "0.24.0",
         "project_meta": {
             "name": model.name,
             "description": model.description,
@@ -139,6 +142,20 @@ def _support(row: dict[str, Any]) -> SupportSpec:
     return SupportSpec(**row)
 
 
+def _foundation_point(row: dict[str, Any]) -> FoundationCoefficientPoint:
+    return FoundationCoefficientPoint(**row)
+
+
+def _foundation(row: dict[str, Any]) -> FoundationSpec:
+    data = dict(row)
+    data["model_type"] = FoundationModel(data.get("model_type", FoundationModel.RIGID.value))
+    data["coefficients"] = [_foundation_point(point) for point in data.get("coefficients", [])]
+    from .domain import AdapterStatus
+
+    data["status"] = AdapterStatus(data.get("status", AdapterStatus.VALIDATED.value))
+    return FoundationSpec(**data)
+
+
 def _seal(row: dict[str, Any]) -> SealSpec:
     return SealSpec(**row)
 
@@ -177,6 +194,7 @@ def _decode_engineering(data: dict[str, Any]) -> RotorProject:
             point_masses=[_point_mass(row) for row in data.get("point_masses", [])],
             disks=[_disk(row) for row in data.get("disks", [])],
             supports=[_support(row) for row in data.get("supports", [])],
+            foundations=[_foundation(row) for row in data.get("foundations", [])],
             seals=[_seal(row) for row in data.get("seals", [])],
             couplings=[_coupling(row) for row in data.get("couplings", [])],
             loads=[_load(row) for row in data.get("loads", [])],
