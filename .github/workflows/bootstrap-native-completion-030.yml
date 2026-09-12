@@ -30,3 +30,5 @@ jobs:
           git add -A
           git commit -m "ROSS Studio 0.30 - native ROSS completion"
           git push origin HEAD:feature/ross-native-completion-030
+
+# retry: Foundation gate label aligned with main CI
