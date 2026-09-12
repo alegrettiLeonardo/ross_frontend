@@ -21,8 +21,9 @@ EXPECTED_EXECUTABLE_CLASSES = {
     "TiltingPad",
     "SqueezeFilmDamper",
     "ThrustPad",
+    "MagneticBearingElement",
 }
-EXPECTED_BLOCKED_CLASSES = {"MagneticBearingElement"}
+EXPECTED_BLOCKED_CLASSES: set[str] = set()
 
 
 @dataclass(slots=True, frozen=True)
@@ -101,6 +102,9 @@ def run_frozen_self_test(ross_module: Any | None = None) -> FrozenSelfTestResult
         status, reason = catalog.registry.effective_status(ross_class)
         if status != AdapterStatus.VALIDATED:
             raise RuntimeError(f"{ross_class} is not VALIDATED in frozen runtime: {status.value}. {reason}")
+
+    from .amb_qualification import qualify_amb_assembly
+    qualify_amb_assembly(rs)
 
     built = RossModelBuilder(rs).build(project, strict=True)
     if built.unresolved_positions_mm:

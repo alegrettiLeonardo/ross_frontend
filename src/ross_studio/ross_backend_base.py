@@ -282,11 +282,11 @@ class RossModelBuilder:
         return rs.BearingElement(
             **common,
             kxx=spec.kxx,
-            kyy=spec.kyy or spec.kxx,
+            kyy=spec.kyy,
             kxy=spec.kxy,
             kyx=spec.kyx,
             cxx=spec.cxx,
-            cyy=spec.cyy or spec.cxx,
+            cyy=spec.cyy,
             cxy=spec.cxy,
             cyx=spec.cyx,
         )
@@ -366,11 +366,11 @@ class RossModelBuilder:
                     rs.BearingElement(
                         n=link_node,
                         kxx=support.kxx,
-                        kyy=support.kyy or support.kxx,
+                        kyy=support.kyy,
                         kxy=support.kxy,
                         kyx=support.kyx,
                         cxx=support.cxx,
-                        cyy=support.cyy or support.cxx,
+                        cyy=support.cyy,
                         cxy=support.cxy,
                         cyx=support.cyx,
                         tag=f"{support.name} / ground",

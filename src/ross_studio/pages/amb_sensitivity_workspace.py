@@ -7,6 +7,8 @@ from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, 
 
 from ..amb_analysis import AMBSensitivityRequest, AMBSensitivityService
 from ..models import ProjectModel
+from ..project_io import project_fingerprint
+from ..result_validity import ResultValidityGuard
 from ..plotly_native_view import NativeRossFigureView
 from ..widgets import SectionCard
 
@@ -81,6 +83,18 @@ class AMBSensitivityWorkspace(QWidget):
         root.addWidget(self.bode, 2)
         root.addWidget(self.time, 2)
         self.run_button.clicked.connect(self._run)
+        self.validity_guard = ResultValidityGuard(self, self._invalidate)
+        self._request_revision = 0
+        self._running_revision = None
+        for box in (self.speed, self.tmax, self.dt, self.amp, self.fmin, self.fmax):
+            box.valueChanged.connect(self._invalidate)
+
+    def _invalidate(self, *_args):
+        self._request_revision += 1
+        self.result = None
+        self.state.setText("Result invalidated: model or inputs changed; run again.")
+        self.bode.set_unavailable("Result invalidated; run again.")
+        self.time.set_unavailable("Result invalidated; run again.")
 
     @staticmethod
     def _box(value, minimum, maximum, decimals):
@@ -105,6 +119,7 @@ class AMBSensitivityWorkspace(QWidget):
         except Exception as exc:
             self.state.setText(f"Input rejected: {exc}")
             return
+        self._running_revision = (project_fingerprint(self.project), self._request_revision)
         self.run_button.setEnabled(False)
         self.state.setText("Running native ROSS AMB sensitivity...")
         self.thread = QThread(self)
@@ -120,6 +135,9 @@ class AMBSensitivityWorkspace(QWidget):
 
     @Slot(object)
     def _success(self, result) -> None:
+        if self._running_revision != (project_fingerprint(self.project), self._request_revision):
+            self._invalidate()
+            return
         self.result = result
         peaks = []
         for tag, axes in getattr(result.native, "max_abs_sensitivities", {}).items():
@@ -137,6 +155,7 @@ class AMBSensitivityWorkspace(QWidget):
 
     @Slot(str)
     def _failure(self, message: str) -> None:
+        self.result = None
         self.state.setText(f"AMB sensitivity failed: {message}")
         self.bode.set_unavailable(message)
         self.time.set_unavailable(message)

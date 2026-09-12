@@ -57,6 +57,7 @@ from ..time_frequency_native import (
 )
 from ..widgets import Card, SectionCard
 from .architecture_workspaces import AnalysisRoutePage
+from ..result_validity import ResultValidityGuard
 from .faults_workspace import FaultsWorkspace
 from .amb_sensitivity_workspace import AMBSensitivityWorkspace
 
@@ -159,6 +160,7 @@ class TimeFrequencyWorkspacePage(AnalysisRoutePage):
         self.tabs.addTab(self._clearance_tab(), "Clearance")
         self.tabs.addTab(FaultsWorkspace(self.project), "Faults")
         self.tabs.addTab(AMBSensitivityWorkspace(self.project), "AMB Sensitivity")
+        self.validity_guard = ResultValidityGuard(self, self.invalidate_for_project_change)
         root.addWidget(self.tabs, 1)
 
     def _engineering(self) -> RotorProject | None:

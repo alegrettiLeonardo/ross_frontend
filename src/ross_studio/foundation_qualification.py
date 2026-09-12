@@ -100,8 +100,8 @@ def _matrix_evidence(base_rotor, dynamic_rotor) -> tuple[float, float, float, fl
 
 def _support_matrices(support) -> tuple[np.ndarray, np.ndarray]:
     return (
-        np.asarray([[support.kxx, support.kxy], [support.kyx, support.kyy or support.kxx]], dtype=float),
-        np.asarray([[support.cxx, support.cxy], [support.cyx, support.cyy or support.cxx]], dtype=float),
+        np.asarray([[support.kxx, support.kxy], [support.kyx, support.kyy]], dtype=float),
+        np.asarray([[support.cxx, support.cxy], [support.cyx, support.cyy]], dtype=float),
     )
 
 

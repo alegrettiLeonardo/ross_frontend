@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 
 from ..fault_analysis import CrackRequest, FaultAnalysisResult, FaultAnalysisService, MisalignmentRequest, RubbingRequest
 from ..models import ProjectModel
+from ..result_validity import ResultValidityGuard
 from ..plotly_native_view import NativeRossFigureView
 from ..widgets import SectionCard
 
@@ -51,6 +52,20 @@ class FaultsWorkspace(QWidget):
         output.root.addWidget(self.view)
         root.addWidget(output, 2)
         self.plot_choice.currentIndexChanged.connect(self._show_plot)
+        self.validity_guard = ResultValidityGuard(self, self._invalidate)
+        for widget in self.tabs.findChildren(QWidget):
+            for name in ("valueChanged", "currentIndexChanged", "toggled"):
+                signal = getattr(widget, name, None)
+                if signal is not None:
+                    signal.connect(self._invalidate)
+                    break
+
+    def _invalidate(self, *_args):
+        self.result = None
+        self.figures.clear()
+        self.plot_choice.clear()
+        self.state.setText("Result invalidated: model or inputs changed; run again.")
+        self.view.set_unavailable("Result invalidated; run again.")
 
     @staticmethod
     def _double(value: float, minimum: float = -1e12, maximum: float = 1e12, decimals: int = 8) -> QDoubleSpinBox:
@@ -197,7 +212,7 @@ class FaultsWorkspace(QWidget):
         try:
             result = self.service.run(deepcopy(self._engineering()), request)
         except Exception as exc:
-            self.result = None
+            self._invalidate()
             self.state.setText(f"Fault solve failed: {exc}")
             self.view.set_unavailable(str(exc))
             return

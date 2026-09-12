@@ -410,11 +410,11 @@ class BearingInputPanel(QWidget):
                     kxx=self.spec.kxx,
                     kxy=self.spec.kxy,
                     kyx=self.spec.kyx,
-                    kyy=self.spec.kyy or self.spec.kxx,
+                    kyy=self.spec.kyy,
                     cxx=self.spec.cxx,
                     cxy=self.spec.cxy,
                     cyx=self.spec.cyx,
-                    cyy=self.spec.cyy or self.spec.cxx,
+                    cyy=self.spec.cyy,
                 )
             ]
         table = QTableWidget(len(points), len(self.KC_HEADERS))

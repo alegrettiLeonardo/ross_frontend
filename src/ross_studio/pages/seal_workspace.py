@@ -173,7 +173,17 @@ class SealStudioPage(QWidget):
         self.calculate.clicked.connect(self._calculate)
         self.apply.clicked.connect(self._apply)
         self.plot_choice.currentIndexChanged.connect(self._show_plot)
+        self.parameters.itemChanged.connect(self._invalidate_preview)
         self._load_existing()
+
+    def _invalidate_preview(self, *_args) -> None:
+        self.preview = None
+        self.apply.setEnabled(False)
+        self.figures.clear()
+        self.plot_choice.clear()
+        self.kc.setRowCount(0)
+        self.state.setText("Preview invalidated: inputs changed; calculate again.")
+        self.plot.set_unavailable("Inputs changed; calculate again before Apply.")
 
     def _engineering(self):
         if self.project.engineering is None:
@@ -292,6 +302,7 @@ class SealStudioPage(QWidget):
             self.service.apply(candidate, index, self.preview)
             RossBackend().build_rotor(candidate, strict=True)
             engineering.seals[index] = deepcopy(candidate.seals[index])
+            self.project.touch()
         except Exception as exc:
             self.state.setText(f"Apply rejected by strict ROSS build: {exc}")
             return

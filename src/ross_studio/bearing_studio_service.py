@@ -164,11 +164,11 @@ class BearingStudioService:
             self._finite(inputs.get("kxx", spec.kxx), "Kxx"),
             self._finite(inputs.get("kxy", spec.kxy), "Kxy"),
             self._finite(inputs.get("kyx", spec.kyx), "Kyx"),
-            self._finite(inputs.get("kyy", spec.kyy or spec.kxx), "Kyy"),
+            self._finite(inputs.get("kyy", spec.kyy), "Kyy"),
             self._finite(inputs.get("cxx", spec.cxx), "Cxx"),
             self._finite(inputs.get("cxy", spec.cxy), "Cxy"),
             self._finite(inputs.get("cyx", spec.cyx), "Cyx"),
-            self._finite(inputs.get("cyy", spec.cyy or spec.cxx), "Cyy"),
+            self._finite(inputs.get("cyy", spec.cyy), "Cyy"),
         )
         return BearingCalculationResult(
             source_model="BearingElement",

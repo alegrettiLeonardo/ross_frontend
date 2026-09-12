@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches:
+      - main
+      - feature/ross-studio-engineering-qualification
       - feature/ross-architecture-0.17.0
       - feature/engineering-outputs-0.18.0
       - feature/static-modal-native-0.19.0
@@ -39,7 +41,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 libxcb-util1 libtbb12 libpulse0
 
       - name: Install package and frozen-build dependencies
         run: python -m pip install -e ".[dev,package]"
@@ -57,9 +59,10 @@ jobs:
         run: python tools/qualify_frozen_foundation_024.py dist artifacts/frozen_selftest_${{ runner.os }}_foundation_024.json
 
       - name: Upload frozen executable and qualification evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ross-studio-0.24.0-${{ runner.os }}
+          name: ross-studio-${{ github.sha }}-${{ runner.os }}
           path: |
             dist/ROSS-Studio/
             artifacts/frozen_selftest_${{ runner.os }}.json

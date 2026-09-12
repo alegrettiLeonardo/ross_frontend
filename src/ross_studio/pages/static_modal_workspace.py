@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..domain import EngineeringError, RotorProject
+from ..result_validity import ResultValidityGuard
 from ..models import ProjectModel
 from ..page_registry import route_spec
 from ..plotly_native_view import NativeRossFigureView
@@ -55,6 +56,7 @@ class _StaticWorker(QObject):
     def __init__(self, project: RotorProject, fingerprint: str) -> None:
         super().__init__()
         self.project = project
+        self.validity_guard = ResultValidityGuard(self, self._invalidate_if_project_changed)
         self.fingerprint = fingerprint
 
     @Slot()

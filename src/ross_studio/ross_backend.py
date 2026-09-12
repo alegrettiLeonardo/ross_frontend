@@ -38,14 +38,14 @@ class RossModelBuilder(_BaseRossModelBuilder):
         k = np.asarray(
             [
                 [support.kxx, support.kxy],
-                [support.kyx, support.kyy or support.kxx],
+                [support.kyx, support.kyy],
             ],
             dtype=float,
         )
         c = np.asarray(
             [
                 [support.cxx, support.cxy],
-                [support.cyx, support.cyy or support.cxx],
+                [support.cyx, support.cyy],
             ],
             dtype=float,
         )
@@ -265,11 +265,11 @@ class RossModelBuilder(_BaseRossModelBuilder):
                     n=support_node,
                     n_link=foundation_node,
                     kxx=support.kxx,
-                    kyy=support.kyy or support.kxx,
+                    kyy=support.kyy,
                     kxy=support.kxy,
                     kyx=support.kyx,
                     cxx=support.cxx,
-                    cyy=support.cyy or support.cxx,
+                    cyy=support.cyy,
                     cxy=support.cxy,
                     cyx=support.cyx,
                     tag=f"{support.name} / foundation",
