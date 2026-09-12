@@ -40,11 +40,12 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
         "model.supports.flexible", "rotor", editor_key="supports", title="Bearing / Flexible Supports"
     ),
     "model.supports.foundation": PageRouteSpec(
-        "model.supports.foundation", "foundation", title="Foundation", implementation_phase="0.24.0",
+        "model.supports.foundation", "foundation", title="Foundation", implementation_phase="0.19.0",
         operational=False,
         note=(
-            "Foundation Studio 0.24 tranche B is active: FoundationSpec, schema-2 persistence and strict "
-            "bearing→support→foundation→ground assembly are implemented; editor and complete scientific/frozen gates remain under qualification."
+            "Foundation navigation ownership was introduced in 0.19. Foundation Studio 0.24 tranche B now provides "
+            "FoundationSpec, schema-2 persistence and strict bearing→support→foundation→ground assembly; the route "
+            "remains locked until the 0.24 scientific and frozen gates close."
         ),
     ),
     "model.couplings": PageRouteSpec("model.couplings", "rotor", editor_key="couplings", title="Couplings"),
