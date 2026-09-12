@@ -7,20 +7,20 @@ from ross_studio.models import load_reference_project_model
 from ross_studio.project_io import FORMAT_NAME, SCHEMA_VERSION, load_project, save_project
 
 
-def test_foundation_schema_is_v2_and_native_saves_use_v2(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 2
+def test_foundation_schema_survives_current_native_schema(tmp_path: Path) -> None:
+    assert SCHEMA_VERSION >= 2
     model = load_reference_project_model()
-    target = save_project(model, tmp_path / "schema2.rossproj")
+    target = save_project(model, tmp_path / "current.rossproj")
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["format"] == FORMAT_NAME
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == SCHEMA_VERSION
     assert payload["engineering"]["foundations"] == []
 
 
 def test_schema1_native_project_migrates_to_empty_foundations_without_reclassifying_supports(tmp_path: Path) -> None:
     model = load_reference_project_model()
-    schema2 = save_project(model, tmp_path / "source.rossproj")
-    payload = json.loads(schema2.read_text(encoding="utf-8"))
+    current = save_project(model, tmp_path / "source.rossproj")
+    payload = json.loads(current.read_text(encoding="utf-8"))
     original_supports = payload["engineering"]["supports"]
     payload["schema_version"] = 1
     payload["app_version"] = "0.23.0"
