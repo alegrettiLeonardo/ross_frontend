@@ -42,19 +42,7 @@ def _failure_payload(exc: Exception) -> dict[str, object]:
     }
 
 
-def _run_callable(
-    argv: list[str],
-    output_flag: str,
-    runner: Callable[[], _SerializableResult],
-    failure_code: int,
-) -> int:
-    """Execute one frozen qualification with a statically discoverable runner.
-
-    The caller imports the runner explicitly. This is deliberate: PyInstaller
-    cannot reliably discover string-based dynamic imports, which can allow an
-    executable to build while omitting its qualification module.
-    """
-
+def _run_callable(argv: list[str], output_flag: str, runner: Callable[[], _SerializableResult], failure_code: int) -> int:
     output_path = _option_value(argv, output_flag)
     try:
         result = runner()
@@ -70,86 +58,52 @@ def _run_callable(
 
 def frozen_self_test_main(argv: list[str]) -> int:
     from ross_studio.frozen_selftest import run_frozen_self_test
-
     return _run_callable(argv, "--self-test-output", run_frozen_self_test, 2)
 
 
 def frozen_project_io_main(argv: list[str]) -> int:
     from ross_studio.frozen_project_io import run_frozen_project_io_test
-
     return _run_callable(argv, "--project-io-output", run_frozen_project_io_test, 4)
 
 
 def frozen_gui_smoke_main(argv: list[str]) -> int:
     from ross_studio.frozen_gui_smoke import run_frozen_gui_smoke
-
     return _run_callable(argv, "--gui-smoke-output", run_frozen_gui_smoke, 3)
 
 
 def frozen_engineering_outputs_main(argv: list[str]) -> int:
     from ross_studio.frozen_engineering_outputs import run_frozen_engineering_outputs_test
-
-    return _run_callable(
-        argv,
-        "--engineering-outputs-output",
-        run_frozen_engineering_outputs_test,
-        5,
-    )
+    return _run_callable(argv, "--engineering-outputs-output", run_frozen_engineering_outputs_test, 5)
 
 
 def frozen_static_modal_020_main(argv: list[str]) -> int:
     from ross_studio.frozen_static_modal_020 import run_frozen_static_modal_020_test
-
-    return _run_callable(
-        argv,
-        "--static-modal-020-output",
-        run_frozen_static_modal_020_test,
-        6,
-    )
+    return _run_callable(argv, "--static-modal-020-output", run_frozen_static_modal_020_test, 6)
 
 
 def frozen_time_frequency_021_main(argv: list[str]) -> int:
     from ross_studio.frozen_time_frequency_021 import run_frozen_time_frequency_021_test
-
-    return _run_callable(
-        argv,
-        "--time-frequency-021-output",
-        run_frozen_time_frequency_021_test,
-        7,
-    )
+    return _run_callable(argv, "--time-frequency-021-output", run_frozen_time_frequency_021_test, 7)
 
 
 def frozen_stochastic_022_main(argv: list[str]) -> int:
     from ross_studio.frozen_stochastic_022 import run_frozen_stochastic_022_test
-
-    return _run_callable(
-        argv,
-        "--stochastic-022-output",
-        run_frozen_stochastic_022_test,
-        8,
-    )
+    return _run_callable(argv, "--stochastic-022-output", run_frozen_stochastic_022_test, 8)
 
 
 def frozen_multirotor_023_main(argv: list[str]) -> int:
     from ross_studio.frozen_multirotor_023 import run_frozen_multirotor_023_test
-
-    return _run_callable(
-        argv,
-        "--multirotor-023-output",
-        run_frozen_multirotor_023_test,
-        9,
-    )
+    return _run_callable(argv, "--multirotor-023-output", run_frozen_multirotor_023_test, 9)
 
 
 def frozen_foundation_024_main(argv: list[str]) -> int:
     from ross_studio.frozen_foundation_024 import run_frozen_foundation_024_test
+    return _run_callable(argv, "--foundation-024-output", run_frozen_foundation_024_test, 10)
 
-    return _run_callable(
-        argv,
-        "--foundation-024-output",
-        run_frozen_foundation_024_test,
-        10,
-    )
+
+def frozen_seal_025_main(argv: list[str]) -> int:
+    from ross_studio.frozen_seal_025 import run_frozen_seal_025_test
+    return _run_callable(argv, "--seal-025-output", run_frozen_seal_025_test, 11)
 
 
 def main() -> int:
@@ -172,9 +126,10 @@ def main() -> int:
         return frozen_multirotor_023_main(argv)
     if "--foundation-024-self-test" in argv or "--foundation-024-output" in argv:
         return frozen_foundation_024_main(argv)
+    if "--seal-025-self-test" in argv or "--seal-025-output" in argv:
+        return frozen_seal_025_main(argv)
 
     from ross_studio.app import launch
-
     return int(launch())
 
 
