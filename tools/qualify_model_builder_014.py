@@ -173,20 +173,19 @@ def main() -> int:
         ct_y_n_s_m=110.0,
         ct_z_n_s_m=120.0,
     )
-    preview = service.preview_add(project, "coupling", coupling)
+    try:
+        service.preview_add(project, "coupling", coupling)
+    except Exception as exc:
+        coupling_error = str(exc)
+    else:
+        raise RuntimeError("Legacy single-station coupling no longer failed closed")
     require_preview_only(project, before, "Coupling")
-    require(NodeInsertionService.plan(preview.candidate).node_for(coupling.position_mm) is not None, "Coupling station is not exact")
-    candidate_build = RossModelBuilder().build(preview.candidate, strict=True)
-    require(
-        all(type(element).__name__ != "CouplingElement" for element in candidate_build.rotor.shaft_elements),
-        "Single-station legacy coupling was silently mapped to a two-node ROSS CouplingElement",
-    )
-    service.commit(project, preview)
     transactions["coupling"] = {
         "preview_only": True,
         "position_mm": coupling.position_mm,
-        "exact_node": NodeInsertionService.plan(project).node_for(coupling.position_mm),
-        "realization": "engineering joint + exact topology; two-node ROSS CouplingElement mapping intentionally blocked",
+        "legacy_single_station_rejected": True,
+        "error": coupling_error,
+        "realization": "legacy one-station contract fails closed; native two-node ROSS CouplingElement is qualified by the 0.30 gate",
     }
 
     before = deepcopy(project)
@@ -246,7 +245,7 @@ def main() -> int:
         "explicit_blocks": {
             "bearing_ownership": "Bearing Studio only",
             "shaft_section_add_delete": "requires explicit downstream absolute-coordinate remapping policy",
-            "coupling_native_mapping": "requires explicit two-node coupling contract",
+            "coupling_native_mapping": "legacy single-station input fails closed; explicit two-node CouplingElement contract is qualified in 0.30",
             "ump_duplicate_editor": "blocked; UMP remains derived from qualified engineering source",
         },
     }
