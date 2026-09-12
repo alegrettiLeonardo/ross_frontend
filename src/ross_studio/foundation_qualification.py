@@ -26,6 +26,9 @@ class FoundationQualification:
     rigid_exact_m_parity: bool
     rigid_exact_k_parity: bool
     rigid_exact_c_parity: bool
+    high_stiffness_sweep_n_m: list[float]
+    high_stiffness_sweep_error_percent: list[float]
+    high_stiffness_convergence_pass: bool
     high_stiffness_baseline_hz: list[float]
     high_stiffness_foundation_hz: list[float]
     high_stiffness_max_error_percent: float
@@ -93,6 +96,45 @@ def _matrix_evidence(base_rotor, dynamic_rotor) -> tuple[float, float, float, fl
     )
 
 
+def _high_stiffness_sweep(rs, baseline_project, baseline_hz: np.ndarray) -> tuple[list[float], list[float], np.ndarray, bool]:
+    """Demonstrate the Foundation K→∞ asymptote without mixing in added mass.
+
+    Three decades are intentionally evaluated instead of one arbitrary large-K point.
+    The final point must be within 0.5 % of the legacy/RIGID modes and the modal error
+    must contract monotonically (up to a tiny numerical tolerance) as K increases.
+    """
+
+    stiffness_values = [1.0e10, 1.0e12, 1.0e14]
+    errors: list[float] = []
+    final_hz: np.ndarray | None = None
+    for stiffness in stiffness_values:
+        project = deepcopy(baseline_project)
+        project.foundations.append(
+            FoundationSpec(
+                name=f"DE high-stiffness limit {stiffness:.0e}",
+                support_index=0,
+                model_type=FoundationModel.LUMPED_KC,
+                kxx=stiffness,
+                kyy=stiffness,
+                cxx=0.0,
+                cyy=0.0,
+            )
+        )
+        rotor = RossModelBuilder(rs).build(project, strict=True).rotor
+        modal_hz = _modal_hz(rotor)
+        errors.append(float(np.max(np.abs(modal_hz - baseline_hz) / baseline_hz * 100.0)))
+        final_hz = modal_hz
+
+    if final_hz is None:
+        raise EngineeringError("Foundation high-stiffness sweep produced no modal results.")
+    monotonic = all(
+        right <= left + max(1.0e-9, 1.0e-6 * max(abs(left), 1.0))
+        for left, right in zip(errors, errors[1:])
+    )
+    convergence = bool(monotonic and errors[-1] < 0.5)
+    return stiffness_values, errors, final_hz, convergence
+
+
 def run_foundation_qualification() -> FoundationQualification:
     import ross as rs
 
@@ -112,25 +154,10 @@ def run_foundation_qualification() -> FoundationQualification:
     rigid_c = np.array_equal(np.asarray(rigid.C(0.0)), np.asarray(baseline.C(0.0)))
 
     baseline_hz = _modal_hz(baseline)
-
-    # Isolate the stiffness asymptote: no Foundation mass is added here.  As
-    # Kfoundation -> infinity, this topology must converge to the legacy/RIGID
-    # direct-to-ground support rather than to a rigidly attached extra mass.
-    high_project = deepcopy(baseline_project)
-    high_project.foundations.append(
-        FoundationSpec(
-            name="DE high-stiffness limit",
-            support_index=0,
-            model_type=FoundationModel.LUMPED_KC,
-            kxx=1.0e14,
-            kyy=1.0e14,
-            cxx=0.0,
-            cyy=0.0,
-        )
+    high_k_values, high_errors, high_hz, high_convergence = _high_stiffness_sweep(
+        rs, baseline_project, baseline_hz
     )
-    high_rotor = RossModelBuilder(rs).build(high_project, strict=True).rotor
-    high_hz = _modal_hz(high_rotor)
-    high_error = float(np.max(np.abs(high_hz - baseline_hz) / baseline_hz * 100.0))
+    high_error = high_errors[-1]
 
     dynamic_mass = 125.0
     soft_project = deepcopy(baseline_project)
@@ -206,7 +233,7 @@ def run_foundation_qualification() -> FoundationQualification:
         rigid_m,
         rigid_k,
         rigid_c,
-        high_error < 0.5,
+        high_convergence,
         sensitivity > 0.5,
         dm > 0.0,
         dk > 0.0,
@@ -227,6 +254,9 @@ def run_foundation_qualification() -> FoundationQualification:
         rigid_exact_m_parity=rigid_m,
         rigid_exact_k_parity=rigid_k,
         rigid_exact_c_parity=rigid_c,
+        high_stiffness_sweep_n_m=[float(value) for value in high_k_values],
+        high_stiffness_sweep_error_percent=[float(value) for value in high_errors],
+        high_stiffness_convergence_pass=high_convergence,
         high_stiffness_baseline_hz=[float(value) for value in baseline_hz],
         high_stiffness_foundation_hz=[float(value) for value in high_hz],
         high_stiffness_max_error_percent=high_error,
