@@ -20,7 +20,6 @@ import ross as rs
 from ross_studio.analysis_backend import RossAnalysisBackend
 from ross_studio.bearing_native_inventory import inventory_native_outputs
 from ross_studio.bearing_studio_service import BearingStudioService
-from ross_studio.domain import AdapterStatus
 from ross_studio.legacy_import import load_irdin_project
 from ross_studio.ross_backend import RossModelBuilder
 from ross_studio.ross_native_plots import NativeRossPlotUnavailable, RossBearingNativePlotService
@@ -275,7 +274,9 @@ def main() -> int:
     )
 
     amb_status, amb_reason = registry.effective_status("MagneticBearingElement")
-    gates["AMB_blocked"] = amb_status == AdapterStatus.BLOCKED
+    # AMB was outside the 0.15.1 Bearing Native Outputs qualification scope.
+    # Its current capability status is reported below, while the dedicated 0.30 gate
+    # qualifies MagneticBearingElement, Newmark feedback outputs and ISO sensitivity.
     gates["all_general_kc_only"] = all(
         model["output_contract"] == "K/C only"
         for model in models.values()
@@ -300,7 +301,7 @@ def main() -> int:
             "General": "calculated K/C only; no fabricated dimensional post-processing",
             "THD": "calculated K/C plus native ROSS curves and dimensional outputs; model-specific unavailable fields remain unavailable",
             "RotorModel": "nominal K/C for all; cached K/C curves only for committed THD; never rerun THD from inspector",
-            "AMB": "blocked until actuator/sensor/controller domain is qualified",
+            "AMB": "outside the 0.15.1 pass/fail scope; current registry status is informational and native AMB is qualified by the 0.30 gate",
         },
         "amb": {"status": amb_status.value, "reason": amb_reason},
         "gates": gates,
