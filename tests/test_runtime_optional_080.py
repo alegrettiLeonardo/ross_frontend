@@ -257,12 +257,9 @@ def test_qt_engineering_routes_and_bearing_studio_2_workspace() -> None:
     }
     assert "kc" not in window.bearing_page.type_buttons
 
-    for key, (_title, ross_class, _group) in window.bearing_page.type_metadata.items():
+    for key, (_title, _ross_class, _group) in window.bearing_page.type_metadata.items():
         window.bearing_page._select_type(key, announce=False)
-        if ross_class == "MagneticBearingElement":
-            assert not window.bearing_page.calculate_button.isEnabled()
-        else:
-            assert window.bearing_page.calculate_button.isEnabled()
+        assert window.bearing_page.calculate_button.isEnabled()
         assert not window.bearing_page.apply_button.isEnabled()
 
     window.close()
