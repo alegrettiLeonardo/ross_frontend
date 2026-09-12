@@ -21,6 +21,16 @@ class AdapterStatus(StrEnum):
     BLOCKED = "Blocked"
 
 
+class FoundationModel(StrEnum):
+    """Qualified Foundation Studio model families for ROSS Studio 0.24."""
+
+    RIGID = "RIGID"
+    LUMPED_KC = "LUMPED_KC"
+    LUMPED_KCM = "LUMPED_KCM"
+    FREQUENCY_DEPENDENT_KC = "FREQUENCY_DEPENDENT_KC"
+    REDUCED_MATRIX = "REDUCED_MATRIX"
+
+
 class LateralConvention(StrEnum):
     """Positive-rotation convention used by lateral dynamic analyses."""
 
@@ -147,13 +157,7 @@ class DistributedMassSpec:
         return self.start_mm + 0.5 * self.length_mm
 
     def equivalent_disk_inertias_kg_m2(self) -> tuple[float, float]:
-        """Return (Id, Ip) for the finite hollow-cylinder body represented by `[Massas]`.
-
-        The legacy component keeps its physical mass, axial length, OD and ID. ROSS
-        represents the rigid body at an explicit center node as ``DiskElement``. The
-        equivalent inertias are therefore calculated from the original finite cylinder,
-        rather than guessed or copied from a nearby shaft station.
-        """
+        """Return (Id, Ip) for the finite hollow-cylinder body represented by `[Massas]`."""
         if self.mass_kg < 0:
             raise EngineeringError(f"{self.name}: mass cannot be negative.")
         if self.length_mm <= 0:
@@ -173,12 +177,7 @@ class DistributedMassSpec:
 
 @dataclass(slots=True)
 class PointMassSpec:
-    """Legacy ``[Concent]`` rigid concentrated body.
-
-    The source columns are ``position, mass, Ix, Iy, Iz``. ``Iy`` is the polar
-    inertia about the RotorDin shaft axis; after the coordinate adapter it becomes
-    the ROSS axial/torsional inertia and the gyroscopic alpha-beta coupling term.
-    """
+    """Legacy ``[Concent]`` rigid concentrated body."""
 
     name: str
     position_mm: float
@@ -210,6 +209,123 @@ class SupportSpec:
     cyy: float = 0.0
     cxy: float = 0.0
     cyx: float = 0.0
+
+
+@dataclass(slots=True, frozen=True)
+class FoundationCoefficientPoint:
+    """Frequency-dependent lateral foundation K/C point.
+
+    Frequency is persisted in Hz for an engineering-facing contract and converted
+    to rad/s only at the ROSS boundary.
+    """
+
+    frequency_hz: float
+    kxx: float
+    kxy: float
+    kyx: float
+    kyy: float
+    cxx: float
+    cxy: float
+    cyx: float
+    cyy: float
+
+
+@dataclass(slots=True)
+class FoundationSpec:
+    """Structural subsystem below one qualified local flexible support.
+
+    ``support_index`` owns the attachment explicitly. Foundation Studio never
+    infers ownership from nearest axial position and never reinterprets SupportSpec
+    coefficients as foundation coefficients.
+    """
+
+    name: str
+    support_index: int
+    model_type: FoundationModel = FoundationModel.RIGID
+    mass_kg: float = 0.0
+    dof: int = 2
+    kxx: float = 0.0
+    kyy: float = 0.0
+    kxy: float = 0.0
+    kyx: float = 0.0
+    cxx: float = 0.0
+    cyy: float = 0.0
+    cxy: float = 0.0
+    cyx: float = 0.0
+    coefficients: list[FoundationCoefficientPoint] = field(default_factory=list)
+    metadata: dict[str, object] = field(default_factory=dict)
+    status: AdapterStatus = AdapterStatus.VALIDATED
+
+    @property
+    def frequency_dependent(self) -> bool:
+        return self.model_type == FoundationModel.FREQUENCY_DEPENDENT_KC
+
+    def validate(self) -> None:
+        if not self.name.strip():
+            raise EngineeringError("Foundation name cannot be empty.")
+        if not isinstance(self.model_type, FoundationModel):
+            try:
+                self.model_type = FoundationModel(str(self.model_type))
+            except ValueError as exc:
+                raise EngineeringError(f"Foundation {self.name!r} uses unsupported model {self.model_type!r}.") from exc
+        if self.dof != 2:
+            self.status = AdapterStatus.BLOCKED
+            raise EngineeringError(
+                f"Foundation {self.name!r} requests {self.dof}-DOF dynamics; Foundation Studio 0.24 qualifies only lateral 2-DOF K/C/M. "
+                "6-DOF and reduced-matrix foundations remain BLOCKED."
+            )
+        if self.model_type == FoundationModel.REDUCED_MATRIX:
+            self.status = AdapterStatus.BLOCKED
+            raise EngineeringError(
+                f"Foundation {self.name!r}: REDUCED_MATRIX is visible but BLOCKED in 0.24 until an explicit reduced multi-DOF adapter is qualified."
+            )
+        scalars = (
+            self.mass_kg,
+            self.kxx, self.kyy, self.kxy, self.kyx,
+            self.cxx, self.cyy, self.cxy, self.cyx,
+        )
+        if not all(isfinite(value) for value in scalars):
+            raise EngineeringError(f"Foundation {self.name!r} contains a non-finite K/C/M value.")
+        if self.mass_kg < 0:
+            raise EngineeringError(f"Foundation {self.name!r} mass cannot be negative.")
+
+        if self.model_type == FoundationModel.RIGID:
+            if self.mass_kg != 0.0 or self.coefficients or any(value != 0.0 for value in scalars[1:]):
+                raise EngineeringError(
+                    f"Foundation {self.name!r}: RIGID is an exact ground attachment and cannot carry independent K/C/M inputs."
+                )
+        elif self.model_type == FoundationModel.LUMPED_KC:
+            if self.mass_kg != 0.0:
+                raise EngineeringError(f"Foundation {self.name!r}: LUMPED_KC requires zero foundation mass; use LUMPED_KCM for Mfoundation.")
+            if self.coefficients:
+                raise EngineeringError(f"Foundation {self.name!r}: LUMPED_KC cannot contain a frequency-dependent K/C table.")
+        elif self.model_type == FoundationModel.LUMPED_KCM:
+            if self.mass_kg <= 0.0:
+                raise EngineeringError(f"Foundation {self.name!r}: LUMPED_KCM requires positive foundation mass.")
+            if self.coefficients:
+                raise EngineeringError(f"Foundation {self.name!r}: LUMPED_KCM cannot contain a frequency-dependent K/C table.")
+        elif self.model_type == FoundationModel.FREQUENCY_DEPENDENT_KC:
+            if self.mass_kg != 0.0:
+                raise EngineeringError(
+                    f"Foundation {self.name!r}: FREQUENCY_DEPENDENT_KC has no foundation mass in the 0.24 contract; use LUMPED_KCM for mass."
+                )
+            if not self.coefficients:
+                raise EngineeringError(f"Foundation {self.name!r}: FREQUENCY_DEPENDENT_KC requires at least one K/C frequency point.")
+            previous = -1.0
+            for point in self.coefficients:
+                values = (
+                    point.frequency_hz,
+                    point.kxx, point.kyy, point.kxy, point.kyx,
+                    point.cxx, point.cyy, point.cxy, point.cyx,
+                )
+                if not all(isfinite(value) for value in values):
+                    raise EngineeringError(f"Foundation {self.name!r} contains a non-finite frequency-table value.")
+                if point.frequency_hz < 0.0 or point.frequency_hz <= previous:
+                    raise EngineeringError(
+                        f"Foundation {self.name!r} frequency points must be finite, non-negative and strictly increasing."
+                    )
+                previous = point.frequency_hz
+        self.status = AdapterStatus.VALIDATED
 
 
 @dataclass(slots=True)
@@ -289,6 +405,7 @@ class RotorProject:
     point_masses: list[PointMassSpec] = field(default_factory=list)
     disks: list[DiskSpec] = field(default_factory=list)
     supports: list[SupportSpec] = field(default_factory=list)
+    foundations: list[FoundationSpec] = field(default_factory=list)
     seals: list[SealSpec] = field(default_factory=list)
     couplings: list[CouplingSpec] = field(default_factory=list)
     loads: list[LoadSpec] = field(default_factory=list)
@@ -368,10 +485,7 @@ class RotorProject:
                 raise EngineeringError(f"Distributed mass #{index} must have positive length and non-negative mass.")
         for index, mass in enumerate(self.point_masses, 1):
             position_ok(mass.position_mm, f"Concentrated mass #{index}")
-            if not all(
-                isfinite(value)
-                for value in (mass.mass_kg, mass.ix_kg_m2, mass.iy_kg_m2, mass.iz_kg_m2)
-            ):
+            if not all(isfinite(value) for value in (mass.mass_kg, mass.ix_kg_m2, mass.iy_kg_m2, mass.iz_kg_m2)):
                 raise EngineeringError(f"Concentrated mass #{index} contains a non-finite mass/inertia value.")
             if mass.mass_kg < 0:
                 raise EngineeringError(f"Concentrated mass #{index} cannot have negative mass.")
@@ -386,6 +500,18 @@ class RotorProject:
                 raise EngineeringError(f"Support {support.name!r} references an invalid bearing index.")
             if support.mass_kg <= 0:
                 raise EngineeringError(f"Support {support.name!r} must have positive mass.")
+
+        foundation_supports: set[int] = set()
+        for foundation in self.foundations:
+            if not 0 <= foundation.support_index < len(self.supports):
+                raise EngineeringError(f"Foundation {foundation.name!r} references an invalid support index.")
+            if foundation.support_index in foundation_supports:
+                raise EngineeringError(
+                    f"Support #{foundation.support_index + 1} has more than one foundation; ownership must be one-to-one."
+                )
+            foundation.validate()
+            foundation_supports.add(foundation.support_index)
+
         for element in [*self.seals, *self.couplings, *self.loads, *self.probes]:
             position_ok(element.position_mm, getattr(element, "name", type(element).__name__))
         for case in self.operating_cases:

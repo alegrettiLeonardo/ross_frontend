@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ..models import ProjectModel
 from ..page_registry import PageRouteSpec
 from ..widgets import Card, SectionCard
+from .foundation_workspace import FoundationWorkspacePage
 
 
 class _ArchitectureHeader(Card):
@@ -32,72 +32,6 @@ class _ArchitectureHeader(Card):
         state.setObjectName("architectureStatus")
         state.setWordWrap(True)
         layout.addWidget(state)
-
-
-class FoundationWorkspacePage(QWidget):
-    """Foundation ownership page introduced before the scientific adapter.
-
-    0.17 establishes the domain boundary and navigation contract only. It does not
-    silently reinterpret SupportSpec as a foundation or manufacture a 6-DOF adapter.
-    """
-
-    def __init__(self, project: ProjectModel, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.project = project
-        root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(10)
-        root.addWidget(_ArchitectureHeader(
-            "Foundation",
-            "Foundation is a structural subsystem below the local bearing/support connection. "
-            "It is intentionally distinct from Bearing / Flexible Supports.",
-            status="Architecture ready · scientific Foundation K/C/M adapter scheduled for the Foundation tranche.",
-        ))
-
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(10)
-
-        topology = SectionCard("Physical Ownership")
-        text = QLabel(
-            "Bearing\n"
-            "   │\n"
-            "Support / n_link\n"
-            "   │\n"
-            "Foundation\n"
-            "   │\n"
-            "Ground"
-        )
-        text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        topology.root.addWidget(text)
-        grid.addWidget(topology, 0, 0)
-
-        contract = SectionCard("Qualified Scope")
-        message = QLabel(
-            "No foundation coefficients are currently applied from this page. "
-            "The next scientific tranche will qualify Rigid, lumped K/C/M and "
-            "frequency-dependent K/C. Reduced multi-DOF matrices remain BLOCKED "
-            "until an explicit physical adapter is implemented."
-        )
-        message.setWordWrap(True)
-        contract.root.addWidget(message)
-        grid.addWidget(contract, 0, 1)
-
-        existing = SectionCard("Current Project")
-        engineering = project.engineering
-        support_count = len(engineering.supports) if engineering is not None else project.supports
-        foundation_count = len(getattr(engineering, "foundations", ())) if engineering is not None else 0
-        summary = QLabel(
-            f"Flexible supports: {support_count}\n"
-            f"Foundation definitions: {foundation_count}\n"
-            "Nearest-node mapping: prohibited"
-        )
-        existing.root.addWidget(summary)
-        grid.addWidget(existing, 1, 0, 1, 2)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        root.addLayout(grid)
-        root.addStretch(1)
 
 
 class AnalysisRoutePage(QWidget):

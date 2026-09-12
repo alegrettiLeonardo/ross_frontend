@@ -41,8 +41,14 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
     ),
     "model.supports.foundation": PageRouteSpec(
         "model.supports.foundation", "foundation", title="Foundation", implementation_phase="0.19.0",
-        operational=False,
-        note="Navigation/domain ownership is established in 0.17; the qualified K/C/M foundation adapter is implemented in the Foundation tranche.",
+        operational=True,
+        note=(
+            "Foundation navigation ownership was introduced in 0.19. Foundation Studio 0.24 is scientifically qualified "
+            "against ROSS 2.3.0: RIGID preserves exact legacy parity; massless zero-damping LUMPED_KC is eliminated by an "
+            "exact Schur complement without artificial mass; LUMPED_KCM keeps explicit physical foundation inertia; "
+            "FREQUENCY_DEPENDENT_KC uses complex-impedance condensation. Unsupported damped massless constant-K/C, "
+            "6-DOF and reduced-matrix contracts fail closed rather than being approximated."
+        ),
     ),
     "model.couplings": PageRouteSpec("model.couplings", "rotor", editor_key="couplings", title="Couplings"),
     "model.loads.unbalance": PageRouteSpec(
@@ -51,7 +57,7 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
     ),
     "model.loads.harmonic": PageRouteSpec(
         "model.loads.harmonic", "rotor", editor_key="loads", title="Harmonic / External Force",
-        implementation_phase="0.18.0", note="Routes to the existing load workspace without inventing a new force model.",
+        implementation_phase="0.18.0", note="Routes to the existing qualified load workspace without inventing a new force model.",
     ),
     "model.loads.electromagnetic": PageRouteSpec(
         "model.loads.electromagnetic", "rotor", editor_key="ump", title="Electromagnetic / UMP",
@@ -83,8 +89,11 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
         ),
     ),
     "analysis.multirotor": PageRouteSpec(
-        "analysis.multirotor", "analysis", title="MultiRotor System", implementation_phase="0.23.0", operational=False,
-        note="Reserved for GearElement + MultiRotor without contaminating RotorProject.",
+        "analysis.multirotor", "analysis", title="MultiRotor System", implementation_phase="0.23.0", operational=True,
+        note=(
+            "Native GearElement/GearElementTVMS + MultiRotor. Speeds are referenced to the driving rotor; "
+            "run_static/run_ucs/run_level1 remain explicitly blocked and critical speed remains experimental."
+        ),
     ),
 }
 

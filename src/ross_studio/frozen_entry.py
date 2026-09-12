@@ -4,6 +4,11 @@ import json
 from pathlib import Path
 import sys
 from traceback import format_exc
+from typing import Callable, Protocol
+
+
+class _SerializableResult(Protocol):
+    def to_dict(self) -> dict[str, object]: ...
 
 
 def _option_value(argv: list[str], name: str) -> str | None:
@@ -37,11 +42,22 @@ def _failure_payload(exc: Exception) -> dict[str, object]:
     }
 
 
-def frozen_self_test_main(argv: list[str]) -> int:
-    output_path = _option_value(argv, "--self-test-output")
+def _run_callable(
+    argv: list[str],
+    output_flag: str,
+    runner: Callable[[], _SerializableResult],
+    failure_code: int,
+) -> int:
+    """Execute one frozen qualification with a statically discoverable runner.
+
+    The caller imports the runner explicitly. This is deliberate: PyInstaller
+    cannot reliably discover string-based dynamic imports, which can allow an
+    executable to build while omitting its qualification module.
+    """
+
+    output_path = _option_value(argv, output_flag)
     try:
-        from ross_studio.frozen_selftest import run_frozen_self_test
-        result = run_frozen_self_test()
+        result = runner()
         payload: dict[str, object] = result.to_dict()
         payload["executable"] = str(Path(sys.executable).resolve())
         payload["frozen"] = bool(getattr(sys, "frozen", False))
@@ -49,97 +65,91 @@ def frozen_self_test_main(argv: list[str]) -> int:
         return 0
     except Exception as exc:
         _write_payload(output_path, _failure_payload(exc))
-        return 2
+        return failure_code
+
+
+def frozen_self_test_main(argv: list[str]) -> int:
+    from ross_studio.frozen_selftest import run_frozen_self_test
+
+    return _run_callable(argv, "--self-test-output", run_frozen_self_test, 2)
 
 
 def frozen_project_io_main(argv: list[str]) -> int:
-    output_path = _option_value(argv, "--project-io-output")
-    try:
-        from ross_studio.frozen_project_io import run_frozen_project_io_test
-        result = run_frozen_project_io_test()
-        payload: dict[str, object] = result.to_dict()
-        payload["executable"] = str(Path(sys.executable).resolve())
-        payload["frozen"] = bool(getattr(sys, "frozen", False))
-        _write_payload(output_path, payload)
-        return 0
-    except Exception as exc:
-        _write_payload(output_path, _failure_payload(exc))
-        return 4
+    from ross_studio.frozen_project_io import run_frozen_project_io_test
+
+    return _run_callable(argv, "--project-io-output", run_frozen_project_io_test, 4)
 
 
 def frozen_gui_smoke_main(argv: list[str]) -> int:
-    output_path = _option_value(argv, "--gui-smoke-output")
-    try:
-        from ross_studio.frozen_gui_smoke import run_frozen_gui_smoke
-        result = run_frozen_gui_smoke()
-        payload: dict[str, object] = result.to_dict()
-        payload["executable"] = str(Path(sys.executable).resolve())
-        payload["frozen"] = bool(getattr(sys, "frozen", False))
-        _write_payload(output_path, payload)
-        return 0
-    except Exception as exc:
-        _write_payload(output_path, _failure_payload(exc))
-        return 3
+    from ross_studio.frozen_gui_smoke import run_frozen_gui_smoke
+
+    return _run_callable(argv, "--gui-smoke-output", run_frozen_gui_smoke, 3)
 
 
 def frozen_engineering_outputs_main(argv: list[str]) -> int:
-    output_path = _option_value(argv, "--engineering-outputs-output")
-    try:
-        from ross_studio.frozen_engineering_outputs import run_frozen_engineering_outputs_test
-        result = run_frozen_engineering_outputs_test()
-        payload: dict[str, object] = result.to_dict()
-        payload["executable"] = str(Path(sys.executable).resolve())
-        payload["frozen"] = bool(getattr(sys, "frozen", False))
-        _write_payload(output_path, payload)
-        return 0
-    except Exception as exc:
-        _write_payload(output_path, _failure_payload(exc))
-        return 5
+    from ross_studio.frozen_engineering_outputs import run_frozen_engineering_outputs_test
+
+    return _run_callable(
+        argv,
+        "--engineering-outputs-output",
+        run_frozen_engineering_outputs_test,
+        5,
+    )
 
 
 def frozen_static_modal_020_main(argv: list[str]) -> int:
-    output_path = _option_value(argv, "--static-modal-020-output")
-    try:
-        from ross_studio.frozen_static_modal_020 import run_frozen_static_modal_020_test
-        result = run_frozen_static_modal_020_test()
-        payload: dict[str, object] = result.to_dict()
-        payload["executable"] = str(Path(sys.executable).resolve())
-        payload["frozen"] = bool(getattr(sys, "frozen", False))
-        _write_payload(output_path, payload)
-        return 0
-    except Exception as exc:
-        _write_payload(output_path, _failure_payload(exc))
-        return 6
+    from ross_studio.frozen_static_modal_020 import run_frozen_static_modal_020_test
+
+    return _run_callable(
+        argv,
+        "--static-modal-020-output",
+        run_frozen_static_modal_020_test,
+        6,
+    )
 
 
 def frozen_time_frequency_021_main(argv: list[str]) -> int:
-    output_path = _option_value(argv, "--time-frequency-021-output")
-    try:
-        from ross_studio.frozen_time_frequency_021 import run_frozen_time_frequency_021_test
-        result = run_frozen_time_frequency_021_test()
-        payload: dict[str, object] = result.to_dict()
-        payload["executable"] = str(Path(sys.executable).resolve())
-        payload["frozen"] = bool(getattr(sys, "frozen", False))
-        _write_payload(output_path, payload)
-        return 0
-    except Exception as exc:
-        _write_payload(output_path, _failure_payload(exc))
-        return 7
+    from ross_studio.frozen_time_frequency_021 import run_frozen_time_frequency_021_test
+
+    return _run_callable(
+        argv,
+        "--time-frequency-021-output",
+        run_frozen_time_frequency_021_test,
+        7,
+    )
 
 
 def frozen_stochastic_022_main(argv: list[str]) -> int:
-    output_path = _option_value(argv, "--stochastic-022-output")
-    try:
-        from ross_studio.frozen_stochastic_022 import run_frozen_stochastic_022_test
-        result = run_frozen_stochastic_022_test()
-        payload: dict[str, object] = result.to_dict()
-        payload["executable"] = str(Path(sys.executable).resolve())
-        payload["frozen"] = bool(getattr(sys, "frozen", False))
-        _write_payload(output_path, payload)
-        return 0
-    except Exception as exc:
-        _write_payload(output_path, _failure_payload(exc))
-        return 8
+    from ross_studio.frozen_stochastic_022 import run_frozen_stochastic_022_test
+
+    return _run_callable(
+        argv,
+        "--stochastic-022-output",
+        run_frozen_stochastic_022_test,
+        8,
+    )
+
+
+def frozen_multirotor_023_main(argv: list[str]) -> int:
+    from ross_studio.frozen_multirotor_023 import run_frozen_multirotor_023_test
+
+    return _run_callable(
+        argv,
+        "--multirotor-023-output",
+        run_frozen_multirotor_023_test,
+        9,
+    )
+
+
+def frozen_foundation_024_main(argv: list[str]) -> int:
+    from ross_studio.frozen_foundation_024 import run_frozen_foundation_024_test
+
+    return _run_callable(
+        argv,
+        "--foundation-024-output",
+        run_frozen_foundation_024_test,
+        10,
+    )
 
 
 def main() -> int:
@@ -158,9 +168,13 @@ def main() -> int:
         return frozen_time_frequency_021_main(argv)
     if "--stochastic-022-self-test" in argv or "--stochastic-022-output" in argv:
         return frozen_stochastic_022_main(argv)
+    if "--multirotor-023-self-test" in argv or "--multirotor-023-output" in argv:
+        return frozen_multirotor_023_main(argv)
+    if "--foundation-024-self-test" in argv or "--foundation-024-output" in argv:
+        return frozen_foundation_024_main(argv)
 
-    # Keep heavy Qt imports out of scientific and I/O packaging self-test bootstraps.
     from ross_studio.app import launch
+
     return int(launch())
 
 

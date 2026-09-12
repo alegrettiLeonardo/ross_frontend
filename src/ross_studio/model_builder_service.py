@@ -9,6 +9,7 @@ from .domain import (
     DiskSpec,
     DistributedMassSpec,
     EngineeringError,
+    FoundationSpec,
     LoadSpec,
     PointMassSpec,
     ProbeSpec,
@@ -58,6 +59,8 @@ class RotorModelMutationService:
 
     Bearings deliberately stay outside this service because Bearing Studio owns the
     qualified Calculate -> Preview -> Apply workflow and its THD/axial semantics.
+    Foundation Studio 0.24 uses this same strict transaction boundary while retaining
+    FoundationSpec as a physical entity distinct from SupportSpec.
     """
 
     _COLLECTIONS: dict[str, tuple[str, type[Any]]] = {
@@ -66,6 +69,7 @@ class RotorModelMutationService:
         "point_mass": ("point_masses", PointMassSpec),
         "disk": ("disks", DiskSpec),
         "support": ("supports", SupportSpec),
+        "foundation": ("foundations", FoundationSpec),
         "seal": ("seals", SealSpec),
         "coupling": ("couplings", CouplingSpec),
         "load": ("loads", LoadSpec),
