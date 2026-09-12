@@ -4,6 +4,11 @@ import json
 from pathlib import Path
 import sys
 from traceback import format_exc
+from typing import Callable, Protocol
+
+
+class _SerializableResult(Protocol):
+    def to_dict(self) -> dict[str, object]: ...
 
 
 def _option_value(argv: list[str], name: str) -> str | None:
@@ -37,11 +42,23 @@ def _failure_payload(exc: Exception) -> dict[str, object]:
     }
 
 
-def _run(argv: list[str], output_flag: str, import_path: str, function_name: str, code: int) -> int:
+def _run_callable(
+    argv: list[str],
+    output_flag: str,
+    runner: Callable[[], _SerializableResult],
+    failure_code: int,
+) -> int:
+    """Execute one frozen qualification with a statically discoverable runner.
+
+    The caller imports the runner explicitly.  This is deliberate: PyInstaller
+    cannot reliably discover the previous string-based ``__import__`` calls,
+    which allowed the executable to build successfully while omitting the
+    qualification modules themselves.
+    """
+
     output_path = _option_value(argv, output_flag)
     try:
-        module = __import__(import_path, fromlist=[function_name])
-        result = getattr(module, function_name)()
+        result = runner()
         payload: dict[str, object] = result.to_dict()
         payload["executable"] = str(Path(sys.executable).resolve())
         payload["frozen"] = bool(getattr(sys, "frozen", False))
@@ -49,53 +66,80 @@ def _run(argv: list[str], output_flag: str, import_path: str, function_name: str
         return 0
     except Exception as exc:
         _write_payload(output_path, _failure_payload(exc))
-        return code
+        return failure_code
 
 
-def frozen_self_test_main(argv):
-    return _run(argv, "--self-test-output", "ross_studio.frozen_selftest", "run_frozen_self_test", 2)
+def frozen_self_test_main(argv: list[str]) -> int:
+    from ross_studio.frozen_selftest import run_frozen_self_test
+
+    return _run_callable(argv, "--self-test-output", run_frozen_self_test, 2)
 
 
-def frozen_project_io_main(argv):
-    return _run(argv, "--project-io-output", "ross_studio.frozen_project_io", "run_frozen_project_io_test", 4)
+def frozen_project_io_main(argv: list[str]) -> int:
+    from ross_studio.frozen_project_io import run_frozen_project_io_test
+
+    return _run_callable(argv, "--project-io-output", run_frozen_project_io_test, 4)
 
 
-def frozen_gui_smoke_main(argv):
-    return _run(argv, "--gui-smoke-output", "ross_studio.frozen_gui_smoke", "run_frozen_gui_smoke", 3)
+def frozen_gui_smoke_main(argv: list[str]) -> int:
+    from ross_studio.frozen_gui_smoke import run_frozen_gui_smoke
+
+    return _run_callable(argv, "--gui-smoke-output", run_frozen_gui_smoke, 3)
 
 
-def frozen_engineering_outputs_main(argv):
-    return _run(argv, "--engineering-outputs-output", "ross_studio.frozen_engineering_outputs", "run_frozen_engineering_outputs_test", 5)
+def frozen_engineering_outputs_main(argv: list[str]) -> int:
+    from ross_studio.frozen_engineering_outputs import run_frozen_engineering_outputs_test
+
+    return _run_callable(
+        argv,
+        "--engineering-outputs-output",
+        run_frozen_engineering_outputs_test,
+        5,
+    )
 
 
-def frozen_static_modal_020_main(argv):
-    return _run(argv, "--static-modal-020-output", "ross_studio.frozen_static_modal_020", "run_frozen_static_modal_020_test", 6)
+def frozen_static_modal_020_main(argv: list[str]) -> int:
+    from ross_studio.frozen_static_modal_020 import run_frozen_static_modal_020_test
+
+    return _run_callable(
+        argv,
+        "--static-modal-020-output",
+        run_frozen_static_modal_020_test,
+        6,
+    )
 
 
-def frozen_time_frequency_021_main(argv):
-    return _run(argv, "--time-frequency-021-output", "ross_studio.frozen_time_frequency_021", "run_frozen_time_frequency_021_test", 7)
+def frozen_time_frequency_021_main(argv: list[str]) -> int:
+    from ross_studio.frozen_time_frequency_021 import run_frozen_time_frequency_021_test
+
+    return _run_callable(
+        argv,
+        "--time-frequency-021-output",
+        run_frozen_time_frequency_021_test,
+        7,
+    )
 
 
-def frozen_stochastic_022_main(argv):
-    return _run(argv, "--stochastic-022-output", "ross_studio.frozen_stochastic_022", "run_frozen_stochastic_022_test", 8)
+def frozen_stochastic_022_main(argv: list[str]) -> int:
+    from ross_studio.frozen_stochastic_022 import run_frozen_stochastic_022_test
+
+    return _run_callable(
+        argv,
+        "--stochastic-022-output",
+        run_frozen_stochastic_022_test,
+        8,
+    )
 
 
-def frozen_multirotor_023_main(argv):
-    # Static import keeps the 0.23 self-test discoverable by PyInstaller rather
-    # than depending on dynamic-import heuristics in a frozen executable.
-    output_path = _option_value(argv, "--multirotor-023-output")
-    try:
-        from ross_studio.frozen_multirotor_023 import run_frozen_multirotor_023_test
+def frozen_multirotor_023_main(argv: list[str]) -> int:
+    from ross_studio.frozen_multirotor_023 import run_frozen_multirotor_023_test
 
-        result = run_frozen_multirotor_023_test()
-        payload: dict[str, object] = result.to_dict()
-        payload["executable"] = str(Path(sys.executable).resolve())
-        payload["frozen"] = bool(getattr(sys, "frozen", False))
-        _write_payload(output_path, payload)
-        return 0
-    except Exception as exc:
-        _write_payload(output_path, _failure_payload(exc))
-        return 9
+    return _run_callable(
+        argv,
+        "--multirotor-023-output",
+        run_frozen_multirotor_023_test,
+        9,
+    )
 
 
 def main() -> int:
@@ -116,7 +160,9 @@ def main() -> int:
         return frozen_stochastic_022_main(argv)
     if "--multirotor-023-self-test" in argv or "--multirotor-023-output" in argv:
         return frozen_multirotor_023_main(argv)
+
     from ross_studio.app import launch
+
     return int(launch())
 
 
