@@ -59,11 +59,21 @@ class SealStudioService:
         return self.rs
 
     @staticmethod
-    def _node(project: RotorProject, position_mm: float) -> int:
-        mapping = BaseRossModelBuilder.map_position(project, position_mm)
-        if mapping.node is None:
+    def _node(project: RotorProject, source: SealSpec) -> int:
+        """Resolve the node against the prospective model, never by nearest-node snapping.
+
+        A brand-new seal is itself an exact-node insertion request. Calculating it must
+        therefore use the topology that would exist after Apply, not only the current
+        live project. Appending a duplicate draft for an Edit is harmless because the
+        topology service unions physical coordinates.
+        """
+
+        candidate = deepcopy(project)
+        candidate.seals.append(deepcopy(source))
+        mapping = BaseRossModelBuilder.map_position(candidate, source.position_mm)
+        if mapping.node is None:  # defensive: NodeInsertionService should insert it exactly
             raise EngineeringError(
-                f"Seal position {position_mm:g} mm is not an exact ROSS shaft node after topology insertion."
+                f"Seal position {source.position_mm:g} mm could not be represented as an exact ROSS shaft node."
             )
         return int(mapping.node)
 
@@ -139,7 +149,7 @@ class SealStudioService:
                 pass
         return payload
 
-    def _direct(self, rs: Any, project: RotorProject, source: SealSpec, node: int) -> SealCalculationPreview:
+    def _direct(self, rs: Any, source: SealSpec, node: int) -> SealCalculationPreview:
         native = rs.SealElement(
             n=node,
             kxx=source.kxx,
@@ -162,36 +172,35 @@ class SealStudioService:
             summary={"ross_class": type(native).__name__, "node": node, "model": SealModel.DIRECT.value},
         )
 
-    def _labyrinth(self, rs: Any, source: LabyrinthSealSpec, node: int) -> SealCalculationPreview:
+    def _labyrinth(self, source: LabyrinthSealSpec, node: int) -> SealCalculationPreview:
         from ross.seals.labyrinth_seal import LabyrinthSeal
         from ross.units import Q_
 
         source.validate_inputs()
-        kwargs: dict[str, object] = {
-            "n": node,
-            "shaft_radius": source.shaft_radius_m,
-            "radial_clearance": source.radial_clearance_m,
-            "n_teeth": source.n_teeth,
-            "pitch": source.pitch_m,
-            "tooth_height": source.tooth_height_m,
-            "tooth_width": source.tooth_width_m,
-            "seal_type": source.seal_type,
-            "inlet_pressure": source.inlet_pressure_pa,
-            "outlet_pressure": source.outlet_pressure_pa,
-            "inlet_temperature": source.inlet_temperature_k,
-            "frequency": Q_(source.frequency_rpm, "RPM"),
-            "preswirl": source.preswirl,
-            "gas_composition": source.gas_composition or None,
-            "molar": source.molar_kg_kmol,
-            "gamma": source.gamma,
-            "tz": None if source.tz_k is None else list(source.tz_k),
-            "muz": None if source.muz_pa_s is None else list(source.muz_pa_s),
-            "analz": source.analz,
-            "nprt": source.nprt,
-            "iopt1": source.iopt1,
-            "tag": source.name,
-        }
-        native = LabyrinthSeal(**kwargs)
+        native = LabyrinthSeal(
+            n=node,
+            shaft_radius=source.shaft_radius_m,
+            radial_clearance=source.radial_clearance_m,
+            n_teeth=source.n_teeth,
+            pitch=source.pitch_m,
+            tooth_height=source.tooth_height_m,
+            tooth_width=source.tooth_width_m,
+            seal_type=source.seal_type,
+            inlet_pressure=source.inlet_pressure_pa,
+            outlet_pressure=source.outlet_pressure_pa,
+            inlet_temperature=source.inlet_temperature_k,
+            frequency=Q_(source.frequency_rpm, "RPM"),
+            preswirl=source.preswirl,
+            gas_composition=source.gas_composition or None,
+            molar=source.molar_kg_kmol,
+            gamma=source.gamma,
+            tz=None if source.tz_k is None else list(source.tz_k),
+            muz=None if source.muz_pa_s is None else list(source.muz_pa_s),
+            analz=source.analz,
+            nprt=source.nprt,
+            iopt1=source.iopt1,
+            tag=source.name,
+        )
         coefficients = self._coefficients(native)
         leakage = self._leakage(native)
         prepared = deepcopy(source)
@@ -206,12 +215,11 @@ class SealStudioService:
         prepared.validate_calculated()
         return SealCalculationPreview(deepcopy(source), prepared, native, node, SealModel.LABYRINTH, leakage, dict(prepared.calculation))
 
-    def _hole_pattern(self, rs: Any, source: HolePatternSealSpec, node: int) -> SealCalculationPreview:
+    def _hole_pattern(self, source: HolePatternSealSpec, node: int) -> SealCalculationPreview:
         from ross.seals.holepattern_seal import HolePatternSeal
         from ross.units import Q_
 
         source.validate_inputs()
-        stage = source.stage()
         native = HolePatternSeal(
             n=node,
             shaft_radius=source.shaft_radius_m,
@@ -223,7 +231,7 @@ class SealStudioService:
             molar=source.molar_kg_kmol,
             gamma=source.gamma,
             tag=source.name,
-            **stage.ross_kwargs(),
+            **source.stage().ross_kwargs(),
         )
         coefficients = self._coefficients(native)
         leakage = self._leakage(native)
@@ -239,7 +247,7 @@ class SealStudioService:
         prepared.validate_calculated()
         return SealCalculationPreview(deepcopy(source), prepared, native, node, SealModel.HOLE_PATTERN, leakage, dict(prepared.calculation))
 
-    def _hybrid(self, rs: Any, source: HybridSealSpec, node: int) -> SealCalculationPreview:
+    def _hybrid(self, source: HybridSealSpec, node: int) -> SealCalculationPreview:
         from ross.seals.hybrid_seal import HybridSeal
         from ross.units import Q_
 
@@ -284,16 +292,16 @@ class SealStudioService:
     def calculate(self, project: RotorProject, source: SealSpec) -> SealCalculationPreview:
         project.validate()
         rs = self._ross()
-        node = self._node(project, source.position_mm)
+        node = self._node(project, source)
         model = seal_model(source)
         if model == SealModel.DIRECT:
-            return self._direct(rs, project, source, node)
+            return self._direct(rs, source, node)
         if isinstance(source, LabyrinthSealSpec):
-            return self._labyrinth(rs, source, node)
+            return self._labyrinth(source, node)
         if isinstance(source, HolePatternSealSpec):
-            return self._hole_pattern(rs, source, node)
+            return self._hole_pattern(source, node)
         if isinstance(source, HybridSealSpec):
-            return self._hybrid(rs, source, node)
+            return self._hybrid(source, node)
         raise EngineeringError(
             f"Seal {source.name!r} declares model {model.value} but its engineering spec type is {type(source).__name__}."
         )
