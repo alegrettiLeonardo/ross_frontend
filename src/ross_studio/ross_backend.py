@@ -9,27 +9,21 @@ from .domain import EngineeringError, FoundationModel, FoundationSpec, RotorProj
 from .ross_backend_base import *  # noqa: F401,F403
 from .ross_backend_base import RossBackend as _BaseRossBackend
 from .ross_backend_base import RossBuildResult, RossModelBuilder as _BaseRossModelBuilder
+from .seal_models import is_advanced_seal
 
 
 class RossModelBuilder(_BaseRossModelBuilder):
-    """Qualified builder extension for seals and Foundation Studio 0.24.
+    """Qualified builder extension for Foundation Studio 0.24 and Seal Studio 0.25.
 
     Foundation ownership is always ``bearing -> support -> foundation -> ground`` at
     the engineering-model level, but the ROSS realization depends on whether the
-    Foundation owns physical inertia:
+    Foundation owns physical inertia.
 
-    * RIGID keeps the previously qualified support-to-ground element unchanged.
-    * LUMPED_KC with zero damping is statically condensed onto the support node.
-      This is an exact Schur complement and therefore does not invent an epsilon
-      mass or leave a zero-mass algebraic node in the ROSS mass matrix.
-    * FREQUENCY_DEPENDENT_KC is condensed as complex dynamic stiffness at every
-      supplied frequency and realized as a native frequency-dependent ROSS bearing.
-    * LUMPED_KCM keeps an explicit Foundation node because its mass is physical.
-
-    A massless constant-K/C two-stage chain with non-zero damping has a rational,
-    frequency-dependent equivalent impedance. It cannot be represented exactly by a
-    single constant ROSS BearingElement, so that contract fails closed rather than
-    silently approximating the physics.
+    Seal Studio retains native ROSS model inputs/results in the engineering domain.
+    Advanced seals are calculated explicitly in Seal Studio and strict rotor assembly
+    consumes the qualified frequency-dependent K/C/M table as ``rs.SealElement``.
+    The expensive seal flow solver is therefore never rerun implicitly during an
+    unrelated rotor edit or analysis build.
     """
 
     @staticmethod
@@ -58,8 +52,6 @@ class RossModelBuilder(_BaseRossModelBuilder):
 
     @staticmethod
     def _solve_series_impedance(z_support: np.ndarray, z_foundation: np.ndarray, *, name: str) -> np.ndarray:
-        """Condense the internal Foundation DOF exactly in the frequency domain."""
-
         total = z_support + z_foundation
         try:
             solved = np.linalg.solve(total, z_support)
@@ -93,8 +85,6 @@ class RossModelBuilder(_BaseRossModelBuilder):
         *,
         name: str,
     ) -> np.ndarray:
-        """Return d(Im(Zeq))/dω at ω=0 without finite differencing."""
-
         total_k = k_support + k_foundation
         total_c = c_support + c_foundation
         try:
@@ -125,8 +115,6 @@ class RossModelBuilder(_BaseRossModelBuilder):
         )
 
     def _foundation_ground_element(self, rs: Any, spec: FoundationSpec, node: int) -> Any:
-        """Ground element for a physical-mass LUMPED_KCM Foundation node."""
-
         return rs.BearingElement(
             n=node,
             kxx=spec.kxx,
@@ -291,6 +279,48 @@ class RossModelBuilder(_BaseRossModelBuilder):
             tag=project.name,
         )
 
+    def _seal_element(self, rs: Any, project: RotorProject, spec: Any, *, strict: bool) -> Any | None:
+        mapping = self.map_position(project, spec.position_mm)
+        if mapping.node is None:
+            if strict:
+                raise EngineeringError(f"Seal {spec.name!r} is not located at an exact FE node.")
+            return None
+
+        if is_advanced_seal(spec):
+            spec.validate_calculated()
+            points = spec.calculated_coefficients
+            frequency = np.asarray([point.rpm for point in points], dtype=float) * 2.0 * pi / 60.0
+            return rs.SealElement(
+                n=mapping.node,
+                kxx=np.asarray([point.kxx for point in points], dtype=float),
+                kyy=np.asarray([point.kyy for point in points], dtype=float),
+                kxy=np.asarray([point.kxy for point in points], dtype=float),
+                kyx=np.asarray([point.kyx for point in points], dtype=float),
+                cxx=np.asarray([point.cxx for point in points], dtype=float),
+                cyy=np.asarray([point.cyy for point in points], dtype=float),
+                cxy=np.asarray([point.cxy for point in points], dtype=float),
+                cyx=np.asarray([point.cyx for point in points], dtype=float),
+                mxx=np.asarray([point.mxx for point in points], dtype=float),
+                myy=np.asarray([point.myy for point in points], dtype=float),
+                mxy=np.asarray([point.mxy for point in points], dtype=float),
+                myx=np.asarray([point.myx for point in points], dtype=float),
+                frequency=frequency,
+                tag=spec.name,
+            )
+
+        return rs.SealElement(
+            n=mapping.node,
+            kxx=spec.kxx,
+            kyy=spec.kyy,
+            kxy=spec.kxy,
+            kyx=spec.kyx,
+            cxx=spec.cxx,
+            cyy=spec.cyy,
+            cxy=spec.cxy,
+            cyx=spec.cyx,
+            tag=spec.name,
+        )
+
     def build(self, project: RotorProject, *, strict: bool = True) -> RossBuildResult:
         result = super().build(project, strict=strict)
         self.last_foundation_nodes: dict[str, int] = {}
@@ -300,44 +330,25 @@ class RossModelBuilder(_BaseRossModelBuilder):
             return result
 
         rs = self._ross()
-        seals: list[Any] = []
-        for spec in project.seals:
-            mapping = self.map_position(project, spec.position_mm)
-            if mapping.node is None:
-                if strict:
-                    raise EngineeringError(
-                        f"Seal {spec.name!r} is not located at an exact FE node."
-                    )
-                continue
-            seals.append(
-                rs.SealElement(
-                    n=mapping.node,
-                    kxx=spec.kxx,
-                    kyy=spec.kyy,
-                    kxy=spec.kxy,
-                    kyx=spec.kyx,
-                    cxx=spec.cxx,
-                    cyy=spec.cyy,
-                    cxy=spec.cxy,
-                    cyx=spec.cyx,
-                    tag=spec.name,
-                )
-            )
+        seals = [
+            element
+            for spec in project.seals
+            if (element := self._seal_element(rs, project, spec, strict=strict)) is not None
+        ]
 
         existing_bearings = list(result.rotor.bearing_elements)
-        rotor = rs.Rotor(
+        result.rotor = rs.Rotor(
             shaft_elements=list(result.rotor.shaft_elements),
             disk_elements=list(result.rotor.disk_elements) or None,
             bearing_elements=[*existing_bearings, *seals] or None,
             point_mass_elements=list(result.rotor.point_mass_elements) or None,
             tag=project.name,
         )
-        result.rotor = rotor
         return result
 
 
 class RossBackend(_BaseRossBackend):
-    """Application boundary using the 0.24 foundation/seal-aware strict builder."""
+    """Application boundary using the qualified Foundation + Seal Studio builder."""
 
     def __init__(self, ross_module: Any | None = None) -> None:
         self.builder = RossModelBuilder(ross_module)
