@@ -109,6 +109,14 @@ def test_foundation_has_distinct_owner_from_flexible_support() -> None:
     assert foundation.implementation_phase == "0.19.0"
 
 
+def test_seal_studio_has_dedicated_release_locked_owner() -> None:
+    seal = route_spec("model.seals")
+    assert seal.owner == "seal"
+    assert seal.editor_key is None
+    assert seal.implementation_phase == "0.25.0"
+    assert seal.operational is False
+
+
 def test_every_public_route_has_one_page_owner() -> None:
     assert set(PAGE_ROUTES) == set(EXPECTED_ROUTES)
     assert all(PAGE_ROUTES[route].owner for route in EXPECTED_ROUTES)
@@ -136,18 +144,17 @@ def test_sidebar_renders_new_tree_and_preserves_frozen_legacy_aliases(qtbot) -> 
     qtbot.addWidget(window)
 
     assert set(window.sidebar.route_buttons) == set(EXPECTED_ROUTES)
-    # Compatibility aliases keep the already-qualified frozen 0.15 smoke usable,
-    # without reintroducing the duplicate visible Shaft state.
     assert {"rotor", "disks", "bearings", "seals", "supports", "couplings", "loads", "ump", "probes"} <= set(window.sidebar.buttons)
     assert "shaft" not in window.sidebar.buttons
     assert window.sidebar.route_buttons["model.bearings.amb"].isEnabled() is False
 
 
-def test_home_foundation_and_analysis_have_dedicated_page_owners(qtbot) -> None:
+def test_home_foundation_seal_and_analysis_have_dedicated_page_owners(qtbot) -> None:
     pytest.importorskip("ross")
     from ross_studio.app import RossStudioWindow
     from ross_studio.pages.architecture_workspaces import AnalysisRoutePage, FoundationWorkspacePage
     from ross_studio.pages.project_home import ProjectHomePage
+    from ross_studio.pages.seal_workspace import SealStudioWorkspacePage
     from ross_studio.pages.stochastic_workspace import StochasticWorkspacePage
 
     window = RossStudioWindow()
@@ -160,6 +167,11 @@ def test_home_foundation_and_analysis_have_dedicated_page_owners(qtbot) -> None:
     foundation = window.stack.currentWidget()
     assert isinstance(foundation, FoundationWorkspacePage)
     assert foundation is not window.rotor_page
+
+    window._navigate("model.seals")
+    seal = window.stack.currentWidget()
+    assert isinstance(seal, SealStudioWorkspacePage)
+    assert seal is not window.rotor_page
 
     analysis_pages = []
     for route in (
@@ -194,8 +206,6 @@ def test_navigation_never_mutates_engineering_model(qtbot) -> None:
 
     for route in EXPECTED_ROUTES:
         if route == "model.bearings.amb":
-            # Public UI blocks this route; direct application routing is still
-            # deterministic and must not mutate the physical model.
             window._navigate(route)
         else:
             window.sidebar.set_active(route)
