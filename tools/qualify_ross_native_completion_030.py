@@ -87,10 +87,15 @@ def qualify_amb() -> None:
     assert any(type(elm).__name__ == "MagneticBearingElement" for elm in built.rotor.bearing_elements)
     AMBSensitivityRequest(speed_rpm=0.0, t_max_s=1.0, dt_s=0.01).validate()
 
-    rotor = rs.rotor_amb_example()
+    # Use the current public ROSS AMB fixture.  The old name
+    # ``rotor_amb_example`` appears only in stale release-note text and is not
+    # exported by ROSS 2.3.0; ``rotor_example_amb_simple`` is the native,
+    # lightweight example exported from ross.bearings.magnetic.amb_models.
+    rotor = rs.rotor_example_amb_simple()
     t = np.arange(0.0, 0.011, 0.001)
     force = np.zeros((len(t), rotor.ndof))
     result = rotor.run_time_response(100.0, force, t, method="newmark")
+    assert type(result).__name__ == "AmbTimeResponseResults"
     assert hasattr(result, "plot_amb_currents")
     assert hasattr(result, "plot_amb_forces")
     assert hasattr(result, "plot_amb_disps")
