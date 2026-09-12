@@ -12,6 +12,7 @@ on:
       - feature/stochastic-ross-0.22.0
       - feature/multirotor-ross-0.23.0
       - feature/foundation-studio-0.24.0
+      - feature/seal-studio-0.25.0
   workflow_dispatch:
 
 jobs:
@@ -47,7 +48,7 @@ jobs:
       - name: Build production-style windowed executable
         run: python -m PyInstaller --clean --noconfirm packaging/ROSS-Studio.spec
 
-      - name: Qualify exact frozen binary including project I/O, Engineering Outputs, Static/Modal 0.20, Time/Frequency 0.21, Stochastic 0.22 and MultiRotor 0.23 runtime
+      - name: Qualify exact frozen binary including project I/O, Engineering Outputs, Static/Modal, Time/Frequency, Stochastic and MultiRotor runtime
         run: python tools/qualify_frozen_binary.py dist artifacts/frozen_selftest_${{ runner.os }}.json
 
       - name: Qualify frozen MultiRotor 0.23 runtime
@@ -56,10 +57,13 @@ jobs:
       - name: Qualify frozen Foundation Studio 0.24 runtime
         run: python tools/qualify_frozen_foundation_024.py dist artifacts/frozen_selftest_${{ runner.os }}_foundation_024.json
 
+      - name: Qualify frozen Seal Studio 0.25 native runtime
+        run: python tools/qualify_frozen_seal_025.py dist artifacts/frozen_selftest_${{ runner.os }}_seal_025.json
+
       - name: Upload frozen executable and qualification evidence
         uses: actions/upload-artifact@v4
         with:
-          name: ross-studio-0.24.0-${{ runner.os }}
+          name: ross-studio-0.25.0-${{ runner.os }}
           path: |
             dist/ROSS-Studio/
             artifacts/frozen_selftest_${{ runner.os }}.json
@@ -71,4 +75,5 @@ jobs:
             artifacts/frozen_selftest_${{ runner.os }}_stochastic_022.json
             artifacts/frozen_selftest_${{ runner.os }}_multirotor_023.json
             artifacts/frozen_selftest_${{ runner.os }}_foundation_024.json
+            artifacts/frozen_selftest_${{ runner.os }}_seal_025.json
           if-no-files-found: error
