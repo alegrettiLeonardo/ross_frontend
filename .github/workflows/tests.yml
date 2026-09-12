@@ -58,6 +58,8 @@ jobs:
         run: python tools/qualify_time_frequency_native_021.py
       - name: Qualify native ROSS Stochastic outputs 0.22
         run: python tools/qualify_stochastic_native_022.py
+      - name: Qualify native ROSS MultiRotor 0.23
+        run: python tools/qualify_multirotor_023.py
       - name: Qualify Engineering Outputs 0.18 package
         run: python tools/qualify_engineering_outputs_018.py
       - name: Run production-resolution OP-W60 pipeline
@@ -94,6 +96,7 @@ jobs:
             artifacts/time_frequency_native_021/**
             artifacts/stochastic_native_022_qualification.json
             artifacts/stochastic_native_022/**
+            artifacts/multirotor_023_qualification.json
             artifacts/engineering_outputs_018_qualification.json
             artifacts/engineering_outputs_018/**
             artifacts/op_w60_pipeline_summary.json
