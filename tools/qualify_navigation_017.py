@@ -42,8 +42,9 @@ def main() -> None:
         raise RuntimeError(f"Navigation route contract mismatch: {routes}")
     if set(PAGE_ROUTES) != set(routes):
         raise RuntimeError("Page registry does not own every public navigation route.")
-    if not navigation_node("model.bearings.amb").locked:
-        raise RuntimeError("AMB must remain visible but locked.")
+    amb_node = navigation_node("model.bearings.amb")
+    if amb_node.kind != "route":
+        raise RuntimeError("AMB must remain a first-class visible navigation route.")
     if canonical_route("ump") != "model.loads.electromagnetic":
         raise RuntimeError("Legacy UMP alias was not moved under Loads / Electromagnetic.")
     if canonical_route("results") == "results":
@@ -58,7 +59,8 @@ def main() -> None:
         "version": "0.17.0",
         "project": project.name,
         "routes": list(routes),
-        "amb_locked": True,
+        "amb_locked": bool(amb_node.locked),
+        "amb_route_policy": "0.17 established the visible AMB route; later qualified releases may unlock it without changing route ownership.",
         "foundation_owner": PAGE_ROUTES["model.supports.foundation"].owner,
         "global_results_public": False,
         "top_level_ump_public": False,

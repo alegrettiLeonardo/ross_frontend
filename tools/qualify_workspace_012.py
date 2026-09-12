@@ -27,13 +27,14 @@ READY = {
     "TiltingPad",
     "ThrustPad",
     "SqueezeFilmDamper",
+    "MagneticBearingElement",
 }
 
 
 def main() -> int:
-    # This is an inherited 0.12 mesh/workspace regression gate. It must validate
-    # the currently installed ROSS Studio release candidate rather than pinning an
-    # obsolete application version. Package metadata and import metadata must agree.
+    # This is an inherited 0.12 mesh/workspace regression gate. It validates
+    # the currently installed ROSS Studio release candidate rather than pinning
+    # obsolete capability states from the historical 0.12 release.
     assert ross_studio.__version__ == distribution_version("ross-studio")
     assert ross.__version__ == "2.3.0"
 
@@ -73,8 +74,6 @@ def main() -> int:
     for ross_class in READY:
         assert catalog_rows[ross_class]["status"] == AdapterStatus.VALIDATED.value
         assert catalog_rows[ross_class]["can_execute"] is True
-    assert catalog_rows["MagneticBearingElement"]["status"] == AdapterStatus.BLOCKED.value
-    assert catalog_rows["MagneticBearingElement"]["can_execute"] is False
 
     payload = {
         "status": "PASS",
