@@ -39,6 +39,8 @@ def main() -> int:
     assert sweep_errors[1] <= sweep_errors[0] + max(1.0e-9, 1.0e-6 * max(abs(sweep_errors[0]), 1.0))
     assert sweep_errors[2] <= sweep_errors[1] + max(1.0e-9, 1.0e-6 * max(abs(sweep_errors[1]), 1.0))
     assert payload["high_stiffness_max_error_percent"] < 0.5
+    assert payload["massless_kc_no_internal_mass_pass"] is True
+    assert payload["massless_damped_kc_blocked"] is True
     assert payload["modal_sensitivity_max_shift_percent"] > 0.5
     assert payload["matrix_delta_norm_m"] > 0.0
     assert payload["matrix_delta_norm_k"] > 0.0

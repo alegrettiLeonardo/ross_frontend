@@ -19,6 +19,24 @@ from ross_studio.project_io import load_project, save_project
 from ross_studio.ross_backend import RossModelBuilder
 
 
+def _support_matrices(support):
+    return (
+        np.asarray([[support.kxx, support.kxy], [support.kyx, support.kyy or support.kxx]], dtype=float),
+        np.asarray([[support.cxx, support.cxy], [support.cyx, support.cyy or support.cxx]], dtype=float),
+    )
+
+
+def _equivalent_at_point(support, point: FoundationCoefficientPoint):
+    ks, cs = _support_matrices(support)
+    kf = np.asarray([[point.kxx, point.kxy], [point.kyx, point.kyy]], dtype=float)
+    cf = np.asarray([[point.cxx, point.cxy], [point.cyx, point.cyy]], dtype=float)
+    omega = point.frequency_hz * 2.0 * pi
+    zs = ks.astype(complex) + 1j * omega * cs
+    zf = kf.astype(complex) + 1j * omega * cf
+    zeq = zs - zs @ np.linalg.solve(zs + zf, zs)
+    return zeq.real, zeq.imag / omega
+
+
 def test_foundation_is_first_class_and_owned_by_support() -> None:
     model = load_reference_project_model()
     project = model.engineering
@@ -170,7 +188,59 @@ def test_lumped_kcm_assembles_exact_bearing_support_foundation_ground_chain() ->
     )
 
 
-def test_frequency_dependent_foundation_is_converted_from_hz_to_ross_rad_s_and_interpolates() -> None:
+def test_massless_lumped_kc_is_exactly_condensed_without_zero_mass_internal_dof() -> None:
+    rs = pytest.importorskip("ross")
+    model = load_reference_project_model()
+    project = model.engineering
+    assert project is not None
+    baseline = RossModelBuilder(rs).build(deepcopy(project), strict=True).rotor
+    foundation = FoundationSpec(
+        name="DE massless KC",
+        support_index=0,
+        model_type=FoundationModel.LUMPED_KC,
+        kxx=1.0e12,
+        kyy=1.0e12,
+    )
+    project.foundations.append(foundation)
+
+    builder = RossModelBuilder(rs)
+    built = builder.build(project, strict=True)
+    support = project.supports[0]
+    element = next(e for e in built.rotor.bearing_elements if e.tag == f"{foundation.name} / condensed ground")
+    ks, _ = _support_matrices(support)
+    kf = np.diag([1.0e12, 1.0e12])
+    expected = ks - ks @ np.linalg.solve(ks + kf, ks)
+
+    assert foundation.name not in builder.last_foundation_nodes
+    assert built.rotor.M().shape == baseline.M().shape
+    assert all(e.tag != f"{foundation.name} mass" for e in built.rotor.point_mass_elements)
+    np.testing.assert_allclose(element.K(0.0)[:2, :2], expected, rtol=1e-12, atol=1e-6)
+    modal = built.rotor.run_modal(speed=0.0, num_modes=12)
+    assert np.all(np.isfinite(np.asarray(modal.wd, dtype=float)))
+
+
+def test_massless_lumped_kc_with_damping_fails_closed_instead_of_approximating() -> None:
+    rs = pytest.importorskip("ross")
+    model = load_reference_project_model()
+    project = model.engineering
+    assert project is not None
+    project.foundations.append(
+        FoundationSpec(
+            name="DE damped massless KC",
+            support_index=0,
+            model_type=FoundationModel.LUMPED_KC,
+            kxx=1.0e8,
+            kyy=1.0e8,
+            cxx=1.0e4,
+            cyy=1.0e4,
+        )
+    )
+
+    with pytest.raises(EngineeringError, match="frequency-dependent rational impedance"):
+        RossModelBuilder(rs).build(project, strict=True)
+
+
+def test_frequency_dependent_foundation_is_condensed_without_massless_internal_dof() -> None:
     rs = pytest.importorskip("ross")
     model = load_reference_project_model()
     project = model.engineering
@@ -188,14 +258,28 @@ def test_frequency_dependent_foundation_is_converted_from_hz_to_ross_rad_s_and_i
 
     builder = RossModelBuilder(rs)
     built = builder.build(project, strict=True)
-    element = next(e for e in built.rotor.bearing_elements if e.tag == f"{foundation.name} / ground")
+    element = next(e for e in built.rotor.bearing_elements if e.tag == f"{foundation.name} / condensed ground")
 
+    assert foundation.name not in builder.last_foundation_nodes
+    assert all(e.tag != f"{foundation.name} mass" for e in built.rotor.point_mass_elements)
     np.testing.assert_allclose(element.frequency, np.asarray([10.0, 20.0]) * 2.0 * pi)
+    endpoint = [_equivalent_at_point(project.supports[0], point) for point in foundation.coefficients]
+    for point, (expected_k, expected_c) in zip(foundation.coefficients, endpoint):
+        omega = point.frequency_hz * 2.0 * pi
+        np.testing.assert_allclose(element.K(omega)[:2, :2], expected_k, rtol=1e-10, atol=1e-6)
+        np.testing.assert_allclose(element.C(omega)[:2, :2], expected_c, rtol=1e-10, atol=1e-9)
+
     midpoint = 15.0 * 2.0 * pi
     np.testing.assert_allclose(
         element.K(midpoint)[:2, :2],
-        np.asarray([[2.0e8, 1.0e6], [-2.0e6, 2.2e8]]),
-        rtol=1e-12,
+        0.5 * (endpoint[0][0] + endpoint[1][0]),
+        rtol=1e-10,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        element.C(midpoint)[:2, :2],
+        0.5 * (endpoint[0][1] + endpoint[1][1]),
+        rtol=1e-10,
         atol=1e-9,
     )
 

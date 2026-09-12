@@ -45,6 +45,8 @@ class FoundationQualification:
     frequency_interpolation_pass: bool
     unsupported_contracts_blocked: bool
     exact_support_ownership_pass: bool
+    massless_kc_no_internal_mass_pass: bool
+    massless_damped_kc_blocked: bool
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -96,13 +98,44 @@ def _matrix_evidence(base_rotor, dynamic_rotor) -> tuple[float, float, float, fl
     )
 
 
-def _high_stiffness_sweep(rs, baseline_project, baseline_hz: np.ndarray) -> tuple[list[float], list[float], np.ndarray, bool]:
-    """Demonstrate the Foundation K→∞ asymptote without mixing in added mass.
+def _support_matrices(support) -> tuple[np.ndarray, np.ndarray]:
+    return (
+        np.asarray([[support.kxx, support.kxy], [support.kyx, support.kyy or support.kxx]], dtype=float),
+        np.asarray([[support.cxx, support.cxy], [support.cyx, support.cyy or support.cxx]], dtype=float),
+    )
 
-    Three decades are intentionally evaluated instead of one arbitrary large-K point.
-    The final point must be within 0.5 % of the legacy/RIGID modes and the modal error
-    must contract monotonically (up to a tiny numerical tolerance) as K increases.
-    """
+
+def _point_matrices(point: FoundationCoefficientPoint) -> tuple[np.ndarray, np.ndarray]:
+    return (
+        np.asarray([[point.kxx, point.kxy], [point.kyx, point.kyy]], dtype=float),
+        np.asarray([[point.cxx, point.cxy], [point.cyx, point.cyy]], dtype=float),
+    )
+
+
+def _series_impedance(z_support: np.ndarray, z_foundation: np.ndarray) -> np.ndarray:
+    return z_support - z_support @ np.linalg.solve(z_support + z_foundation, z_support)
+
+
+def _frequency_equivalent(support, point: FoundationCoefficientPoint) -> tuple[np.ndarray, np.ndarray]:
+    ks, cs = _support_matrices(support)
+    kf, cf = _point_matrices(point)
+    omega = point.frequency_hz * 2.0 * pi
+    if abs(omega) <= np.finfo(float).eps:
+        keq = _series_impedance(ks.astype(complex), kf.astype(complex)).real
+        total_k = ks + kf
+        a_inv_ks = np.linalg.solve(total_k, ks)
+        a_inv_cs = np.linalg.solve(total_k, cs)
+        a_inv_b_a_inv_ks = np.linalg.solve(total_k, (cs + cf) @ a_inv_ks)
+        ceq = cs - cs @ a_inv_ks - ks @ a_inv_cs + ks @ a_inv_b_a_inv_ks
+        return np.asarray(keq, dtype=float), np.asarray(ceq, dtype=float)
+    zs = ks.astype(complex) + 1j * omega * cs
+    zf = kf.astype(complex) + 1j * omega * cf
+    zeq = _series_impedance(zs, zf)
+    return np.asarray(zeq.real, dtype=float), np.asarray(zeq.imag / omega, dtype=float)
+
+
+def _high_stiffness_sweep(rs, baseline_project, baseline_hz: np.ndarray) -> tuple[list[float], list[float], np.ndarray, bool]:
+    """Demonstrate the Foundation K→∞ asymptote without adding a massless DOF."""
 
     stiffness_values = [1.0e10, 1.0e12, 1.0e14]
     errors: list[float] = []
@@ -159,6 +192,23 @@ def run_foundation_qualification() -> FoundationQualification:
     )
     high_error = high_errors[-1]
 
+    massless_probe_project = deepcopy(baseline_project)
+    massless_probe = FoundationSpec(
+        "DE massless KC probe",
+        0,
+        FoundationModel.LUMPED_KC,
+        kxx=1.0e12,
+        kyy=1.0e12,
+    )
+    massless_probe_project.foundations.append(massless_probe)
+    massless_builder = RossModelBuilder(rs)
+    massless_build = massless_builder.build(massless_probe_project, strict=True)
+    massless_no_internal_mass = bool(
+        np.asarray(massless_build.rotor.M()).shape == np.asarray(baseline.M()).shape
+        and massless_probe.name not in massless_builder.last_foundation_nodes
+        and all(getattr(element, "tag", "") != f"{massless_probe.name} mass" for element in massless_build.rotor.point_mass_elements)
+    )
+
     dynamic_mass = 125.0
     soft_project = deepcopy(baseline_project)
     soft_foundation = FoundationSpec(
@@ -210,14 +260,26 @@ def run_foundation_qualification() -> FoundationQualification:
     frequency_project.foundations.append(frequency_foundation)
     frequency_rotor = RossModelBuilder(rs).build(frequency_project, strict=True).rotor
     frequency_element = next(
-        element for element in frequency_rotor.bearing_elements if element.tag == f"{frequency_foundation.name} / ground"
+        element for element in frequency_rotor.bearing_elements if element.tag == f"{frequency_foundation.name} / condensed ground"
     )
     axis_pass = bool(np.allclose(frequency_element.frequency, np.asarray([10.0, 20.0]) * 2.0 * pi, rtol=0.0, atol=1.0e-12))
+    support = frequency_project.supports[frequency_foundation.support_index]
+    endpoint_equivalents = [_frequency_equivalent(support, point) for point in frequency_foundation.coefficients]
+    endpoint_pass = all(
+        np.allclose(frequency_element.K(point.frequency_hz * 2.0 * pi)[:2, :2], expected_k, rtol=1.0e-10, atol=1.0e-6)
+        and np.allclose(frequency_element.C(point.frequency_hz * 2.0 * pi)[:2, :2], expected_c, rtol=1.0e-10, atol=1.0e-9)
+        for point, (expected_k, expected_c) in zip(frequency_foundation.coefficients, endpoint_equivalents)
+    )
     midpoint = 15.0 * 2.0 * pi
-    midpoint_expected = np.asarray([[2.0e8, 1.0e6], [-2.0e6, 2.2e8]])
-    interpolation_pass = bool(np.allclose(frequency_element.K(midpoint)[:2, :2], midpoint_expected, rtol=1.0e-12, atol=1.0e-8))
+    midpoint_expected_k = 0.5 * (endpoint_equivalents[0][0] + endpoint_equivalents[1][0])
+    midpoint_expected_c = 0.5 * (endpoint_equivalents[0][1] + endpoint_equivalents[1][1])
+    interpolation_pass = bool(
+        endpoint_pass
+        and np.allclose(frequency_element.K(midpoint)[:2, :2], midpoint_expected_k, rtol=1.0e-10, atol=1.0e-6)
+        and np.allclose(frequency_element.C(midpoint)[:2, :2], midpoint_expected_c, rtol=1.0e-10, atol=1.0e-9)
+    )
 
-    blocked = True
+    validation_blocked = True
     for candidate in (
         FoundationSpec("6DOF blocked", 0, FoundationModel.LUMPED_KCM, mass_kg=1.0, dof=6),
         FoundationSpec("ROM blocked", 0, FoundationModel.REDUCED_MATRIX),
@@ -225,15 +287,36 @@ def run_foundation_qualification() -> FoundationQualification:
         try:
             candidate.validate()
         except EngineeringError:
-            blocked = blocked and candidate.status == AdapterStatus.BLOCKED
+            validation_blocked = validation_blocked and candidate.status == AdapterStatus.BLOCKED
         else:
-            blocked = False
+            validation_blocked = False
+
+    damped_massless_project = deepcopy(baseline_project)
+    damped_massless_project.foundations.append(
+        FoundationSpec(
+            "Damped massless KC blocked",
+            0,
+            FoundationModel.LUMPED_KC,
+            kxx=1.0e8,
+            kyy=1.0e8,
+            cxx=1.0e4,
+            cyy=1.0e4,
+        )
+    )
+    try:
+        RossModelBuilder(rs).build(damped_massless_project, strict=True)
+    except EngineeringError as exc:
+        damped_massless_blocked = "massless LUMPED_KC" in str(exc) and "frequency-dependent rational impedance" in str(exc)
+    else:
+        damped_massless_blocked = False
+    blocked = bool(validation_blocked and damped_massless_blocked)
 
     gates = (
         rigid_m,
         rigid_k,
         rigid_c,
         high_convergence,
+        massless_no_internal_mass,
         sensitivity > 0.5,
         dm > 0.0,
         dk > 0.0,
@@ -273,6 +356,8 @@ def run_foundation_qualification() -> FoundationQualification:
         frequency_interpolation_pass=interpolation_pass,
         unsupported_contracts_blocked=blocked,
         exact_support_ownership_pass=exact_ownership,
+        massless_kc_no_internal_mass_pass=massless_no_internal_mass,
+        massless_damped_kc_blocked=damped_massless_blocked,
     )
 
 

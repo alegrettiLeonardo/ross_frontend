@@ -14,34 +14,119 @@ from .ross_backend_base import RossBuildResult, RossModelBuilder as _BaseRossMod
 class RossModelBuilder(_BaseRossModelBuilder):
     """Qualified builder extension for seals and Foundation Studio 0.24.
 
-    The 0.23 base builder remains untouched. Foundation Studio only rebuilds the
-    external support chain when a non-rigid FoundationSpec is explicitly present::
+    Foundation ownership is always ``bearing -> support -> foundation -> ground`` at
+    the engineering-model level, but the ROSS realization depends on whether the
+    Foundation owns physical inertia:
 
-        shaft -> bearing -> support node -> support K/C -> foundation node
-              -> foundation K/C -> ground
+    * RIGID keeps the previously qualified support-to-ground element unchanged.
+    * LUMPED_KC with zero damping is statically condensed onto the support node.
+      This is an exact Schur complement and therefore does not invent an epsilon
+      mass or leave a zero-mass algebraic node in the ROSS mass matrix.
+    * FREQUENCY_DEPENDENT_KC is condensed as complex dynamic stiffness at every
+      supplied frequency and realized as a native frequency-dependent ROSS bearing.
+    * LUMPED_KCM keeps an explicit Foundation node because its mass is physical.
 
-    Support mass stays on the support node. LUMPED_KCM adds Foundation mass on the
-    foundation node; LUMPED_KC and FREQUENCY_DEPENDENT_KC retain an exact zero-mass
-    algebraic node instead of inventing epsilon mass. RIGID and absent FoundationSpec
-    leave the previously qualified support-to-ground topology byte-for-byte unchanged.
+    A massless constant-K/C two-stage chain with non-zero damping has a rational,
+    frequency-dependent equivalent impedance. It cannot be represented exactly by a
+    single constant ROSS BearingElement, so that contract fails closed rather than
+    silently approximating the physics.
     """
 
+    @staticmethod
+    def _support_matrices(support: Any) -> tuple[np.ndarray, np.ndarray]:
+        k = np.asarray(
+            [
+                [support.kxx, support.kxy],
+                [support.kyx, support.kyy or support.kxx],
+            ],
+            dtype=float,
+        )
+        c = np.asarray(
+            [
+                [support.cxx, support.cxy],
+                [support.cyx, support.cyy or support.cxx],
+            ],
+            dtype=float,
+        )
+        return k, c
+
+    @staticmethod
+    def _foundation_matrices(spec: FoundationSpec) -> tuple[np.ndarray, np.ndarray]:
+        k = np.asarray([[spec.kxx, spec.kxy], [spec.kyx, spec.kyy]], dtype=float)
+        c = np.asarray([[spec.cxx, spec.cxy], [spec.cyx, spec.cyy]], dtype=float)
+        return k, c
+
+    @staticmethod
+    def _solve_series_impedance(z_support: np.ndarray, z_foundation: np.ndarray, *, name: str) -> np.ndarray:
+        """Condense the internal Foundation DOF exactly in the frequency domain."""
+
+        total = z_support + z_foundation
+        try:
+            solved = np.linalg.solve(total, z_support)
+        except np.linalg.LinAlgError as exc:
+            raise EngineeringError(
+                f"Foundation {name!r} cannot be condensed because support + foundation impedance is singular."
+            ) from exc
+        equivalent = z_support - z_support @ solved
+        if not np.all(np.isfinite(equivalent)):
+            raise EngineeringError(f"Foundation {name!r} condensation produced non-finite coefficients.")
+        return equivalent
+
+    @classmethod
+    def _static_series_stiffness(cls, k_support: np.ndarray, k_foundation: np.ndarray, *, name: str) -> np.ndarray:
+        return np.asarray(
+            cls._solve_series_impedance(
+                np.asarray(k_support, dtype=complex),
+                np.asarray(k_foundation, dtype=complex),
+                name=name,
+            ).real,
+            dtype=float,
+        )
+
+    @classmethod
+    def _zero_frequency_series_damping(
+        cls,
+        k_support: np.ndarray,
+        c_support: np.ndarray,
+        k_foundation: np.ndarray,
+        c_foundation: np.ndarray,
+        *,
+        name: str,
+    ) -> np.ndarray:
+        """Return d(Im(Zeq))/dω at ω=0 without finite differencing."""
+
+        total_k = k_support + k_foundation
+        total_c = c_support + c_foundation
+        try:
+            a_inv_ks = np.linalg.solve(total_k, k_support)
+            a_inv_cs = np.linalg.solve(total_k, c_support)
+            a_inv_b_a_inv_ks = np.linalg.solve(total_k, total_c @ a_inv_ks)
+        except np.linalg.LinAlgError as exc:
+            raise EngineeringError(
+                f"Foundation {name!r} zero-frequency condensation is singular."
+            ) from exc
+        equivalent = (
+            c_support
+            - c_support @ a_inv_ks
+            - k_support @ a_inv_cs
+            + k_support @ a_inv_b_a_inv_ks
+        )
+        if not np.all(np.isfinite(equivalent)):
+            raise EngineeringError(f"Foundation {name!r} zero-frequency damping condensation produced non-finite coefficients.")
+        return np.asarray(equivalent, dtype=float)
+
+    @staticmethod
+    def _matrix_coefficients(matrix: np.ndarray) -> tuple[float, float, float, float]:
+        return (
+            float(matrix[0, 0]),
+            float(matrix[1, 1]),
+            float(matrix[0, 1]),
+            float(matrix[1, 0]),
+        )
+
     def _foundation_ground_element(self, rs: Any, spec: FoundationSpec, node: int) -> Any:
-        if spec.model_type == FoundationModel.FREQUENCY_DEPENDENT_KC:
-            frequency = np.asarray([point.frequency_hz for point in spec.coefficients], dtype=float) * 2.0 * pi
-            return rs.BearingElement(
-                n=node,
-                kxx=np.asarray([point.kxx for point in spec.coefficients], dtype=float),
-                kyy=np.asarray([point.kyy for point in spec.coefficients], dtype=float),
-                kxy=np.asarray([point.kxy for point in spec.coefficients], dtype=float),
-                kyx=np.asarray([point.kyx for point in spec.coefficients], dtype=float),
-                cxx=np.asarray([point.cxx for point in spec.coefficients], dtype=float),
-                cyy=np.asarray([point.cyy for point in spec.coefficients], dtype=float),
-                cxy=np.asarray([point.cxy for point in spec.coefficients], dtype=float),
-                cyx=np.asarray([point.cyx for point in spec.coefficients], dtype=float),
-                frequency=frequency,
-                tag=f"{spec.name} / ground",
-            )
+        """Ground element for a physical-mass LUMPED_KCM Foundation node."""
+
         return rs.BearingElement(
             n=node,
             kxx=spec.kxx,
@@ -53,6 +138,74 @@ class RossModelBuilder(_BaseRossModelBuilder):
             cxy=spec.cxy,
             cyx=spec.cyx,
             tag=f"{spec.name} / ground",
+        )
+
+    def _massless_lumped_element(self, rs: Any, support: Any, spec: FoundationSpec, node: int) -> Any:
+        k_support, c_support = self._support_matrices(support)
+        k_foundation, c_foundation = self._foundation_matrices(spec)
+        if np.any(c_support != 0.0) or np.any(c_foundation != 0.0):
+            raise EngineeringError(
+                f"Foundation {spec.name!r} is massless LUMPED_KC with non-zero damping. "
+                "Eliminating its internal DOF produces a frequency-dependent rational impedance, "
+                "which cannot be represented exactly by one constant ROSS BearingElement. "
+                "Use LUMPED_KCM with physical mass or FREQUENCY_DEPENDENT_KC; no epsilon mass or constant-K/C approximation is applied."
+            )
+        equivalent_k = self._static_series_stiffness(k_support, k_foundation, name=spec.name)
+        kxx, kyy, kxy, kyx = self._matrix_coefficients(equivalent_k)
+        return rs.BearingElement(
+            n=node,
+            kxx=kxx,
+            kyy=kyy,
+            kxy=kxy,
+            kyx=kyx,
+            cxx=0.0,
+            cyy=0.0,
+            cxy=0.0,
+            cyx=0.0,
+            tag=f"{spec.name} / condensed ground",
+        )
+
+    def _frequency_dependent_condensed_element(self, rs: Any, support: Any, spec: FoundationSpec, node: int) -> Any:
+        k_support, c_support = self._support_matrices(support)
+        frequency = np.asarray([point.frequency_hz for point in spec.coefficients], dtype=float) * 2.0 * pi
+        equivalent_k: list[np.ndarray] = []
+        equivalent_c: list[np.ndarray] = []
+
+        for omega, point in zip(frequency, spec.coefficients):
+            k_foundation = np.asarray([[point.kxx, point.kxy], [point.kyx, point.kyy]], dtype=float)
+            c_foundation = np.asarray([[point.cxx, point.cxy], [point.cyx, point.cyy]], dtype=float)
+            if abs(float(omega)) <= np.finfo(float).eps:
+                k_eq = self._static_series_stiffness(k_support, k_foundation, name=spec.name)
+                c_eq = self._zero_frequency_series_damping(
+                    k_support,
+                    c_support,
+                    k_foundation,
+                    c_foundation,
+                    name=spec.name,
+                )
+            else:
+                z_support = k_support.astype(complex) + 1j * float(omega) * c_support
+                z_foundation = k_foundation.astype(complex) + 1j * float(omega) * c_foundation
+                z_eq = self._solve_series_impedance(z_support, z_foundation, name=spec.name)
+                k_eq = np.asarray(z_eq.real, dtype=float)
+                c_eq = np.asarray(z_eq.imag / float(omega), dtype=float)
+            equivalent_k.append(k_eq)
+            equivalent_c.append(c_eq)
+
+        k_arrays = np.asarray(equivalent_k, dtype=float)
+        c_arrays = np.asarray(equivalent_c, dtype=float)
+        return rs.BearingElement(
+            n=node,
+            kxx=k_arrays[:, 0, 0],
+            kyy=k_arrays[:, 1, 1],
+            kxy=k_arrays[:, 0, 1],
+            kyx=k_arrays[:, 1, 0],
+            cxx=c_arrays[:, 0, 0],
+            cyy=c_arrays[:, 1, 1],
+            cxy=c_arrays[:, 0, 1],
+            cyx=c_arrays[:, 1, 0],
+            frequency=frequency,
+            tag=f"{spec.name} / condensed ground",
         )
 
     def _apply_foundations(self, result: RossBuildResult, project: RotorProject) -> None:
@@ -87,10 +240,25 @@ class RossModelBuilder(_BaseRossModelBuilder):
                 raise EngineeringError(
                     f"Foundation {foundation.name!r} owns support {support.name!r}, but that support has no qualified ROSS n_link node."
                 )
+
+            if foundation.model_type == FoundationModel.LUMPED_KC:
+                foundation_elements.append(self._massless_lumped_element(rs, support, foundation, support_node))
+                continue
+
+            if foundation.model_type == FoundationModel.FREQUENCY_DEPENDENT_KC:
+                foundation_elements.append(
+                    self._frequency_dependent_condensed_element(rs, support, foundation, support_node)
+                )
+                continue
+
+            if foundation.model_type != FoundationModel.LUMPED_KCM:
+                raise EngineeringError(
+                    f"Foundation {foundation.name!r} model {foundation.model_type.value} has no qualified ROSS realization."
+                )
+
             foundation_node = next_node
             next_node += 1
             self.last_foundation_nodes[foundation.name] = foundation_node
-
             foundation_elements.append(
                 rs.BearingElement(
                     n=support_node,
