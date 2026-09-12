@@ -41,11 +41,13 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
     ),
     "model.supports.foundation": PageRouteSpec(
         "model.supports.foundation", "foundation", title="Foundation", implementation_phase="0.19.0",
-        operational=False,
+        operational=True,
         note=(
-            "Foundation navigation ownership was introduced in 0.19. Foundation Studio 0.24 tranche B now provides "
-            "FoundationSpec, schema-2 persistence and strict bearing→support→foundation→ground assembly; the route "
-            "remains locked until the 0.24 scientific and frozen gates close."
+            "Foundation navigation ownership was introduced in 0.19. Foundation Studio 0.24 is scientifically qualified "
+            "against ROSS 2.3.0: RIGID preserves exact legacy parity; massless zero-damping LUMPED_KC is eliminated by an "
+            "exact Schur complement without artificial mass; LUMPED_KCM keeps explicit physical foundation inertia; "
+            "FREQUENCY_DEPENDENT_KC uses complex-impedance condensation. Unsupported damped massless constant-K/C, "
+            "6-DOF and reduced-matrix contracts fail closed rather than being approximated."
         ),
     ),
     "model.couplings": PageRouteSpec("model.couplings", "rotor", editor_key="couplings", title="Couplings"),
