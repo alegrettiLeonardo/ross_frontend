@@ -120,8 +120,8 @@ def test_native_seal_element_is_realized_with_direct_and_cross_coupled_coefficie
     assert project.seals == []
 
 
-def test_legacy_single_station_coupling_is_transactional_but_not_silently_mapped_to_two_node_element() -> None:
-    rs, project, service = _project_and_service()
+def test_legacy_single_station_coupling_fails_closed_before_transaction() -> None:
+    _rs, project, service = _project_and_service()
     baseline = deepcopy(project)
     record = CouplingSpec(
         "COUPLING-014",
@@ -141,19 +141,8 @@ def test_legacy_single_station_coupling_is_transactional_but_not_silently_mapped
         ct_z_n_s_m=120.0,
     )
 
-    preview = service.preview_add(project, "coupling", record)
-    assert project == baseline
-    assert NodeInsertionService.plan(preview.candidate).node_for(record.position_mm) is not None
-    built = RossModelBuilder(rs).build(preview.candidate, strict=True)
-    assert all(type(element).__name__ != "CouplingElement" for element in built.rotor.shaft_elements)
-
-    service.commit(project, preview)
-    index = len(project.couplings) - 1
-    update = service.preview_update(project, "coupling", index, {"kr_z_n_m_rad": 2.5e6})
-    service.commit(project, update)
-    assert project.couplings[index].kr_z_n_m_rad == pytest.approx(2.5e6)
-    delete = service.preview_delete(project, "coupling", index)
-    service.commit(project, delete)
+    with pytest.raises(EngineeringError, match="positive length|single-station|COUPLING_TWO_NODE_REQUIRED"):
+        service.preview_add(project, "coupling", record)
     assert project == baseline
 
 

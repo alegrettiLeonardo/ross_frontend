@@ -92,7 +92,9 @@ class NodeInsertionService:
             request(seal.position_mm, f"seal:{index}:{seal.name}")
 
         for index, coupling in enumerate(project.couplings, 1):
-            request(coupling.position_mm, f"coupling:{index}:{coupling.name}")
+            request(coupling.position_mm, f"coupling-left:{index}:{coupling.name}")
+            if coupling.length_mm > 0:
+                request(coupling.end_mm, f"coupling-right:{index}:{coupling.name}")
 
         for index, load in enumerate(project.loads, 1):
             request(load.position_mm, f"load:{index}:{load.name}")

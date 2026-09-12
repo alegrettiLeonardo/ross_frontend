@@ -42,6 +42,7 @@ from ..time_frequency_analysis import (
     UnbalanceResponseService,
 )
 from ..time_frequency_native import (
+    AMB_TIME_PLOT_LABELS,
     ClearanceNativeCatalog,
     FREQUENCY_PLOT_LABELS,
     FrequencyResponseNativeCatalog,
@@ -56,6 +57,8 @@ from ..time_frequency_native import (
 )
 from ..widgets import Card, SectionCard
 from .architecture_workspaces import AnalysisRoutePage
+from .faults_workspace import FaultsWorkspace
+from .amb_sensitivity_workspace import AMBSensitivityWorkspace
 
 
 _SERVICES = {
@@ -117,7 +120,7 @@ class _Header(Card):
         root.addWidget(title)
         subtitle = QLabel(
             "ROSS Studio 0.21 executes Frequency Response, Unbalance Response, Time Response, "
-            "Harmonic Balance, UCS and Clearance as independent ROSS 2.3.0 transactions. "
+            "Harmonic Balance, UCS, Clearance, Faults and AMB sensitivity as native ROSS 2.3.0 transactions. "
             "The native result object is cached; changing plot type, units, probe/orbit node or "
             "deflected-shape speed is post-processing only and never re-runs the scientific solve."
         )
@@ -154,6 +157,8 @@ class TimeFrequencyWorkspacePage(AnalysisRoutePage):
         self.tabs.addTab(self._hbm_tab(), "Harmonic Balance")
         self.tabs.addTab(self._ucs_tab(), "UCS Map")
         self.tabs.addTab(self._clearance_tab(), "Clearance")
+        self.tabs.addTab(FaultsWorkspace(self.project), "Faults")
+        self.tabs.addTab(AMBSensitivityWorkspace(self.project), "AMB Sensitivity")
         root.addWidget(self.tabs, 1)
 
     def _engineering(self) -> RotorProject | None:
@@ -513,7 +518,14 @@ class TimeFrequencyWorkspacePage(AnalysisRoutePage):
         root.addWidget(setup)
         controls = QHBoxLayout()
         self.tr_output = QComboBox()
-        for key, label in TIME_PLOT_LABELS.items(): self.tr_output.addItem(label, key)
+        for key, label in TIME_PLOT_LABELS.items():
+            self.tr_output.addItem(label, key)
+        engineering = self._engineering()
+        if engineering is not None and any(
+            bearing.ross_class == "MagneticBearingElement" for bearing in engineering.bearings
+        ):
+            for key, label in AMB_TIME_PLOT_LABELS.items():
+                self.tr_output.addItem(label, key)
         self.tr_node = self._spin(0, 0, 100000)
         self.tr_disp_units = QComboBox(); self.tr_disp_units.addItems(["m", "um", "mm"])
         self.tr_freq_units = QComboBox(); self.tr_freq_units.addItems(["Hz", "rad/s", "RPM"])

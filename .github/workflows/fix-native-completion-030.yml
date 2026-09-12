@@ -1,0 +1,32 @@
+name: Fix native ROSS completion 0.30 CI
+
+on:
+  push:
+    branches:
+      - feature/ross-native-completion-030
+    paths:
+      - tools/fix_native_completion_030_ci.py
+      - .github/workflows/fix-native-completion-030.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply CI alignment patch
+        run: python tools/fix_native_completion_030_ci.py
+      - name: Compile patched sources and tests
+        run: python -m compileall -q src tests tools
+      - name: Commit aligned implementation and qualification suite
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src tests tools/qualify_model_builder_014.py
+          git commit -m "Align legacy model-builder qualification with native coupling contract"
+          git push origin HEAD:feature/ross-native-completion-030

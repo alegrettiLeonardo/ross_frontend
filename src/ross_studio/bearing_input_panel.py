@@ -193,7 +193,8 @@ class BearingInputPanel(QWidget):
                 "Apply adds or updates a separate Kzz/Czz axial element."
             ),
             "MagneticBearingElement": (
-                "AMB remains blocked until actuator, sensor and controller engineering-domain contracts are qualified."
+                "Native ROSS active magnetic bearing. Physical air-gap/coil parameters and PID sensor/controller gains are retained; "
+                "time-domain feedback is evaluated only through Newmark integration."
             ),
         }
         return descriptions.get(self.ross_class, self.ross_class)
@@ -224,6 +225,22 @@ class BearingInputPanel(QWidget):
                 ("journal_diameter_mm", "Journal diameter (mm)", 100.0),
                 ("radial_clearance_mm", "Radial clearance (mm)", 0.1),
                 ("oil_viscosity_pa_s", "Dynamic viscosity (Pa·s)", 0.1),
+            ]
+        if self.ross_class == "MagneticBearingElement":
+            return [
+                ("speed_rpm", "Controller frequency stations (rpm)", [500.0, 1000.0, 3000.0, 6000.0]),
+                ("g0_mm", "Nominal air gap g0 (mm)", 1.0),
+                ("i0_a", "Bias current i0 (A)", 1.0),
+                ("ag_mm2", "Effective pole area Ag (mm²)", 100.0),
+                ("nw", "Windings per coil", 200),
+                ("alpha_deg", "Pole angle α (deg)", 22.5),
+                ("k_amp", "Amplifier gain", 1.0),
+                ("k_sense", "Sensor gain", 1.0),
+                ("kp_pid", "PID Kp", 1500.0),
+                ("kd_pid", "PID Kd", 10.0),
+                ("ki_pid", "PID Ki", 100.0),
+                ("n_f_rad_s", "Derivative filter cutoff (rad/s)", 10000.0),
+                ("sensors_axis_rotation_deg", "Sensor/actuator axis rotation (deg)", 45.0),
             ]
         if self.ross_class in THD_FIELDS:
             return list(THD_COMMON + THD_FIELDS[self.ross_class])
@@ -258,6 +275,10 @@ class BearingInputPanel(QWidget):
                 fallback = speeds if key == "speed_rpm" else default
                 values[key] = stored.get(key, fallback)
             return values
+
+        if self.ross_class == "MagneticBearingElement":
+            stored = metadata.get("engineering_input", {}) if metadata.get("source_model") == self.ross_class else {}
+            return {key: stored.get(key, default) for key, _label, default in definitions}
 
         def meta(key: str, default: Any) -> Any:
             return metadata.get(key, default)
@@ -506,6 +527,20 @@ class BearingInputPanel(QWidget):
                     "roller_length_m": float(raw["roller_length_mm"]) / 1000.0,
                     "static_load_n": float(raw["static_load_n"]),
                     "contact_angle_rad": float(raw["contact_angle_deg"]) * pi / 180.0,
+                }
+            elif self.ross_class == "MagneticBearingElement":
+                self._validate_speeds([float(v) for v in raw["speed_rpm"]])
+                values = {
+                    "speed_rpm": [float(v) for v in raw["speed_rpm"]],
+                    "g0_m": float(raw["g0_mm"]) / 1000.0,
+                    "i0_a": float(raw["i0_a"]),
+                    "ag_m2": float(raw["ag_mm2"]) * 1e-6,
+                    "nw": int(raw["nw"]),
+                    "alpha_rad": float(raw["alpha_deg"]) * pi / 180.0,
+                    "k_amp": float(raw["k_amp"]), "k_sense": float(raw["k_sense"]),
+                    "kp_pid": float(raw["kp_pid"]), "kd_pid": float(raw["kd_pid"]), "ki_pid": float(raw["ki_pid"]),
+                    "n_f_rad_s": float(raw["n_f_rad_s"]),
+                    "sensors_axis_rotation_rad": float(raw["sensors_axis_rotation_deg"]) * pi / 180.0,
                 }
             elif self.ross_class == "CylindricalBearing":
                 if float(raw["speed_max_rpm"]) <= float(raw["speed_min_rpm"]):

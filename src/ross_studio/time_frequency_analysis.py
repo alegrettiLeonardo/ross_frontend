@@ -522,6 +522,11 @@ class TimeResponseService(_TimeFrequencyService):
         request.validate()
         elapsed: dict[str, float] = {}
         build = self._build(project, elapsed, progress=progress, cancelled=cancelled, label="Time Response")
+        has_amb = any(type(element).__name__ == "MagneticBearingElement" for element in build.rotor.bearing_elements)
+        if has_amb and request.method.strip().casefold() != "newmark":
+            raise EngineeringError(
+                "Active Magnetic Bearings require method='newmark' so the sensor/controller/actuator force is updated at every time step."
+            )
         t = np.linspace(0.0, float(request.duration_s), int(request.samples), dtype=float)
         speed_profile_rpm = np.linspace(float(request.speed_start_rpm), float(request.speed_end_rpm), len(t))
         speed_rad_s_array = speed_profile_rpm * 2.0 * pi / 60.0

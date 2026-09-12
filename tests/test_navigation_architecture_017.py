@@ -89,14 +89,14 @@ def test_no_public_global_ump_or_results_route() -> None:
     assert canonical_route("results") == "analysis.static_modal.lateral"
 
 
-def test_amb_route_is_visible_but_locked() -> None:
+def test_amb_route_is_visible_and_operational_030() -> None:
     node = navigation_node("model.bearings.amb")
     spec = route_spec(node.id)
     assert node.kind == "route"
-    assert node.locked is True
+    assert node.locked is False
     assert spec.owner == "bearing"
     assert spec.bearing_group == "AMB"
-    assert spec.operational is False
+    assert spec.operational is True
 
 
 def test_foundation_has_distinct_owner_from_flexible_support() -> None:
@@ -140,7 +140,7 @@ def test_sidebar_renders_new_tree_and_preserves_frozen_legacy_aliases(qtbot) -> 
     # without reintroducing the duplicate visible Shaft state.
     assert {"rotor", "disks", "bearings", "seals", "supports", "couplings", "loads", "ump", "probes"} <= set(window.sidebar.buttons)
     assert "shaft" not in window.sidebar.buttons
-    assert window.sidebar.route_buttons["model.bearings.amb"].isEnabled() is False
+    assert window.sidebar.route_buttons["model.bearings.amb"].isEnabled() is True
 
 
 def test_home_foundation_and_analysis_have_dedicated_page_owners(qtbot) -> None:

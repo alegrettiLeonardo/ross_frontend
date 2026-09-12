@@ -43,8 +43,8 @@ NAVIGATION_NODES: tuple[NavigationNode, ...] = (
     NavigationNode("model.bearings.fluid_film", "Fluid-Film Bearing Models", "route",
                    parent="model.bearings", icon="bearing"),
     NavigationNode("model.bearings.amb", "Active Magnetic Bearings", "route",
-                   parent="model.bearings", icon="bearing", locked=True,
-                   tooltip="Visible by design; blocked until the AMB controller/sensor/Newmark contract is qualified."),
+                   parent="model.bearings", icon="bearing",
+                   tooltip="Native MagneticBearingElement with PID feedback, Newmark time integration and ISO 14839 sensitivity."),
 
     NavigationNode("model.seals", "Seals", "route", parent="model", icon="seal"),
     NavigationNode("model.supports", "Supports", "group", parent="model", icon="support"),

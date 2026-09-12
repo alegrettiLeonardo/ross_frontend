@@ -72,8 +72,11 @@ def test_bearing_studio_uses_requested_model_tree_and_vertical_workspace(qtbot) 
 
     qtbot.mouseClick(page.type_buttons["amb"], Qt.MouseButton.LeftButton)
     assert window._selected_bearing_class() == "MagneticBearingElement"
-    assert not page.calculate_button.isEnabled()
-    assert "blocked" in page.input_panel.description.text().lower()
+    assert page.calculate_button.isEnabled()
+    assert {"speed_rpm", "g0_mm", "i0_a", "ag_mm2", "nw", "kp_pid", "kd_pid", "ki_pid"} <= set(
+        page.input_panel.fields
+    )
+    assert "native ross active magnetic bearing" in page.input_panel.description.text().lower()
     assert window.project.engineering == original
 
 

@@ -7,13 +7,13 @@ from ross_studio.models import load_reference_project_model
 from ross_studio.project_io import FORMAT_NAME, SCHEMA_VERSION, load_project, save_project
 
 
-def test_foundation_schema_is_v2_and_native_saves_use_v2(tmp_path: Path) -> None:
-    assert SCHEMA_VERSION == 2
+def test_foundation_schema_is_v3_and_native_saves_use_v3(tmp_path: Path) -> None:
+    assert SCHEMA_VERSION == 3
     model = load_reference_project_model()
-    target = save_project(model, tmp_path / "schema2.rossproj")
+    target = save_project(model, tmp_path / "schema3.rossproj")
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["format"] == FORMAT_NAME
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["engineering"]["foundations"] == []
 
 

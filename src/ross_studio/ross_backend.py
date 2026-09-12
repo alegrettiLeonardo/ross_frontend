@@ -9,6 +9,7 @@ from .domain import EngineeringError, FoundationModel, FoundationSpec, RotorProj
 from .ross_backend_base import *  # noqa: F401,F403
 from .ross_backend_base import RossBackend as _BaseRossBackend
 from .ross_backend_base import RossBuildResult, RossModelBuilder as _BaseRossModelBuilder
+from .seal_studio_service import SealStudioService
 
 
 class RossModelBuilder(_BaseRossModelBuilder):
@@ -300,29 +301,15 @@ class RossModelBuilder(_BaseRossModelBuilder):
             return result
 
         rs = self._ross()
+        seal_service = SealStudioService(rs)
         seals: list[Any] = []
         for spec in project.seals:
             mapping = self.map_position(project, spec.position_mm)
             if mapping.node is None:
                 if strict:
-                    raise EngineeringError(
-                        f"Seal {spec.name!r} is not located at an exact FE node."
-                    )
+                    raise EngineeringError(f"Seal {spec.name!r} is not located at an exact FE node.")
                 continue
-            seals.append(
-                rs.SealElement(
-                    n=mapping.node,
-                    kxx=spec.kxx,
-                    kyy=spec.kyy,
-                    kxy=spec.kxy,
-                    kyx=spec.kyx,
-                    cxx=spec.cxx,
-                    cyy=spec.cyy,
-                    cxy=spec.cxy,
-                    cyx=spec.cyx,
-                    tag=spec.name,
-                )
-            )
+            seals.append(seal_service.native_from_spec(spec, node=mapping.node))
 
         existing_bearings = list(result.rotor.bearing_elements)
         rotor = rs.Rotor(

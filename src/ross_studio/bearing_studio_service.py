@@ -35,8 +35,9 @@ class BearingStudioService:
     2. calculate through the installed ROSS class;
     3. explicitly apply the result to one ``BearingSpec``.
 
-    THD and AMB classes are not accepted here; they keep their independent
-    qualification gates.
+    THD classes keep their specialized solvers. MagneticBearingElement is
+    accepted here because its native ROSS constructor already owns the complete
+    electromagnetic/PID coefficient model; time-domain feedback is qualified separately.
     """
 
     GENERAL_CLASSES = {
@@ -44,6 +45,7 @@ class BearingStudioService:
         "BallBearingElement",
         "RollerBearingElement",
         "CylindricalBearing",
+        "MagneticBearingElement",
     }
 
     def __init__(self, ross_module: Any | None = None) -> None:
@@ -118,9 +120,7 @@ class BearingStudioService:
         spec = self._bearing(project, index)
         inputs = dict(inputs or {})
         if ross_class not in self.GENERAL_CLASSES:
-            raise EngineeringError(
-                f"{ross_class} is not a General / Parametric Bearing Studio model. THD/AMB execution remains separately gated."
-            )
+            raise EngineeringError(f"{ross_class} has no qualified Bearing Studio service.")
 
         if ross_class == "BearingElement":
             return self._calculate_kc(spec, inputs)
@@ -128,6 +128,8 @@ class BearingStudioService:
             return self._calculate_ball(inputs)
         if ross_class == "RollerBearingElement":
             return self._calculate_roller(inputs)
+        if ross_class == "MagneticBearingElement":
+            return self._calculate_magnetic(project, inputs)
         return self._calculate_cylindrical(project, index, inputs)
 
     def _calculate_kc(self, spec: BearingSpec, inputs: dict[str, Any]) -> BearingCalculationResult:
@@ -335,11 +337,39 @@ class BearingStudioService:
             note=note,
         )
 
+    def _calculate_magnetic(self, project: RotorProject, inputs: dict[str, Any]) -> BearingCalculationResult:
+        rs = self._ross()
+        speeds_rpm = np.asarray(inputs.get("speed_rpm", [project.operating_cases[0].rated_speed_rpm]), dtype=float)
+        if speeds_rpm.ndim != 1 or speeds_rpm.size == 0 or np.any(speeds_rpm <= 0) or np.any(np.diff(speeds_rpm) <= 0):
+            raise EngineeringError("AMB speed_rpm must be positive and strictly increasing.")
+        required_positive = ("g0_m", "i0_a", "ag_m2", "nw")
+        for key in required_positive:
+            self._finite_positive(inputs.get(key), key)
+        frequency = speeds_rpm * 2.0 * pi / 60.0
+        element = rs.MagneticBearingElement(
+            n=0, g0=float(inputs["g0_m"]), i0=float(inputs["i0_a"]), ag=float(inputs["ag_m2"]), nw=float(inputs["nw"]),
+            frequency=frequency, alpha=float(inputs.get("alpha_rad", pi / 8.0)),
+            k_amp=float(inputs.get("k_amp", 1.0)), k_sense=float(inputs.get("k_sense", 1.0)),
+            kp_pid=float(inputs.get("kp_pid", 0.0)), kd_pid=float(inputs.get("kd_pid", 0.0)), ki_pid=float(inputs.get("ki_pid", 0.0)),
+            n_f=float(inputs.get("n_f_rad_s", 10000.0)), sensors_axis_rotation=float(inputs.get("sensors_axis_rotation_rad", pi / 4.0)),
+        )
+        points = tuple(self._point(rpm, self._matrix_kc(element, omega)) for rpm, omega in zip(speeds_rpm, frequency))
+        rated = min(points, key=lambda point: abs(point.rpm - project.operating_cases[0].rated_speed_rpm))
+        scalar = (rated.kxx, rated.kxy, rated.kyx, rated.kyy, rated.cxx, rated.cxy, rated.cyx, rated.cyy)
+        engineering_input = {key: value for key, value in inputs.items()}
+        engineering_input["speed_rpm"] = [float(value) for value in speeds_rpm]
+        return BearingCalculationResult(
+            source_model="MagneticBearingElement", application_class="MagneticBearingElement",
+            coefficients=points, scalar_kc=scalar,
+            metadata={"source_model": "MagneticBearingElement", "engineering_input": engineering_input},
+            note="Native ROSS MagneticBearingElement electromagnetic/PID model; Newmark is mandatory for active time-domain feedback.",
+        )
+
     def apply(self, project: RotorProject, index: int, result: BearingCalculationResult) -> BearingSpec:
         spec = self._bearing(project, index)
         kxx, kxy, kyx, kyy, cxx, cxy, cyx, cyy = result.scalar_kc
         spec.ross_class = result.application_class
-        spec.group = BearingGroup.GENERAL
+        spec.group = BearingGroup.AMB if result.source_model == "MagneticBearingElement" else BearingGroup.GENERAL
         spec.kxx = kxx
         spec.kxy = kxy
         spec.kyx = kyx
