@@ -87,18 +87,22 @@ def qualify_amb() -> None:
     assert any(type(elm).__name__ == "MagneticBearingElement" for elm in built.rotor.bearing_elements)
     AMBSensitivityRequest(speed_rpm=0.0, t_max_s=1.0, dt_s=0.01).validate()
 
-    # Use the current public ROSS AMB fixture.  The old name
-    # ``rotor_amb_example`` appears only in stale release-note text and is not
-    # exported by ROSS 2.3.0; ``rotor_example_amb_simple`` is the native,
-    # lightweight example exported from ross.bearings.magnetic.amb_models.
-    rotor = rs.rotor_example_amb_simple()
+    # ROSS Studio is deliberately pinned to ross-rotordynamics 2.3.0.  In that
+    # release the public AMB fixture is ``rotor_amb_example`` (exported from
+    # ross.rotor_assembly), and run_time_response returns TimeResponseResults.
+    # The newer ``rotor_example_amb_simple`` / AmbTimeResponseResults API belongs
+    # to later upstream ROSS code and must not be used to qualify the pinned
+    # production dependency.
+    assert rs.__version__ == "2.3.0", rs.__version__
+    assert hasattr(rs, "rotor_amb_example")
+    rotor = rs.rotor_amb_example()
+    assert any(type(elm).__name__ == "MagneticBearingElement" for elm in rotor.bearing_elements)
     t = np.arange(0.0, 0.011, 0.001)
     force = np.zeros((len(t), rotor.ndof))
     result = rotor.run_time_response(100.0, force, t, method="newmark")
-    assert type(result).__name__ == "AmbTimeResponseResults"
-    assert hasattr(result, "plot_amb_currents")
-    assert hasattr(result, "plot_amb_forces")
-    assert hasattr(result, "plot_amb_disps")
+    assert type(result).__name__ == "TimeResponseResults"
+    for name in ("plot_1d", "plot_2d", "plot_3d", "plot_dfft", "data_time_response"):
+        assert hasattr(result, name), name
 
 
 def qualify_fault_api() -> None:
