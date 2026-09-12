@@ -34,10 +34,19 @@ from .domain import (
     SupportSpec,
 )
 from .models import ProjectModel
+from .seal_models import (
+    HolePatternSealSpec,
+    HolePatternStageSpec,
+    HybridSealSpec,
+    LabyrinthSealSpec,
+    LabyrinthStageSpec,
+    SealCoefficientPoint,
+    SealModel,
+)
 
 FORMAT_NAME = "ROSS Studio Project"
-SCHEMA_VERSION = 2
-_SUPPORTED_SCHEMA_VERSIONS = (1, SCHEMA_VERSION)
+SCHEMA_VERSION = 3
+_SUPPORTED_SCHEMA_VERSIONS = (1, 2, SCHEMA_VERSION)
 NATIVE_EXTENSION = ".rossproj"
 
 
@@ -78,7 +87,7 @@ def _project_payload(model: ProjectModel) -> dict[str, Any]:
     return {
         "format": FORMAT_NAME,
         "schema_version": SCHEMA_VERSION,
-        "app_version": "0.24.0",
+        "app_version": "0.25.0",
         "project_meta": {
             "name": model.name,
             "description": model.description,
@@ -90,18 +99,20 @@ def _project_payload(model: ProjectModel) -> dict[str, Any]:
 
 
 def _migrate_payload(payload: dict[str, Any], schema: int) -> dict[str, Any]:
-    """Migrate older native projects without inventing physical foundation data.
-
-    Schema 1 predates Foundation Studio. Its exact semantic migration is therefore an
-    empty ``foundations`` collection. Existing supports remain supports; they are never
-    silently reclassified as foundations.
-    """
+    """Migrate native projects without inventing Foundation or seal physics."""
     migrated = deepcopy(payload)
-    if schema == 1:
-        engineering = migrated.get("engineering")
-        if isinstance(engineering, dict):
-            engineering.setdefault("foundations", [])
-        migrated["schema_version"] = SCHEMA_VERSION
+    engineering = migrated.get("engineering")
+    if schema == 1 and isinstance(engineering, dict):
+        engineering.setdefault("foundations", [])
+    # Schemas 1/2 only knew direct K/C SealSpec. Keep every original coefficient
+    # exactly as stored and mark no advanced model origin.
+    if schema < 3 and isinstance(engineering, dict):
+        for seal in engineering.get("seals", []):
+            if isinstance(seal, dict):
+                seal.pop("model_type", None)
+                seal.pop("calculated_coefficients", None)
+                seal.pop("calculation", None)
+    migrated["schema_version"] = SCHEMA_VERSION
     return migrated
 
 
@@ -173,8 +184,28 @@ def _foundation(row: dict[str, Any]) -> FoundationSpec:
     return FoundationSpec(**data)
 
 
+def _seal_point(row: dict[str, Any]) -> SealCoefficientPoint:
+    return SealCoefficientPoint(**row)
+
+
 def _seal(row: dict[str, Any]) -> SealSpec:
-    return SealSpec(**row)
+    data = dict(row)
+    model = SealModel(str(data.pop("model_type", SealModel.DIRECT.value)))
+    if model == SealModel.DIRECT:
+        return SealSpec(**data)
+    data["calculated_coefficients"] = [_seal_point(point) for point in data.get("calculated_coefficients", [])]
+    if model == SealModel.LABYRINTH:
+        spec = LabyrinthSealSpec(**data)
+    elif model == SealModel.HOLE_PATTERN:
+        spec = HolePatternSealSpec(**data)
+    elif model == SealModel.HYBRID:
+        data["hole_pattern"] = HolePatternStageSpec(**data.get("hole_pattern", {}))
+        data["labyrinth"] = LabyrinthStageSpec(**data.get("labyrinth", {}))
+        spec = HybridSealSpec(**data)
+    else:  # pragma: no cover - exhaustive enum guard
+        raise ProjectFormatError(f"Unsupported seal model {model.value!r}.")
+    spec.validate_calculated()
+    return spec
 
 
 def _coupling(row: dict[str, Any]) -> CouplingSpec:
