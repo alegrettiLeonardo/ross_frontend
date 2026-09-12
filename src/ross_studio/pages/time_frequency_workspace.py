@@ -42,6 +42,7 @@ from ..time_frequency_analysis import (
     UnbalanceResponseService,
 )
 from ..time_frequency_native import (
+    AMB_TIME_PLOT_LABELS,
     ClearanceNativeCatalog,
     FREQUENCY_PLOT_LABELS,
     FrequencyResponseNativeCatalog,
@@ -517,7 +518,14 @@ class TimeFrequencyWorkspacePage(AnalysisRoutePage):
         root.addWidget(setup)
         controls = QHBoxLayout()
         self.tr_output = QComboBox()
-        for key, label in TIME_PLOT_LABELS.items(): self.tr_output.addItem(label, key)
+        for key, label in TIME_PLOT_LABELS.items():
+            self.tr_output.addItem(label, key)
+        engineering = self._engineering()
+        if engineering is not None and any(
+            bearing.ross_class == "MagneticBearingElement" for bearing in engineering.bearings
+        ):
+            for key, label in AMB_TIME_PLOT_LABELS.items():
+                self.tr_output.addItem(label, key)
         self.tr_node = self._spin(0, 0, 100000)
         self.tr_disp_units = QComboBox(); self.tr_disp_units.addItems(["m", "um", "mm"])
         self.tr_freq_units = QComboBox(); self.tr_freq_units.addItems(["Hz", "rad/s", "RPM"])

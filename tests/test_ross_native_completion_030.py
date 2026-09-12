@@ -14,6 +14,7 @@ from ross_studio.project_io import load_project, save_project
 from ross_studio.ross_backend import RossBackend
 from ross_studio.services import RossCapabilityRegistry
 from ross_studio.time_frequency_analysis import TimeResponseRequest, TimeResponseService
+from ross_studio.time_frequency_native import AMB_TIME_PLOT_LABELS, TIME_PLOT_LABELS
 
 
 def project() -> RotorProject:
@@ -105,6 +106,12 @@ def test_amb_time_response_rejects_non_newmark_before_integration() -> None:
     )
     with pytest.raises(EngineeringError, match="Active Magnetic Bearings require method='newmark'"):
         TimeResponseService().run(p, request)
+
+
+def test_amb_time_outputs_extend_the_generic_time_plot_contract() -> None:
+    assert set(TIME_PLOT_LABELS) == {"time_1d", "orbit_2d", "orbits_3d", "dfft"}
+    assert set(AMB_TIME_PLOT_LABELS) == {"amb_disps", "amb_currents", "amb_forces"}
+    assert set(TIME_PLOT_LABELS).isdisjoint(AMB_TIME_PLOT_LABELS)
 
 
 def test_schema3_round_trip_keeps_native_contracts(tmp_path) -> None:

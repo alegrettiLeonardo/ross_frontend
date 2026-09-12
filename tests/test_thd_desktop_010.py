@@ -24,13 +24,13 @@ from ross_studio.thd_input_dialog import THDBearingInputDialog
 from ross_studio.thd_results import UNAVAILABLE, convergence, native_field
 
 
-def test_production_registry_promotes_qualified_thd_and_blocks_amb():
+def test_production_registry_promotes_qualified_thd_and_amb():
     registry = RossCapabilityRegistry(rs)
     for model in THDBearingStudioService.SUPPORTED_CLASSES:
         status, _reason = registry.effective_status(model)
         assert status == AdapterStatus.VALIDATED
     assert registry.effective_status("ThrustPad")[0] == AdapterStatus.VALIDATED
-    assert registry.effective_status("MagneticBearingElement")[0] == AdapterStatus.BLOCKED
+    assert registry.effective_status("MagneticBearingElement")[0] == AdapterStatus.VALIDATED
 
 
 @pytest.mark.parametrize("model,speeds", [
@@ -137,7 +137,7 @@ def test_real_qt_thd_inline_calculate_preview_apply_strict_modal(qtbot, monkeypa
     assert window.bearing_page.calculate_button.isEnabled()
     assert not window.bearing_page.apply_button.isEnabled()
     window._open_bearing_group("AMB")
-    assert not window.bearing_page.calculate_button.isEnabled()
+    assert window.bearing_page.calculate_button.isEnabled()
     out = Path(__file__).parents[1] / "artifacts" / "thd_desktop_qualification.json"
     out.parent.mkdir(exist_ok=True)
     payload = json.loads(out.read_text()) if out.exists() else {}

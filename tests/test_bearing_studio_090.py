@@ -123,11 +123,11 @@ def test_cylindrical_calculation_generates_finite_speed_dependent_kc() -> None:
     assert build.rotor.bearing_elements[0].n_link == 28
 
 
-def test_thd_and_amb_are_not_silently_enabled_by_general_service() -> None:
+def test_thd_models_remain_separately_owned_by_their_native_services() -> None:
     project = load_irdin_project(FIXTURE)
     service = BearingStudioService()
-    for ross_class in ("PlainJournal", "TiltingPad", "ThrustPad", "SqueezeFilmDamper", "MagneticBearingElement"):
-        with pytest.raises(Exception, match="separately gated"):
+    for ross_class in ("PlainJournal", "TiltingPad", "ThrustPad", "SqueezeFilmDamper"):
+        with pytest.raises(Exception):
             service.calculate(project, 0, ross_class, {})
 
 

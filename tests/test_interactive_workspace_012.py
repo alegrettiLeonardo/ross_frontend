@@ -95,6 +95,7 @@ def test_real_catalog_has_all_qualified_bearing_adapters_executable() -> None:
         "TiltingPad",
         "ThrustPad",
         "SqueezeFilmDamper",
+        "MagneticBearingElement",
     }
     rows = {
         row["class"]: row
@@ -104,8 +105,8 @@ def test_real_catalog_has_all_qualified_bearing_adapters_executable() -> None:
     for ross_class in expected_ready:
         assert rows[ross_class]["status"] == AdapterStatus.VALIDATED.value
         assert rows[ross_class]["can_execute"] is True
-    assert rows["MagneticBearingElement"]["status"] == AdapterStatus.BLOCKED.value
-    assert rows["MagneticBearingElement"]["can_execute"] is False
+    assert rows["MagneticBearingElement"]["status"] == AdapterStatus.VALIDATED.value
+    assert rows["MagneticBearingElement"]["can_execute"] is True
 
 
 def test_rotor_page_has_single_navigation_and_editable_mesh_column(qtbot) -> None:

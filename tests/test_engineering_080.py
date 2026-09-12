@@ -144,7 +144,8 @@ def test_catalog_separates_class_existence_from_adapter_readiness() -> None:
     assert thd["ThrustPad"]["status"] == AdapterStatus.VALIDATED.value
     assert thd["ThrustPad"]["can_execute"] is True
     amb = catalog.entries(BearingGroup.AMB)[0]
-    assert amb["status"] == AdapterStatus.BLOCKED.value
+    assert amb["status"] == AdapterStatus.VALIDATED.value
+    assert amb["can_execute"] is True
 
 
 def test_readiness_accepts_mass_node_and_ump_realization_for_op_w60() -> None:

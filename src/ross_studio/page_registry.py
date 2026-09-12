@@ -78,7 +78,7 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
         note="Independent Modal/Campbell transaction; torsional modes come from ROSS shape.mode_type and retain native 3D animation.",
     ),
     "analysis.time_frequency": PageRouteSpec(
-        "analysis.time_frequency", "analysis", title="Time & Frequency", implementation_phase="0.30.0", operational=True,
+        "analysis.time_frequency", "analysis", title="Time & Frequency", implementation_phase="0.21.0", operational=True,
         note=(
             "Independent native ROSS run_freq_response(), run_unbalance_response(), run_time_response(), "
             "run_harmonic_balance_response(), run_ucs(), run_clearance_analysis(), native Misalignment/Rubbing/Crack faults, "

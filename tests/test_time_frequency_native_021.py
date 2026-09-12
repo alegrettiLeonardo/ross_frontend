@@ -208,16 +208,16 @@ def test_clearance_uses_explicit_bearing_clearance_and_native_plot(native_suite)
     assert np.all(np.isfinite(catalog.raw_arrays()["magnitudes_um_pkpk"]))
 
 
-def test_time_frequency_workspace_has_six_independent_analysis_tabs(qtbot) -> None:
+def test_time_frequency_workspace_has_eight_native_analysis_tabs_after_030_extensions(qtbot) -> None:
     from ross_studio.pages.time_frequency_workspace import TimeFrequencyWorkspacePage
 
     project = ProjectModel.from_engineering(compact_project())
     page = TimeFrequencyWorkspacePage(project)
     qtbot.addWidget(page)
-    assert page.tabs.count() == 6
+    assert page.tabs.count() == 8
     assert [page.tabs.tabText(i) for i in range(page.tabs.count())] == [
         "Frequency Response", "Unbalance Response", "Time Response",
-        "Harmonic Balance", "UCS Map", "Clearance",
+        "Harmonic Balance", "UCS Map", "Clearance", "Faults", "AMB Sensitivity",
     ]
     assert set(page._buttons) == {"frequency", "unbalance", "time", "hbm", "ucs", "clearance"}
     assert page.fr_output.count() == len(FREQUENCY_PLOT_LABELS)

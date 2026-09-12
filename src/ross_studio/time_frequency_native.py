@@ -73,6 +73,9 @@ TIME_PLOT_LABELS = {
     "orbit_2d": "Orbit · selected node",
     "orbits_3d": "Orbits · all nodes 3D",
     "dfft": "DFFT · probes",
+}
+
+AMB_TIME_PLOT_LABELS = {
     "amb_disps": "AMB · sensor displacements",
     "amb_currents": "AMB · control currents",
     "amb_forces": "AMB · magnetic forces",
@@ -550,6 +553,7 @@ class ClearanceNativeCatalog(_NativeCatalogBase):
 
 
 __all__ = [
+    "AMB_TIME_PLOT_LABELS",
     "ClearanceNativeCatalog",
     "FREQUENCY_PLOT_LABELS",
     "FrequencyResponseNativeCatalog",

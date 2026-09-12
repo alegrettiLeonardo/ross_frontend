@@ -157,7 +157,9 @@ def test_seal_coupling_and_load_gui_add_delete_use_strict_transactions(qtbot, mo
 
     class FakeCoupling:
         def __init__(self, coupling=None, *, total_length_mm, parent=None):
-            self.value = coupling or CouplingSpec("GUI-COUPLING", 1420.250, 2.0, 3.0, 0.04, 0.05, kr_z_n_m_rad=2.0e6)
+            self.value = coupling or CouplingSpec(
+                "GUI-COUPLING", 1420.250, 2.0, 3.0, 0.04, 0.05, length_mm=0.001, kr_z_n_m_rad=2.0e6
+            )
         def exec(self): return QDialog.DialogCode.Accepted
         def record(self): return self.value
         def changes(self):
