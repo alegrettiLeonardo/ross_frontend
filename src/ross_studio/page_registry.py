@@ -76,11 +76,14 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
         ),
     ),
     "analysis.stochastic": PageRouteSpec(
-        "analysis.stochastic", "analysis", title="Stochastic", implementation_phase="0.24.0", operational=False,
-        note="Reserved for native ROSS stochastic ST_* adapters; no synthetic Monte Carlo is introduced.",
+        "analysis.stochastic", "analysis", title="Stochastic", implementation_phase="0.22.0", operational=True,
+        note=(
+            "Native ross.stochastic ST_Material/ST_ShaftElement/ST_DiskElement/ST_BearingElement/ST_PointMass + ST_Rotor; "
+            "Campbell, Frequency Response, Unbalance Response and Time Response retain ROSS mean/percentile/confidence outputs."
+        ),
     ),
     "analysis.multirotor": PageRouteSpec(
-        "analysis.multirotor", "analysis", title="MultiRotor System", implementation_phase="0.25.0", operational=False,
+        "analysis.multirotor", "analysis", title="MultiRotor System", implementation_phase="0.23.0", operational=False,
         note="Reserved for GearElement + MultiRotor without contaminating RotorProject.",
     ),
 }

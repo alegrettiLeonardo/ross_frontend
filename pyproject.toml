@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ross-studio"
-version = "0.21.0"
+version = "0.22.0"
 description = "Rotordynamics Design Platform for Rotating Electrical Machines"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,7 +18,13 @@ dependencies = [
   "pint>=0.22",
   "openpyxl>=3.1,<4",
   "reportlab>=4.2,<5",
-  "kaleido==0.2.1",
+  # Kaleido 0.2.1 is retained on Linux/macOS, where the frozen export gate is
+  # qualified.  On Windows its legacy subprocess protocol can hang indefinitely
+  # in write_image() (including Python 3.12 / PyInstaller windowed executables).
+  # 0.1.0.post1 is the established Windows fix for Plotly 5.x and preserves the
+  # exact native Plotly figure -> PNG contract without bypassing static export.
+  "kaleido==0.1.0.post1; sys_platform == 'win32'",
+  "kaleido==0.2.1; sys_platform != 'win32'",
 ]
 
 [project.optional-dependencies]

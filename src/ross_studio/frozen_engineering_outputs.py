@@ -26,6 +26,30 @@ class FrozenEngineeringOutputsResult:
         return asdict(self)
 
 
+def _shutdown_kaleido_scope() -> None:
+    """Close the legacy process-backed Kaleido scope deterministically.
+
+    Plotly 5.24.1 keeps one global process-backed Kaleido scope.  Windows uses
+    the qualified 0.1.0.post1 renderer because 0.2.1 can hang indefinitely in
+    ``write_image()`` under Python 3.12 / windowed frozen executables; Linux and
+    macOS retain 0.2.1.  Explicit teardown is still useful on every platform so
+    the renderer child cannot keep a successful qualification process alive.
+    """
+
+    try:
+        import plotly.io as pio
+
+        scope = getattr(getattr(pio, "kaleido", None), "scope", None)
+        shutdown = getattr(scope, "__del__", None)
+        if callable(shutdown):
+            shutdown()
+    except Exception:
+        # Export validity is checked independently below.  Cleanup must be
+        # best-effort so a third-party teardown quirk cannot hide the actual
+        # engineering-output evidence that was already produced.
+        pass
+
+
 def run_frozen_engineering_outputs_test() -> FrozenEngineeringOutputsResult:
     """Exercise rich export plus 0.19 native Static/Modal Plotly runtime in frozen builds."""
 
@@ -61,7 +85,10 @@ def run_frozen_engineering_outputs_test() -> FrozenEngineeringOutputsResult:
     with tempfile.TemporaryDirectory(prefix="ross-studio-frozen-outputs-") as temp:
         root = Path(temp)
         png = root / "native_ross_rotor.png"
-        figure.write_image(str(png), format="png", width=900, height=500, scale=1)
+        try:
+            figure.write_image(str(png), format="png", width=900, height=500, scale=1)
+        finally:
+            _shutdown_kaleido_scope()
 
         xlsx = root / "engineering_outputs.xlsx"
         workbook = Workbook()
