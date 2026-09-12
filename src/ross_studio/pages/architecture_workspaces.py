@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-from ..domain import FoundationModel
 from ..models import ProjectModel
 from ..page_registry import PageRouteSpec
 from ..widgets import Card, SectionCard
+from .foundation_workspace import FoundationWorkspacePage
 
 
 class _ArchitectureHeader(Card):
@@ -33,101 +32,6 @@ class _ArchitectureHeader(Card):
         state.setObjectName("architectureStatus")
         state.setWordWrap(True)
         layout.addWidget(state)
-
-
-class FoundationWorkspacePage(QWidget):
-    """Foundation Studio 0.24 tranche-B audit page.
-
-    Foundation is now a first-class engineering entity and the strict ROSS builder
-    can assemble qualified 2-DOF K/C/M contracts. The editor remains intentionally
-    disabled until the full numerical and frozen gates are closed; this page reports
-    the actual project state instead of pretending the earlier architecture placeholder
-    is still current.
-    """
-
-    def __init__(self, project: ProjectModel, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.project = project
-        root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(10)
-        root.addWidget(_ArchitectureHeader(
-            "Foundation Studio · tranche B",
-            "Foundation is a structural subsystem below the local bearing/support connection. "
-            "SupportSpec and FoundationSpec remain separate physical owners.",
-            status=(
-                "0.24 implementation active · first-class domain, schema-2 persistence and strict "
-                "bearing→support→foundation→ground assembly are present; editing stays locked until qualification closes."
-            ),
-        ))
-
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(10)
-
-        topology = SectionCard("Physical Ownership")
-        text = QLabel(
-            "Shaft node\n"
-            "   │\n"
-            "BearingElement / n_link\n"
-            "   ▼\n"
-            "Support node ─ PointMass(Msupport)\n"
-            "   │\n"
-            "Support K/C\n"
-            "   ▼\n"
-            "Foundation node ─ PointMass(Mfoundation)\n"
-            "   │\n"
-            "Foundation K/C\n"
-            "   ▼\n"
-            "Ground"
-        )
-        text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        topology.root.addWidget(text)
-        grid.addWidget(topology, 0, 0)
-
-        contract = SectionCard("0.24 Scientific Contract")
-        message = QLabel(
-            "Implemented domain models: RIGID, LUMPED_KC, LUMPED_KCM and FREQUENCY_DEPENDENT_KC. "
-            "Full 2×2 K/C cross-coupling is retained. Frequency rows are engineering Hz at the project boundary "
-            "and are converted to ROSS rad/s during assembly. REDUCED_MATRIX and any 6-DOF foundation request "
-            "remain BLOCKED rather than truncated."
-        )
-        message.setWordWrap(True)
-        contract.root.addWidget(message)
-        grid.addWidget(contract, 0, 1)
-
-        existing = SectionCard("Current Project")
-        engineering = project.engineering
-        support_count = len(engineering.supports) if engineering is not None else project.supports
-        foundations = list(engineering.foundations) if engineering is not None else []
-        dynamic_count = sum(f.model_type != FoundationModel.RIGID for f in foundations)
-        frequency_count = sum(f.model_type == FoundationModel.FREQUENCY_DEPENDENT_KC for f in foundations)
-        summary = QLabel(
-            f"Flexible supports: {support_count}\n"
-            f"Foundation definitions: {len(foundations)}\n"
-            f"Dynamic foundations: {dynamic_count}\n"
-            f"Frequency-dependent foundations: {frequency_count}\n"
-            "Attachment: explicit support_index only\n"
-            "Nearest-node mapping: prohibited"
-        )
-        summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        existing.root.addWidget(summary)
-        grid.addWidget(existing, 1, 0)
-
-        gate = SectionCard("Qualification Gate")
-        gate_label = QLabel(
-            "Pending before this route becomes operational: rigid/high-stiffness limit, diagonal and cross-coupled K/C, "
-            "foundation-mass M audit, frequency interpolation, modal sensitivity, schema-1→2 migration, project round-trip, "
-            "full pytest/OP-W60 regression, and Linux/Windows frozen execution."
-        )
-        gate_label.setWordWrap(True)
-        gate.root.addWidget(gate_label)
-        grid.addWidget(gate, 1, 1)
-
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        root.addLayout(grid)
-        root.addStretch(1)
 
 
 class AnalysisRoutePage(QWidget):
