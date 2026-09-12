@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# Full-suite gate retry: tests.yml qualifies the corrected 0.30 branch HEAD before PR creation.
+# Full-suite gate: tests.yml qualifies the phase-aware 0.30 branch HEAD before PR creation.
 
 import inspect
 import numpy as np
