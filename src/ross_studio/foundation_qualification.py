@@ -113,13 +113,15 @@ def run_foundation_qualification() -> FoundationQualification:
 
     baseline_hz = _modal_hz(baseline)
 
+    # Isolate the stiffness asymptote: no Foundation mass is added here.  As
+    # Kfoundation -> infinity, this topology must converge to the legacy/RIGID
+    # direct-to-ground support rather than to a rigidly attached extra mass.
     high_project = deepcopy(baseline_project)
     high_project.foundations.append(
         FoundationSpec(
             name="DE high-stiffness limit",
             support_index=0,
-            model_type=FoundationModel.LUMPED_KCM,
-            mass_kg=125.0,
+            model_type=FoundationModel.LUMPED_KC,
             kxx=1.0e14,
             kyy=1.0e14,
             cxx=0.0,
