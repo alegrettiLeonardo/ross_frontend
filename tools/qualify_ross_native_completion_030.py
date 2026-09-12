@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# Full-suite gate: tests.yml qualifies the phase-aware 0.30 branch HEAD before PR creation.
+# Final full-suite gate: tests.yml qualifies the aligned 0.30 branch HEAD before PR creation.
 
 import inspect
 import numpy as np
