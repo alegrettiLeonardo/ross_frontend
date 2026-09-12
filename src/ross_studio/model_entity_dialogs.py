@@ -426,60 +426,57 @@ class CouplingEditorDialog(QDialog):
         root = QVBoxLayout(self)
         _note(
             root,
-            "Coupling properties are stored as a first-class engineering joint. Position "
-            "is exact-node qualified. This single-station legacy contract is not silently "
-            "converted into a two-node ROSS CouplingElement.",
+            "Native ROSS CouplingElement replaces one shaft interval and connects two adjacent FE stations. "
+            "Set left position + physical length explicitly. Misalignment remains a separate fault analysis.",
         )
         form = QFormLayout()
         self.name = QLineEdit(source.name)
         self.position = _double(source.position_mm, minimum=0.0, maximum=max(total_length_mm, 0.0))
+        self.length = _double(source.length_mm, minimum=0.0, maximum=max(total_length_mm, 0.0))
+        self.od = _double(source.od_mm, minimum=0.0)
         self.left_mass = _double(source.left_mass_kg, minimum=0.0)
         self.right_mass = _double(source.right_mass_kg, minimum=0.0)
+        self.left_id = _double(source.left_id_kg_m2, minimum=0.0)
+        self.right_id = _double(source.right_id_kg_m2, minimum=0.0)
         self.left_ip = _double(source.left_ip_kg_m2, minimum=0.0)
         self.right_ip = _double(source.right_ip_kg_m2, minimum=0.0)
-        self.kt_x = _double(source.kt_x_n_m)
-        self.kt_y = _double(source.kt_y_n_m)
-        self.kt_z = _double(source.kt_z_n_m)
-        self.kr_x = _double(source.kr_x_n_m_rad)
-        self.kr_y = _double(source.kr_y_n_m_rad)
-        self.kr_z = _double(source.kr_z_n_m_rad)
-        self.ct_x = _double(source.ct_x_n_s_m)
-        self.ct_y = _double(source.ct_y_n_s_m)
-        self.ct_z = _double(source.ct_z_n_s_m)
-        form.addRow("Name", self.name)
-        form.addRow("Position (mm)", self.position)
-        form.addRow("Left mass (kg)", self.left_mass)
-        form.addRow("Right mass (kg)", self.right_mass)
-        form.addRow("Left Ip (kg·m²)", self.left_ip)
-        form.addRow("Right Ip (kg·m²)", self.right_ip)
-        form.addRow("Kt x (N/m)", self.kt_x)
-        form.addRow("Kt y (N/m)", self.kt_y)
-        form.addRow("Kt z / axial (N/m)", self.kt_z)
-        form.addRow("Kr x (N·m/rad)", self.kr_x)
-        form.addRow("Kr y (N·m/rad)", self.kr_y)
-        form.addRow("Kr z / torsion (N·m/rad)", self.kr_z)
-        form.addRow("Ct x (N·s/m)", self.ct_x)
-        form.addRow("Ct y (N·s/m)", self.ct_y)
-        form.addRow("Ct z (N·s/m)", self.ct_z)
+        self.kt_x = _double(source.kt_x_n_m); self.kt_y = _double(source.kt_y_n_m); self.kt_z = _double(source.kt_z_n_m)
+        self.kr_x = _double(source.kr_x_n_m_rad); self.kr_y = _double(source.kr_y_n_m_rad); self.kr_z = _double(source.kr_z_n_m_rad)
+        self.ct_x = _double(source.ct_x_n_s_m); self.ct_y = _double(source.ct_y_n_s_m); self.ct_z = _double(source.ct_z_n_s_m)
+        self.cr_x = _double(source.cr_x_n_m_s_rad); self.cr_y = _double(source.cr_y_n_m_s_rad); self.cr_z = _double(source.cr_z_n_m_s_rad)
+        for label, widget in (
+            ("Name", self.name), ("Left station / n (mm)", self.position), ("Length to n+1 (mm)", self.length),
+            ("Outer diameter for plot (mm)", self.od), ("Left mass (kg)", self.left_mass), ("Right mass (kg)", self.right_mass),
+            ("Left Id (kg·m²)", self.left_id), ("Right Id (kg·m²)", self.right_id),
+            ("Left Ip (kg·m²)", self.left_ip), ("Right Ip (kg·m²)", self.right_ip),
+            ("Kt x (N/m)", self.kt_x), ("Kt y (N/m)", self.kt_y), ("Kt z / axial (N/m)", self.kt_z),
+            ("Kr x (N·m/rad)", self.kr_x), ("Kr y (N·m/rad)", self.kr_y), ("Kr z / torsion (N·m/rad)", self.kr_z),
+            ("Ct x (N·s/m)", self.ct_x), ("Ct y (N·s/m)", self.ct_y), ("Ct z (N·s/m)", self.ct_z),
+            ("Cr x (N·m·s/rad)", self.cr_x), ("Cr y (N·m·s/rad)", self.cr_y), ("Cr z (N·m·s/rad)", self.cr_z),
+        ):
+            form.addRow(label, widget)
         root.addLayout(form)
         root.addWidget(_buttons(self))
 
     def record(self) -> CouplingSpec:
         return CouplingSpec(
-            name=self.name.text().strip(), position_mm=self.position.value(),
+            name=self.name.text().strip(), position_mm=self.position.value(), length_mm=self.length.value(), od_mm=self.od.value(),
             left_mass_kg=self.left_mass.value(), right_mass_kg=self.right_mass.value(),
+            left_id_kg_m2=self.left_id.value(), right_id_kg_m2=self.right_id.value(),
             left_ip_kg_m2=self.left_ip.value(), right_ip_kg_m2=self.right_ip.value(),
             kt_x_n_m=self.kt_x.value(), kt_y_n_m=self.kt_y.value(), kt_z_n_m=self.kt_z.value(),
             kr_x_n_m_rad=self.kr_x.value(), kr_y_n_m_rad=self.kr_y.value(), kr_z_n_m_rad=self.kr_z.value(),
             ct_x_n_s_m=self.ct_x.value(), ct_y_n_s_m=self.ct_y.value(), ct_z_n_s_m=self.ct_z.value(),
+            cr_x_n_m_s_rad=self.cr_x.value(), cr_y_n_m_s_rad=self.cr_y.value(), cr_z_n_m_s_rad=self.cr_z.value(),
         )
 
     def changes(self) -> dict[str, object]:
         record = self.record()
         return {name: getattr(record, name) for name in (
-            "name", "position_mm", "left_mass_kg", "right_mass_kg", "left_ip_kg_m2", "right_ip_kg_m2",
+            "name", "position_mm", "length_mm", "od_mm", "left_mass_kg", "right_mass_kg",
+            "left_id_kg_m2", "right_id_kg_m2", "left_ip_kg_m2", "right_ip_kg_m2",
             "kt_x_n_m", "kt_y_n_m", "kt_z_n_m", "kr_x_n_m_rad", "kr_y_n_m_rad", "kr_z_n_m_rad",
-            "ct_x_n_s_m", "ct_y_n_s_m", "ct_z_n_s_m"
+            "ct_x_n_s_m", "ct_y_n_s_m", "ct_z_n_s_m", "cr_x_n_m_s_rad", "cr_y_n_m_s_rad", "cr_z_n_m_s_rad"
         )}
 
 

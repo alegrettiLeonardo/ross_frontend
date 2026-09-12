@@ -31,6 +31,15 @@ class FoundationModel(StrEnum):
     REDUCED_MATRIX = "REDUCED_MATRIX"
 
 
+class SealModel(StrEnum):
+    """ROSS-native seal model families exposed by Seal Studio."""
+
+    DIRECT = "DIRECT"
+    LABYRINTH = "LABYRINTH"
+    HOLE_PATTERN = "HOLE_PATTERN"
+    HYBRID = "HYBRID"
+
+
 class LateralConvention(StrEnum):
     """Positive-rotation convention used by lateral dynamic analyses."""
 
@@ -73,6 +82,9 @@ class ShaftSection:
     id_right_mm: float | None = None
     material: str = "Steel"
     fe_elements: int = 1
+    shear_effects: bool = True
+    rotary_inertia: bool = True
+    gyroscopic: bool = True
 
     @property
     def odr_mm(self) -> float:
@@ -340,16 +352,23 @@ class SealSpec:
     kyx: float = 0.0
     cxy: float = 0.0
     cyx: float = 0.0
+    model: SealModel = SealModel.DIRECT
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
 class CouplingSpec:
+    """Native ROSS CouplingElement contract spanning two adjacent shaft stations."""
+
     name: str
     position_mm: float
     left_mass_kg: float
     right_mass_kg: float
     left_ip_kg_m2: float
     right_ip_kg_m2: float
+    length_mm: float = 0.0
+    left_id_kg_m2: float = 0.0
+    right_id_kg_m2: float = 0.0
     kt_x_n_m: float = 0.0
     kt_y_n_m: float = 0.0
     kt_z_n_m: float = 0.0
@@ -359,6 +378,14 @@ class CouplingSpec:
     ct_x_n_s_m: float = 0.0
     ct_y_n_s_m: float = 0.0
     ct_z_n_s_m: float = 0.0
+    cr_x_n_m_s_rad: float = 0.0
+    cr_y_n_m_s_rad: float = 0.0
+    cr_z_n_m_s_rad: float = 0.0
+    od_mm: float = 0.0
+
+    @property
+    def end_mm(self) -> float:
+        return self.position_mm + self.length_mm
 
 
 @dataclass(slots=True)
@@ -512,7 +539,28 @@ class RotorProject:
             foundation.validate()
             foundation_supports.add(foundation.support_index)
 
-        for element in [*self.seals, *self.couplings, *self.loads, *self.probes]:
+        for seal in self.seals:
+            position_ok(seal.position_mm, seal.name)
+            if not isinstance(seal.model, SealModel):
+                try:
+                    seal.model = SealModel(str(seal.model))
+                except ValueError as exc:
+                    raise EngineeringError(f"Seal {seal.name!r} has unsupported model {seal.model!r}.") from exc
+
+        for coupling in self.couplings:
+            position_ok(coupling.position_mm, coupling.name)
+            if coupling.length_mm < 0:
+                raise EngineeringError(f"Coupling {coupling.name!r}: length cannot be negative.")
+            if coupling.length_mm > 0:
+                position_ok(coupling.end_mm, f"{coupling.name} end")
+            values = (
+                coupling.left_mass_kg, coupling.right_mass_kg, coupling.left_ip_kg_m2, coupling.right_ip_kg_m2,
+                coupling.left_id_kg_m2, coupling.right_id_kg_m2, coupling.od_mm,
+            )
+            if any(not isfinite(value) or value < 0 for value in values):
+                raise EngineeringError(f"Coupling {coupling.name!r}: masses, inertias and OD must be finite and non-negative.")
+
+        for element in [*self.loads, *self.probes]:
             position_ok(element.position_mm, getattr(element, "name", type(element).__name__))
         for case in self.operating_cases:
             if case.speed_min_rpm < 0 or case.speed_max_rpm < case.speed_min_rpm:

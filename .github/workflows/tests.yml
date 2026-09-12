@@ -62,6 +62,9 @@ jobs:
         run: python tools/qualify_multirotor_023.py
       - name: Qualify Foundation Studio 0.24
         run: python tools/qualify_foundation_024.py
+
+      - name: Qualify native ROSS completion 0.30
+        run: python tools/qualify_ross_native_completion_030.py
       - name: Qualify Engineering Outputs 0.18 package
         run: python tools/qualify_engineering_outputs_018.py
       - name: Run production-resolution OP-W60 pipeline

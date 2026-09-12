@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-"""ROSS Studio 0.24 application composition root.
+"""ROSS Studio 0.30 application composition root.
 
 The qualified 0.15 scientific transaction logic remains in ``app_legacy`` while
 0.17 owns hierarchical navigation, 0.18 adds local Engineering Outputs, 0.19 adds
 native Static/Modal plots, 0.20 decouples Static from Modal/Campbell, 0.21 adds
 independent native ROSS Time & Frequency transactions, 0.22 adds native
 ``ross.stochastic`` ST_* workflows, 0.23 adds native ROSS ``MultiRotor`` and 0.24
-adds the editable Foundation Studio without introducing a public/global Results route.
+adds the editable Foundation Studio; 0.30 completes native ROSS seals, couplings, faults, shaft switches and AMB workflows.
 """
 
 import sys
@@ -28,6 +28,7 @@ from .pages.foundation_workspace import FoundationWorkspacePage
 from .pages.multirotor_workspace import MultiRotorWorkspacePage
 from .pages.project_home import ProjectHomePage
 from .pages.rotor_workspace import RotorModelPage
+from .pages.seal_workspace import SealStudioPage
 from .pages.static_modal_workspace import StaticModalWorkspacePage
 from .pages.stochastic_workspace import StochasticWorkspacePage
 from .pages.time_frequency_workspace import TimeFrequencyWorkspacePage
@@ -45,7 +46,7 @@ TitleBar = _legacy.TitleBar
 
 
 class RossStudioWindow(_legacy.RossStudioWindow):
-    """0.24 shell with deterministic, stochastic, MultiRotor and Foundation workspaces."""
+    """0.30 shell with native ROSS deterministic, stochastic and component workspaces."""
 
     def __init__(self) -> None:
         self._architecture_pages: dict[str, QWidget] = {}
@@ -64,6 +65,8 @@ class RossStudioWindow(_legacy.RossStudioWindow):
             page: QWidget = ProjectHomePage(self.project)
         elif spec.owner == "foundation":
             page = FoundationWorkspacePage(self.project)
+        elif spec.owner == "seal":
+            page = SealStudioPage(self.project)
         elif route_id == "analysis.static_modal.lateral":
             page = StaticModalWorkspacePage(self.project, mode_filter="Lateral")
         elif route_id == "analysis.static_modal.torsional":
@@ -125,9 +128,11 @@ class RossStudioWindow(_legacy.RossStudioWindow):
             )
             return
 
-        if spec.owner in {"foundation", "analysis"}:
+        if spec.owner in {"seal", "foundation", "analysis"}:
             self.stack.setCurrentWidget(self._architecture_page(route))
-            if route == "model.supports.foundation":
+            if route == "model.seals":
+                detail = "Native Direct / Labyrinth / Hole Pattern / Hybrid Seal Studio with leakage, pressure and convergence outputs"
+            elif route == "model.supports.foundation":
                 detail = (
                     "Editable Foundation Studio 0.24 · strict support ownership · 2-DOF Rigid, lumped K/C, "
                     "lumped K/C/M and frequency-dependent K/C contracts"
@@ -136,8 +141,8 @@ class RossStudioWindow(_legacy.RossStudioWindow):
                 detail = "Independent native ROSS Static and Modal/Campbell transactions with separate caches"
             elif route == "analysis.time_frequency":
                 detail = (
-                    "Independent native ROSS Frequency, Unbalance, Time, HBM, UCS and Clearance transactions "
-                    "with per-analysis caches and plot-only post-processing"
+                    "Native ROSS Frequency, Unbalance, Time, HBM, UCS, Clearance, Faults and AMB sensitivity; "
+                    "Newmark AMB outputs expose displacement, current and magnetic force"
                 )
             elif route == "analysis.stochastic":
                 detail = (

@@ -6,7 +6,7 @@ from typing import Literal
 from .navigation_registry import public_routes
 
 
-PageOwner = Literal["home", "rotor", "bearing", "foundation", "analysis"]
+PageOwner = Literal["home", "rotor", "bearing", "seal", "foundation", "analysis"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,10 +32,13 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
         "model.bearings.fluid_film", "bearing", bearing_group="THD", title="Fluid-Film Bearing Models"
     ),
     "model.bearings.amb": PageRouteSpec(
-        "model.bearings.amb", "bearing", bearing_group="AMB", title="Active Magnetic Bearings", operational=False,
-        note="Blocked until the AMB actuator/sensor/controller/Newmark feedback contract is qualified.",
+        "model.bearings.amb", "bearing", bearing_group="AMB", title="Active Magnetic Bearings", implementation_phase="0.30.0",
+        operational=True, note="Native MagneticBearingElement qualified with physical actuator/PID inputs and Newmark feedback."
     ),
-    "model.seals": PageRouteSpec("model.seals", "rotor", editor_key="seals", title="Seals"),
+    "model.seals": PageRouteSpec(
+        "model.seals", "seal", title="Seal Studio", implementation_phase="0.30.0", operational=True,
+        note="Native SealElement, LabyrinthSeal, HolePatternSeal and HybridSeal with Preview → Apply provenance."
+    ),
     "model.supports.flexible": PageRouteSpec(
         "model.supports.flexible", "rotor", editor_key="supports", title="Bearing / Flexible Supports"
     ),
@@ -75,10 +78,11 @@ PAGE_ROUTES: dict[str, PageRouteSpec] = {
         note="Independent Modal/Campbell transaction; torsional modes come from ROSS shape.mode_type and retain native 3D animation.",
     ),
     "analysis.time_frequency": PageRouteSpec(
-        "analysis.time_frequency", "analysis", title="Time & Frequency", implementation_phase="0.21.0", operational=True,
+        "analysis.time_frequency", "analysis", title="Time & Frequency", implementation_phase="0.30.0", operational=True,
         note=(
             "Independent native ROSS run_freq_response(), run_unbalance_response(), run_time_response(), "
-            "run_harmonic_balance_response(), run_ucs() and run_clearance_analysis() transactions with native plots."
+            "run_harmonic_balance_response(), run_ucs(), run_clearance_analysis(), native Misalignment/Rubbing/Crack faults, "
+            "AMB Newmark controller outputs and run_amb_sensitivity() transactions with native plots."
         ),
     ),
     "analysis.stochastic": PageRouteSpec(

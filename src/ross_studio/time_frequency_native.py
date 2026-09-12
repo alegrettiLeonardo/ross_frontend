@@ -32,6 +32,7 @@ TIME_FREQUENCY_NATIVE_OUTPUTS: dict[str, tuple[str, ...]] = {
     ),
     "time_response": (
         "plot_1d", "plot_2d", "plot_3d", "plot_dfft", "data_time_response",
+        "plot_amb_disps", "plot_amb_currents", "plot_amb_forces",
         "t", "yout", "xout",
     ),
     "harmonic_balance": (
@@ -72,6 +73,9 @@ TIME_PLOT_LABELS = {
     "orbit_2d": "Orbit · selected node",
     "orbits_3d": "Orbits · all nodes 3D",
     "dfft": "DFFT · probes",
+    "amb_disps": "AMB · sensor displacements",
+    "amb_currents": "AMB · control currents",
+    "amb_forces": "AMB · magnetic forces",
 }
 
 HBM_PLOT_LABELS = {
@@ -343,6 +347,18 @@ class TimeResponseNativeCatalog(_NativeCatalogBase):
                 frequency_units=frequency_units,
                 frequency_range=frequency_range,
             )
+        elif key == "amb_disps":
+            if not hasattr(native, "plot_amb_disps"):
+                raise EngineeringError("This time response contains no active magnetic bearing data.")
+            figure = native.plot_amb_disps(displacement_units=displacement_units, time_units=time_units)
+        elif key == "amb_currents":
+            if not hasattr(native, "plot_amb_currents"):
+                raise EngineeringError("This time response contains no active magnetic bearing data.")
+            figure = native.plot_amb_currents(current_units="A", time_units=time_units)
+        elif key == "amb_forces":
+            if not hasattr(native, "plot_amb_forces"):
+                raise EngineeringError("This time response contains no active magnetic bearing data.")
+            figure = native.plot_amb_forces(force_units="N", time_units=time_units)
         else:
             raise KeyError(key)
         self._cache[cache_key] = figure

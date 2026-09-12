@@ -31,7 +31,7 @@ class RossCapabilityRegistry:
         Capability(BearingGroup.THD, "TiltingPad", "Tilting Pad", AdapterStatus.VALIDATED, "Native ROSS 2.3 lateral THD workflow qualified end to end: engineering input, calculate, native fields, solved K/C preview, BearingElement apply, flexible n_link, strict rotor and modal."),
         Capability(BearingGroup.THD, "ThrustPad", "Thrust Pad", AdapterStatus.VALIDATED, "Native ROSS 2.3 axial ThrustPad workflow qualified end to end: engineering input, calculate, native pressure/temperature/film fields, solved Kzz/Czz preview, independent axial BearingElement apply, strict rotor and modal; radial K/C and lateral n_link are preserved."),
         Capability(BearingGroup.THD, "SqueezeFilmDamper", "Squeeze Film Damper", AdapterStatus.VALIDATED, "Native ROSS 2.3 lateral SFD workflow qualified end to end: engineering input, calculate, solved K/C preview, BearingElement apply, flexible n_link, strict rotor and modal. Unsupported native fields remain explicitly unavailable."),
-        Capability(BearingGroup.AMB, "MagneticBearingElement", "Active Magnetic Bearing", AdapterStatus.BLOCKED, "Requires an explicit actuator/sensor/controller domain before execution is enabled."),
+        Capability(BearingGroup.AMB, "MagneticBearingElement", "Active Magnetic Bearing", AdapterStatus.VALIDATED, "Native ROSS MagneticBearingElement with physical actuator inputs, PID sensor/controller loop, Newmark time integration and ISO 14839 sensitivity workflow."),
     )
 
     def __init__(self, ross_module: Any | None = None) -> None:
@@ -163,6 +163,21 @@ class EngineeringValidationService:
                 issues.append(ValidationIssue("error", "CONCENTRATED_MASS_INERTIA_INVALID", str(exc)))
 
         plan = NodeInsertionService.plan(project)
+        for coupling in project.couplings:
+            if coupling.length_mm <= 0:
+                issues.append(ValidationIssue(
+                    "error", "COUPLING_TWO_NODE_REQUIRED",
+                    f"{coupling.name} requires a positive length so native ROSS CouplingElement can connect n to n+1.",
+                ))
+                continue
+            left = plan.node_for(coupling.position_mm)
+            right = plan.node_for(coupling.end_mm)
+            if left is None or right is None or right != left + 1:
+                issues.append(ValidationIssue(
+                    "error", "COUPLING_NOT_ADJACENT",
+                    f"{coupling.name} must span exactly one adjacent ROSS shaft interval; received nodes {left} and {right}.",
+                ))
+
         node_positions = set(plan.positions_mm)
         required_positions: list[tuple[str, float]] = []
         required_positions.extend((bearing.name, bearing.position_mm) for bearing in project.bearings)

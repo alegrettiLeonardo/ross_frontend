@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -86,6 +87,12 @@ class GuidedShaftSectionEditorDialog(QDialog):
         self.fe_elements.setValue(section.fe_elements)
         self.material = QLineEdit(section.material)
         self.material.setReadOnly(True)
+        self.shear_effects = QCheckBox("Include shear deformation")
+        self.shear_effects.setChecked(bool(section.shear_effects))
+        self.rotary_inertia = QCheckBox("Include rotary inertia")
+        self.rotary_inertia.setChecked(bool(section.rotary_inertia))
+        self.gyroscopic = QCheckBox("Include gyroscopic matrix")
+        self.gyroscopic.setChecked(bool(section.gyroscopic))
 
         form.addRow("ROSS shaft type", self.geometry)
         form.addRow("Tutorial contract", self.contract)
@@ -96,6 +103,9 @@ class GuidedShaftSectionEditorDialog(QDialog):
         form.addRow("ID right / idr (mm)", self.id_right)
         form.addRow("Base FE elements", self.fe_elements)
         form.addRow("Material", self.material)
+        form.addRow("Shear effects", self.shear_effects)
+        form.addRow("Rotary inertia", self.rotary_inertia)
+        form.addRow("Gyroscopic", self.gyroscopic)
         root.addLayout(form)
 
         buttons = QDialogButtonBox(
@@ -191,6 +201,9 @@ class GuidedShaftSectionEditorDialog(QDialog):
             "id_left_mm": id_left,
             "id_right_mm": id_right,
             "fe_elements": self.fe_elements.value(),
+            "shear_effects": self.shear_effects.isChecked(),
+            "rotary_inertia": self.rotary_inertia.isChecked(),
+            "gyroscopic": self.gyroscopic.isChecked(),
         }
 
     @classmethod

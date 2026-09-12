@@ -29,6 +29,7 @@ from .domain import (
     ProbeAngleContract,
     ProbeSpec,
     RotorProject,
+    SealModel,
     SealSpec,
     ShaftSection,
     SupportSpec,
@@ -36,8 +37,8 @@ from .domain import (
 from .models import ProjectModel
 
 FORMAT_NAME = "ROSS Studio Project"
-SCHEMA_VERSION = 2
-_SUPPORTED_SCHEMA_VERSIONS = (1, SCHEMA_VERSION)
+SCHEMA_VERSION = 3
+_SUPPORTED_SCHEMA_VERSIONS = (1, 2, SCHEMA_VERSION)
 NATIVE_EXTENSION = ".rossproj"
 
 
@@ -78,7 +79,7 @@ def _project_payload(model: ProjectModel) -> dict[str, Any]:
     return {
         "format": FORMAT_NAME,
         "schema_version": SCHEMA_VERSION,
-        "app_version": "0.24.0",
+        "app_version": "0.30.0",
         "project_meta": {
             "name": model.name,
             "description": model.description,
@@ -90,18 +91,37 @@ def _project_payload(model: ProjectModel) -> dict[str, Any]:
 
 
 def _migrate_payload(payload: dict[str, Any], schema: int) -> dict[str, Any]:
-    """Migrate older native projects without inventing physical foundation data.
+    """Migrate old files without inventing physical ROSS data.
 
-    Schema 1 predates Foundation Studio. Its exact semantic migration is therefore an
-    empty ``foundations`` collection. Existing supports remain supports; they are never
-    silently reclassified as foundations.
+    Schema 2 introduced Foundation Studio. Schema 3 adds explicit shaft theory
+    switches, seal model provenance and the physical two-node coupling contract.
+    A legacy single-station coupling is retained with ``length_mm=0`` and is
+    therefore readable but fails the strict native CouplingElement execution gate
+    until the user supplies the second station.
     """
     migrated = deepcopy(payload)
-    if schema == 1:
-        engineering = migrated.get("engineering")
-        if isinstance(engineering, dict):
-            engineering.setdefault("foundations", [])
-        migrated["schema_version"] = SCHEMA_VERSION
+    engineering = migrated.get("engineering")
+    if schema == 1 and isinstance(engineering, dict):
+        engineering.setdefault("foundations", [])
+        schema = 2
+    if schema <= 2 and isinstance(engineering, dict):
+        for section in engineering.get("shaft_sections", []):
+            section.setdefault("shear_effects", True)
+            section.setdefault("rotary_inertia", True)
+            section.setdefault("gyroscopic", True)
+        for seal in engineering.get("seals", []):
+            seal.setdefault("model", "DIRECT")
+            seal.setdefault("metadata", {})
+        for coupling in engineering.get("couplings", []):
+            coupling.setdefault("length_mm", 0.0)
+            coupling.setdefault("left_id_kg_m2", 0.0)
+            coupling.setdefault("right_id_kg_m2", 0.0)
+            coupling.setdefault("cr_x_n_m_s_rad", 0.0)
+            coupling.setdefault("cr_y_n_m_s_rad", 0.0)
+            coupling.setdefault("cr_z_n_m_s_rad", 0.0)
+            coupling.setdefault("od_mm", 0.0)
+    migrated["schema_version"] = SCHEMA_VERSION
+    migrated["app_version"] = "0.30.0"
     return migrated
 
 
@@ -174,7 +194,9 @@ def _foundation(row: dict[str, Any]) -> FoundationSpec:
 
 
 def _seal(row: dict[str, Any]) -> SealSpec:
-    return SealSpec(**row)
+    data = dict(row)
+    data["model"] = SealModel(data.get("model", SealModel.DIRECT.value))
+    return SealSpec(**data)
 
 
 def _coupling(row: dict[str, Any]) -> CouplingSpec:

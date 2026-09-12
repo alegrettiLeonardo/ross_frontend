@@ -24,6 +24,9 @@ class ShaftElementPlan:
     id0_mm: float
     id1_mm: float
     material: str
+    shear_effects: bool = True
+    rotary_inertia: bool = True
+    gyroscopic: bool = True
 
     @property
     def length_mm(self) -> float:
@@ -103,7 +106,10 @@ class RossModelBuilder:
             od1 = section.od_left_mm + (section.odr_mm - section.od_left_mm) * t1
             id0 = section.id_left_mm + (section.idr_mm - section.id_left_mm) * t0
             id1 = section.id_left_mm + (section.idr_mm - section.id_left_mm) * t1
-            plan.append(ShaftElementPlan(n, x0, x1, section.section, od0, od1, id0, id1, section.material))
+            plan.append(ShaftElementPlan(
+                n, x0, x1, section.section, od0, od1, id0, id1, section.material,
+                bool(section.shear_effects), bool(section.rotary_inertia), bool(section.gyroscopic),
+            ))
         return plan
 
     @staticmethod
@@ -188,6 +194,24 @@ class RossModelBuilder:
                 radial_clearance=float(spec.metadata["radial_clearance_m"]),
                 oil_viscosity=float(spec.metadata["oil_viscosity_pa_s"]),
                 tag=spec.name,
+            )
+
+        if spec.ross_class == "MagneticBearingElement":
+            data = spec.metadata.get("engineering_input", spec.metadata)
+            required = ("g0_m", "i0_a", "ag_m2", "nw")
+            missing = [key for key in required if key not in data]
+            if missing:
+                raise EngineeringError(f"AMB {spec.name!r} is missing engineering inputs: {', '.join(missing)}")
+            speed_rpm = data.get("speed_rpm")
+            frequency = None if speed_rpm is None else np.asarray(speed_rpm, dtype=float) * 2.0 * pi / 60.0
+            return rs.MagneticBearingElement(
+                n=mapping.node, n_link=n_link, tag=spec.name,
+                g0=float(data["g0_m"]), i0=float(data["i0_a"]), ag=float(data["ag_m2"]), nw=float(data["nw"]),
+                frequency=frequency, alpha=float(data.get("alpha_rad", pi / 8.0)),
+                k_amp=float(data.get("k_amp", 1.0)), k_sense=float(data.get("k_sense", 1.0)),
+                kp_pid=float(data.get("kp_pid", 0.0)), kd_pid=float(data.get("kd_pid", 0.0)),
+                ki_pid=float(data.get("ki_pid", 0.0)), n_f=float(data.get("n_f_rad_s", 10000.0)),
+                sensors_axis_rotation=float(data.get("sensors_axis_rotation_rad", pi / 4.0)),
             )
 
         if spec.ross_class != "BearingElement":
@@ -277,19 +301,52 @@ class RossModelBuilder:
         plan = self.shaft_plan(project)
         node_positions = list(insertion_plan.positions_mm)
         material_cache = {name: self._material(project, name) for name in project.materials}
-        shaft_elements = [
-            rs.ShaftElement(
-                L=element.length_mm / 1000.0,
-                idl=element.id0_mm / 1000.0,
-                odl=element.od0_mm / 1000.0,
-                idr=element.id1_mm / 1000.0,
-                odr=element.od1_mm / 1000.0,
-                material=material_cache[element.material],
-                n=element.n,
-                tag=f"S{element.physical_section:02d}.{element.n:02d}",
+        coupling_by_interval: dict[tuple[float, float], Any] = {}
+        for coupling in project.couplings:
+            if coupling.length_mm <= 0:
+                raise EngineeringError(
+                    f"Coupling {coupling.name!r} still uses the legacy single-station contract. "
+                    "Edit it and provide a positive length to create native ROSS CouplingElement nodes n and n+1."
+                )
+            key = (round(coupling.position_mm, 10), round(coupling.end_mm, 10))
+            if key in coupling_by_interval:
+                raise EngineeringError(f"More than one coupling occupies interval {key} mm.")
+            coupling_by_interval[key] = coupling
+
+        shaft_elements: list[Any] = []
+        for element in plan:
+            coupling = coupling_by_interval.get((round(element.x0_mm, 10), round(element.x1_mm, 10)))
+            if coupling is not None:
+                shaft_elements.append(
+                    rs.CouplingElement(
+                        m_l=coupling.left_mass_kg, m_r=coupling.right_mass_kg,
+                        Ip_l=coupling.left_ip_kg_m2, Ip_r=coupling.right_ip_kg_m2,
+                        Id_l=coupling.left_id_kg_m2, Id_r=coupling.right_id_kg_m2,
+                        kt_x=coupling.kt_x_n_m, kt_y=coupling.kt_y_n_m, kt_z=coupling.kt_z_n_m,
+                        kr_x=coupling.kr_x_n_m_rad, kr_y=coupling.kr_y_n_m_rad, kr_z=coupling.kr_z_n_m_rad,
+                        ct_x=coupling.ct_x_n_s_m, ct_y=coupling.ct_y_n_s_m, ct_z=coupling.ct_z_n_s_m,
+                        cr_x=coupling.cr_x_n_m_s_rad, cr_y=coupling.cr_y_n_m_s_rad, cr_z=coupling.cr_z_n_m_s_rad,
+                        o_d=None if coupling.od_mm <= 0 else coupling.od_mm / 1000.0,
+                        L=coupling.length_mm / 1000.0, n=element.n, tag=coupling.name,
+                    )
+                )
+                continue
+            shaft_elements.append(
+                rs.ShaftElement(
+                    L=element.length_mm / 1000.0, idl=element.id0_mm / 1000.0, odl=element.od0_mm / 1000.0,
+                    idr=element.id1_mm / 1000.0, odr=element.od1_mm / 1000.0,
+                    material=material_cache[element.material], n=element.n, tag=f"S{element.physical_section:02d}.{element.n:02d}",
+                    shear_effects=element.shear_effects, rotary_inertia=element.rotary_inertia, gyroscopic=element.gyroscopic,
+                )
             )
-            for element in plan
-        ]
+
+        unmatched = set(coupling_by_interval) - {(round(item.x0_mm, 10), round(item.x1_mm, 10)) for item in plan}
+        if unmatched:
+            joined = ", ".join(f"{a:g}-{b:g}" for a, b in sorted(unmatched))
+            raise EngineeringError(
+                "Native CouplingElement must replace exactly one adjacent shaft interval; "
+                f"these coupling spans contain intermediate nodes or boundaries: {joined} mm."
+            )
 
         support_by_bearing = {support.bearing_index: support for support in project.supports}
         support_link_nodes: dict[str, int] = {}

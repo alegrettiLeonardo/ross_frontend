@@ -291,6 +291,7 @@ class RossStudioWindow(QMainWindow):
             "TiltingPad": "Tilting Pad",
             "SqueezeFilmDamper": "Squeeze Film Damper",
             "ThrustPad": "Axial Thrust Pad",
+            "MagneticBearingElement": "Active Magnetic Bearing",
         }
         base.bearing_type = titles.get(result.source_model, result.source_model)
 
