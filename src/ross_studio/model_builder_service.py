@@ -36,12 +36,7 @@ class MutationAudit:
 
 @dataclass(slots=True)
 class RotorMutationPreview:
-    """Qualified, unapplied mutation of a :class:`RotorProject`.
-
-    The source snapshot provides the same stale-input protection used by Bearing
-    Studio: a preview may only be committed while the live project is byte-for-byte
-    equivalent at the dataclass level to the project from which it was calculated.
-    """
+    """Qualified, unapplied mutation of a :class:`RotorProject`."""
 
     source_snapshot: RotorProject
     candidate: RotorProject
@@ -51,16 +46,15 @@ class RotorMutationPreview:
 class RotorModelMutationService:
     """Transactional engineering editor for non-bearing rotor model entities.
 
-    Every mutation follows the production contract::
+    Every mutation follows::
 
         live project -> deepcopy -> mutate -> domain validation
                      -> engineering validation -> strict ROSS build -> preview
                      -> stale check -> commit
 
     Bearings deliberately stay outside this service because Bearing Studio owns the
-    qualified Calculate -> Preview -> Apply workflow and its THD/axial semantics.
-    Foundation Studio 0.24 uses this same strict transaction boundary while retaining
-    FoundationSpec as a physical entity distinct from SupportSpec.
+    qualified Calculate -> Preview -> Apply workflow. Foundation Studio 0.24 and
+    Seal Studio 0.25 use this strict boundary for committed domain records.
     """
 
     _COLLECTIONS: dict[str, tuple[str, type[Any]]] = {
@@ -190,6 +184,42 @@ class RotorModelMutationService:
             after_count=len(collection),
         )
 
+    def preview_replace(
+        self,
+        project: RotorProject,
+        kind: str,
+        index: int,
+        record: Any,
+    ) -> RotorMutationPreview:
+        """Replace one first-class record, allowing a qualified subtype to change.
+
+        Seal Studio uses this when an engineer deliberately changes Direct ↔
+        Labyrinth ↔ Hole Pattern ↔ Hybrid. The whole candidate project is rebuilt by
+        ROSS before commit, so changing model family cannot bypass validation.
+        """
+
+        candidate = deepcopy(project)
+        live_collection, expected_type = self._collection(project, kind)
+        collection, _ = self._collection(candidate, kind)
+        if not 0 <= index < len(collection):
+            raise EngineeringError(f"{kind} index {index} is outside [0, {len(collection) - 1}].")
+        if kind == "shaft":
+            raise EngineeringError("Shaft records cannot be replaced as a topology-changing shortcut.")
+        if not isinstance(record, expected_type):
+            raise EngineeringError(
+                f"Cannot replace {kind} with {type(record).__name__}; expected {expected_type.__name__} or a qualified subtype."
+            )
+        collection[index] = deepcopy(record)
+        return self._qualify(
+            project,
+            candidate,
+            kind=kind,
+            operation="replace",
+            index=index,
+            before_count=len(live_collection),
+            after_count=len(collection),
+        )
+
     def preview_add(
         self,
         project: RotorProject,
@@ -252,8 +282,6 @@ class RotorModelMutationService:
             raise EngineeringError(
                 "Rotor model inputs changed after preview; discard this preview and recalculate the model-builder transaction."
             )
-        # Keep object identity stable because ProjectModel, open widgets and services
-        # can all hold the same engineering-domain instance.
         for field in fields(RotorProject):
             setattr(project, field.name, deepcopy(getattr(preview.candidate, field.name)))
         return preview.audit
