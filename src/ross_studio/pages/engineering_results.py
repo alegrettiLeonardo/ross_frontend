@@ -334,6 +334,9 @@ class EngineeringAnalysisResultsPage(AnalysisResultsPage):
         self.validity_guard = ResultValidityGuard(self, self._invalidate_results)
 
     def _invalidate_results(self):
+        if self.engineering_outputs_dialog is not None:
+            self.engineering_outputs_dialog.close()
+            self.engineering_outputs_dialog = None
         self.result = None
         self.engineering_snapshot = None
         self.engineering_figure_catalog = None

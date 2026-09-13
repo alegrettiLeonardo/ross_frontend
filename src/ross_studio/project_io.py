@@ -99,6 +99,7 @@ def _migrate_payload(payload: dict[str, Any], schema: int) -> dict[str, Any]:
     therefore readable but fails the strict native CouplingElement execution gate
     until the user supplies the second station.
     """
+    original_schema = schema
     migrated = deepcopy(payload)
     engineering = migrated.get("engineering")
     if schema == 1 and isinstance(engineering, dict):
@@ -120,6 +121,24 @@ def _migrate_payload(payload: dict[str, Any], schema: int) -> dict[str, Any]:
             coupling.setdefault("cr_y_n_m_s_rad", 0.0)
             coupling.setdefault("cr_z_n_m_s_rad", 0.0)
             coupling.setdefault("od_mm", 0.0)
+    if original_schema < SCHEMA_VERSION and isinstance(engineering, dict):
+        original = payload.get("engineering", {})
+        changes = []
+        def added_fields(before, after, path):
+            if isinstance(after, dict):
+                for key, value in after.items():
+                    if key not in before:
+                        changes.append(f"{path}.{key}={value!r}")
+                    else:
+                        added_fields(before[key], value, f"{path}.{key}")
+            elif isinstance(after, list) and isinstance(before, list):
+                for index, (old, new) in enumerate(zip(before, after)):
+                    added_fields(old, new, f"{path}[{index}]")
+        added_fields(original, engineering, "engineering")
+        engineering.setdefault("warnings", []).append(
+            f"Project schema migration {original_schema} -> {SCHEMA_VERSION}. "
+            + ("Added defaults: " + "; ".join(changes) if changes else "No physical values changed.")
+        )
     migrated["schema_version"] = SCHEMA_VERSION
     migrated["app_version"] = "0.30.0"
     return migrated

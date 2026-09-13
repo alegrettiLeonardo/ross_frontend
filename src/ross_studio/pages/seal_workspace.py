@@ -264,28 +264,32 @@ class SealStudioPage(QWidget):
         self._collect_figures(result.native_element)
 
     def _collect_figures(self, native: Any) -> None:
+        errors = []
         self.figures.clear()
         self.plot_choice.clear()
         for label, coefficients in (("Stiffness K vs frequency", ["kxx", "kyy", "kxy", "kyx"]), ("Damping C vs frequency", ["cxx", "cyy", "cxy", "cyx"])):
             try:
                 self.figures[label] = native.plot(coefficients=coefficients, frequency_units="RPM")
-            except Exception:
-                pass
+            except Exception as exc:
+                errors.append(str(exc))
         if hasattr(native, "plot_pressure_distribution"):
             try:
                 self.figures["Pressure distribution"] = native.plot_pressure_distribution(pressure_units="MPa", length_units="mm")
-            except Exception:
-                pass
+            except Exception as exc:
+                errors.append(str(exc))
         if hasattr(native, "plot_convergence"):
             try:
                 self.figures["Hybrid convergence"] = native.plot_convergence()
-            except Exception:
-                pass
+            except Exception as exc:
+                errors.append(str(exc))
         self.plot_choice.addItems(list(self.figures))
         if self.figures:
             self._show_plot()
         else:
             self.plot.set_unavailable("This native ROSS seal exposes no compatible plot for the solved preview.")
+
+        if errors:
+            self.state.setText("Preview calculated; native plot failures: " + "; ".join(errors))
 
     def _show_plot(self) -> None:
         figure = self.figures.get(self.plot_choice.currentText())

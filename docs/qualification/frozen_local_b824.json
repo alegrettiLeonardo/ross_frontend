@@ -1,0 +1,38 @@
+{
+  "frozen_selftest_LocalLinux_multirotor_023.json": {
+    "status": "PASS",
+    "frozen": true
+  },
+  "frozen_selftest_LocalLinux_engineering_outputs.json": {
+    "status": "PASS",
+    "frozen": true
+  },
+  "frozen_selftest_LocalLinux_project_io.json": {
+    "status": "PASS",
+    "frozen": true
+  },
+  "frozen_selftest_LocalLinux_foundation_024.json": {
+    "status": "PASS",
+    "frozen": true
+  },
+  "frozen_selftest_LocalLinux_time_frequency_021.json": {
+    "status": "PASS",
+    "frozen": true
+  },
+  "frozen_selftest_LocalLinux.json": {
+    "status": "PASS",
+    "frozen": true
+  },
+  "frozen_selftest_LocalLinux_static_modal_020.json": {
+    "status": "PASS",
+    "frozen": true
+  },
+  "frozen_selftest_LocalLinux_stochastic_022.json": {
+    "status": "PASS",
+    "frozen": true
+  },
+  "frozen_selftest_LocalLinux_gui.json": {
+    "status": "PASS",
+    "frozen": true
+  }
+}

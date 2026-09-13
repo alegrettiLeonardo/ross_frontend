@@ -207,3 +207,90 @@ def test_multirotor_real_modal_is_invalidated(qtbot):
     page.validity_guard.check()
     assert page._result is None
     assert page._catalog is None
+
+
+def test_duplicate_support_names_rejected():
+    from ross_studio.domain import EngineeringError
+    p=small_project();p.supports=[SupportSpec('S',0,10.),SupportSpec('S',1,10.)]
+    with pytest.raises(EngineeringError,match='unique names'):
+        p.validate()
+
+
+@pytest.mark.parametrize('speeds',[(1000.,1000.),(2000.,1000.)])
+def test_bearing_frequency_table_requires_strict_order(speeds):
+    from ross_studio.domain import EngineeringError, BearingCoefficientPoint
+    p=small_project();p.bearings[0].coefficients=[BearingCoefficientPoint(rpm=s,kxx=1e7,kyy=1e7,kxy=0.,kyx=0.,cxx=100.,cyy=100.,cxy=0.,cyx=0.) for s in speeds]
+    with pytest.raises(EngineeringError,match='strictly increasing'):
+        p.validate()
+
+
+def test_stochastic_real_build_invalidated_on_model_and_sampling_edit(qtbot):
+    from ross_studio.pages.stochastic_workspace import StochasticWorkspacePage
+    from ross_studio.stochastic_analysis import StochasticRotorService
+    from test_stochastic_native_022 import compact_project, sampling
+    page=StochasticWorkspacePage(ProjectModel.from_engineering(compact_project()));qtbot.addWidget(page)
+    built=StochasticRotorService().build(page.engineering,sampling())
+    page._input_build_complete(built)
+    assert page._input_build is built
+    page.project.engineering.disks[0].mass_kg*=2
+    page.validity_guard.check()
+    assert page._input_build is None
+    page._input_build_complete(built)
+    page.seed.setValue(page.seed.value()+1)
+    assert page._input_build is None
+
+
+def test_engineering_outputs_real_result_invalidated(qtbot):
+    from ross_studio.pages.engineering_results import EngineeringAnalysisResultsPage
+    from ross_studio.analysis_pipeline import AnalysisPipelineService
+    from ross_studio.models import load_reference_project_model
+    model=load_reference_project_model()
+    page=EngineeringAnalysisResultsPage(model);qtbot.addWidget(page)
+    result=AnalysisPipelineService().run(model.engineering)
+    page.set_results(result)
+    assert page.engineering_snapshot is not None
+    model.engineering.bearings[0].kxx+=1.234567e7
+    page.validity_guard.check()
+    assert page.result is None
+    assert page.engineering_snapshot is None
+    assert not page.engineering_outputs_button.isEnabled()
+
+
+def test_hybrid_nonconvergence_cannot_be_applied():
+    from ross_studio.pages.seal_workspace import _DEFAULTS
+    from ross_studio.seal_studio_service import SealStudioService
+    from ross_studio.domain import SealSpec, SealModel, EngineeringError
+    p=small_project();p.seals=[SealSpec('Unconverged',300.,1e6,1e6,100.,100.)]
+    inputs=dict(_DEFAULTS[SealModel.HYBRID],max_iterations=1)
+    with pytest.raises(EngineeringError,match='did not converge'):
+        SealStudioService().calculate(p,0,SealModel.HYBRID,inputs)
+    assert p.seals[0].model==SealModel.DIRECT
+
+
+def test_schema_migration_records_every_added_physical_default(tmp_path):
+    import json
+    model=ProjectModel.from_engineering(small_project())
+    target=save_project(model,tmp_path/'old.rossproj')
+    raw=json.loads(target.read_text());raw['schema_version']=2
+    for shaft in raw['engineering']['shaft_sections']:
+        for key in ('shear_effects','rotary_inertia','gyroscopic'): shaft.pop(key)
+    target.write_text(json.dumps(raw))
+    loaded=load_project(target)
+    record=loaded.engineering.warnings[-1]
+    assert 'migration 2 -> 3' in record
+    for index in range(2):
+        for key in ('shear_effects','rotary_inertia','gyroscopic'):
+            assert f'engineering.shaft_sections[{index}].{key}=True' in record
+    reopened=load_project(save_project(loaded,tmp_path/'new.rossproj'))
+    assert reopened.engineering.warnings==loaded.engineering.warnings
+
+
+def test_seal_plot_failure_is_visible(qtbot,monkeypatch):
+    from ross_studio.pages.seal_workspace import SealStudioPage
+    page=SealStudioPage(ProjectModel.from_engineering(small_project()));qtbot.addWidget(page)
+    native=rs.SealElement(n=0,kxx=1e6,cxx=100.)
+    def failure(*args,**kwargs): raise ValueError('injected plotting failure')
+    monkeypatch.setattr(native,'plot',failure)
+    page._collect_figures(native)
+    assert 'injected plotting failure' in page.state.text()
+    assert not page.figures

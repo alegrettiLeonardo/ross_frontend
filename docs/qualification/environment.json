@@ -1,0 +1,6 @@
+{
+  "python": "3.12.14",
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.39",
+  "head": "b824a619f27335c17855d05eb35203f4a399f2a8",
+  "benchmark_note": "Single BLAS thread; shared machine while other tests/build ran; peak RSS cumulative, not per operation; exploratory benchmark, not isolated release performance gate."
+}

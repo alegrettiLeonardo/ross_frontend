@@ -316,13 +316,24 @@ class SealStudioService:
             "seal_type": str(value["lab_seal_type"]),
             "preswirl": float(value["lab_preswirl"]),
         }
-        return cls(
+        native = cls(
             **common,
             hole_pattern_parameters=hole,
             labyrinth_parameters=lab,
             tolerance=float(value["tolerance"]),
             max_iterations=int(value["max_iterations"]),
         )
+
+        history = native.convergence_history
+        if not history or not np.isfinite(history[-1]) or history[-1] > float(value["tolerance"]):
+            residual = history[-1] if history else None
+            raise EngineeringError(
+                f"Hybrid seal {spec.name!r}: mass-flow residual={residual!r}; "
+                f"expected <= {value['tolerance']} after {value['max_iterations']} iterations. "
+                "The two stages did not converge. Check pressures/geometry or increase max_iterations; "
+                "unconverged coefficients cannot be applied."
+            )
+        return native
 
     def native_from_spec(self, spec: SealSpec, *, node: int) -> Any:
         model = spec.model if isinstance(spec.model, SealModel) else SealModel(str(spec.model))

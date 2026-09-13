@@ -227,20 +227,15 @@ class FaultsWorkspace(QWidget):
         probes = [rs.Probe(node=probe.node, angle=probe.orientation_deg * pi / 180.0, tag=probe.tag) for probe in result.probes]
         if not probes:
             probes = [rs.Probe(node=0, angle=0.0, tag="Node 0")]
-        try:
-            self.figures["Time response"] = result.native.plot_1d(probe=probes)
-        except TypeError:
+        errors = []
+        for label, method in (("Time response", result.native.plot_1d), ("DFFT", result.native.plot_dfft)):
             try:
-                self.figures["Time response"] = result.native.plot_1d(probes)
-            except Exception:
-                pass
-        try:
-            self.figures["DFFT"] = result.native.plot_dfft(probe=probes)
-        except TypeError:
-            try:
-                self.figures["DFFT"] = result.native.plot_dfft(probes)
-            except Exception:
-                pass
+                self.figures[label] = method(probe=probes)
+            except Exception as exc:
+                errors.append(f"{label}: {exc}")
+        if errors:
+            self.state.setText("Fault solve completed; native plot failures: " + "; ".join(errors))
+            self.view.set_unavailable("; ".join(errors))
         self.plot_choice.addItems(list(self.figures))
         self._show_plot()
 

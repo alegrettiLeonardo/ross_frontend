@@ -1,0 +1,117 @@
+[
+  {
+    "command": "python tools/qualify_ump.py",
+    "exit_code": 0,
+    "seconds": 8.01120488700002
+  },
+  {
+    "command": "python tools/qualify_concentrated.py",
+    "exit_code": 0,
+    "seconds": 5.664668930999994
+  },
+  {
+    "command": "python tools/qualify_bearing_studio.py",
+    "exit_code": 0,
+    "seconds": 16.905646898999976
+  },
+  {
+    "command": "python tools/qualify_thd_bearing_studio.py",
+    "exit_code": 0,
+    "seconds": 15.049324608999996
+  },
+  {
+    "command": "python tools/qualify_thrust_pad.py",
+    "exit_code": 0,
+    "seconds": 14.073496243999955
+  },
+  {
+    "command": "python tools/qualify_bearing_native_outputs_0151.py",
+    "exit_code": 0,
+    "seconds": 22.692403057999968
+  },
+  {
+    "command": "python tools/qualify_workspace_012.py",
+    "exit_code": 0,
+    "seconds": 6.411079351000012
+  },
+  {
+    "command": "python tools/qualify_bearing_workspace.py",
+    "exit_code": 0,
+    "seconds": 5.890503492999983
+  },
+  {
+    "command": "python tools/qualify_model_builder_014.py",
+    "exit_code": 0,
+    "seconds": 9.097272509999925
+  },
+  {
+    "command": "python tools/qualify_shaft_geometry_018.py",
+    "exit_code": 0,
+    "seconds": 7.2548938760000965
+  },
+  {
+    "command": "python tools/qualify_navigation_017.py",
+    "exit_code": 0,
+    "seconds": 5.5241317620000245
+  },
+  {
+    "command": "python tools/qualify_static_modal_native_019.py",
+    "exit_code": 0,
+    "seconds": 29.53560595900001
+  },
+  {
+    "command": "python tools/qualify_static_modal_decoupled_020.py",
+    "exit_code": 0,
+    "seconds": 10.389951535000023
+  },
+  {
+    "command": "python tools/qualify_time_frequency_native_021.py",
+    "exit_code": 0,
+    "seconds": 20.59615384899996
+  },
+  {
+    "command": "python tools/qualify_stochastic_native_022.py",
+    "exit_code": 0,
+    "seconds": 16.238270192000073
+  },
+  {
+    "command": "python tools/qualify_multirotor_023.py",
+    "exit_code": 0,
+    "seconds": 13.181695586000046
+  },
+  {
+    "command": "python tools/qualify_foundation_024.py",
+    "exit_code": 0,
+    "seconds": 11.691271827000037
+  },
+  {
+    "command": "python tools/qualify_ross_native_completion_030.py",
+    "exit_code": 0,
+    "seconds": 9.960885721999944
+  },
+  {
+    "command": "python tools/qualify_engineering_outputs_018.py",
+    "exit_code": 0,
+    "seconds": 14.541553272999977
+  },
+  {
+    "command": "python tools/qualify_op_w60_pipeline.py",
+    "exit_code": 0,
+    "seconds": 11.534805719000019
+  },
+  {
+    "command": "python tools/correlate_op_w60_rotordin.py --enforce",
+    "exit_code": 0,
+    "seconds": 0.10330105100001674
+  },
+  {
+    "command": "python tools/isolate_op_w60_response_differences.py",
+    "exit_code": 0,
+    "seconds": 8.55252186000007
+  },
+  {
+    "command": "python tools/isolate_op_w60_conventions.py",
+    "exit_code": 0,
+    "seconds": 25.488631948000034
+  }
+]

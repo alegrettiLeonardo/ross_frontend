@@ -116,7 +116,7 @@ class StochasticWorkspacePage(QWidget):
         self._update_variable_table()
         self._revision = 0
         self.validity_guard = ResultValidityGuard(self, self._invalidate_all)
-        for name in ("samples", "seed", "camp_min", "camp_max", "camp_points", "camp_freqs", "fr_min", "fr_max", "fr_points", "ub_min", "ub_max", "ub_points", "ub_mag", "ub_phase", "ub_random_mag", "ub_random_phase", "tr_speed", "tr_duration", "tr_points", "tr_force", "tr_frequency", "tr_random_force"):
+        for name in ("samples", "seed", "camp_min", "camp_max", "camp_points", "camp_freqs", "fr_min", "fr_max", "fr_points", "ub_min", "ub_max", "ub_points", "ub_mag", "ub_phase", "ub_random_mag", "ub_random_phase", "ub_node", "tr_node", "fr_in_node", "fr_in_dof", "fr_out_node", "fr_out_dof", "tr_speed", "tr_duration", "tr_points", "tr_force", "tr_frequency", "tr_random_force"):
             widget = getattr(self, name)
             for signal_name in ("valueChanged", "currentIndexChanged", "textChanged"):
                 signal = getattr(widget, signal_name, None)

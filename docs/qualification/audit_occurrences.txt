@@ -1,0 +1,155 @@
+src/ross_studio/rotor_scene_base.py:343:        return None
+src/ross_studio/ross_conventions.py:39:        pass
+src/ross_studio/time_frequency_analysis.py:343:        except Exception:
+src/ross_studio/topology.py:43:        return None
+src/ross_studio/solver_console.py:51:        except Exception as exc:  # displayed verbatim in engineering console
+src/ross_studio/solver_console.py:260:        self._append("No simulated timing or mock solver output is used.")
+src/ross_studio/engineering_report_pdf.py:44:    except Exception as exc:  # pragma: no cover - dependency/frozen gate
+src/ross_studio/analysis_pipeline.py:121:            return None
+src/ross_studio/analysis_pipeline.py:127:            return None
+src/ross_studio/analysis_pipeline.py:379:            except Exception as exc:
+src/ross_studio/project_io.py:65:        except Exception:
+src/ross_studio/project_io.py:66:            pass
+src/ross_studio/project_io.py:70:        except Exception:
+src/ross_studio/project_io.py:71:            pass
+src/ross_studio/shaft_geometry.py:68:    return None
+src/ross_studio/ump.py:268:        pass
+src/ross_studio/engineering_outputs.py:419:        except Exception as exc:
+src/ross_studio/engineering_outputs.py:492:            except Exception as exc:
+src/ross_studio/engineering_outputs.py:517:        except Exception as exc:
+src/ross_studio/project_file_service.py:74:        except Exception as exc:
+src/ross_studio/ross_native_view.py:101:        except Exception as exc:  # pragma: no cover - depends on optional Qt runtime component
+src/ross_studio/ross_native_view.py:126:        except Exception as exc:
+src/ross_studio/thrust_pad_service.py:141:            return None
+src/ross_studio/thrust_pad_service.py:145:            return None
+src/ross_studio/thrust_pad_service.py:151:            return None
+src/ross_studio/thrust_pad_service.py:155:            return None
+src/ross_studio/thd_calculation_dialog.py:17:        except Exception as exc:
+src/ross_studio/static_modal_decoupled.py:125:        except Exception:
+src/ross_studio/shaft_section_dialog.py:127:            return None
+src/ross_studio/thd_bearing_service.py:145:            return None
+src/ross_studio/thd_bearing_service.py:149:            return None
+src/ross_studio/thd_bearing_service.py:155:            return None
+src/ross_studio/thd_bearing_service.py:159:            return None
+src/ross_studio/services.py:46:        except Exception:
+src/ross_studio/services.py:102:        except Exception as exc:
+src/ross_studio/seal_studio_service.py:72:            return None
+src/ross_studio/engineering_figures.py:260:        except Exception as exc:
+src/ross_studio/model_builder_service.py:125:        except Exception as exc:
+src/ross_studio/model_builder_service.py:135:        except Exception as exc:
+src/ross_studio/bearing_input_dialog.py:179:            except Exception:
+src/ross_studio/bearing_node_inspector.py:223:            return None
+src/ross_studio/bearing_node_inspector.py:226:            return None
+src/ross_studio/bearing_node_inspector.py:234:        return None
+src/ross_studio/bearing_node_inspector.py:243:            return None
+src/ross_studio/bearing_node_inspector.py:252:        return None
+src/ross_studio/bearing_node_inspector.py:274:        except Exception as exc:
+src/ross_studio/ross_native_plots.py:12:    pass
+src/ross_studio/ross_native_plots.py:54:        return None
+src/ross_studio/ross_native_plots.py:143:            return None
+src/ross_studio/ross_native_plots.py:146:            return None
+src/ross_studio/ross_native_plots.py:161:        except Exception as exc:
+src/ross_studio/ross_native_plots.py:165:            return None
+src/ross_studio/ross_native_plots.py:206:            except NotImplementedError:
+src/ross_studio/ross_native_plots.py:208:            except Exception as exc:
+src/ross_studio/ross_native_plots.py:217:            except (NotImplementedError, TypeError, ValueError, AttributeError) as exc:
+src/ross_studio/ross_native_plots.py:220:            except Exception as exc:
+src/ross_studio/ross_native_plots.py:237:            except (NotImplementedError, TypeError, ValueError, AttributeError) as exc:
+src/ross_studio/ross_native_plots.py:239:            except Exception as exc:
+src/ross_studio/ross_native_plots.py:250:            except (NotImplementedError, TypeError, ValueError, AttributeError) as exc:
+src/ross_studio/ross_native_plots.py:253:            except Exception as exc:
+src/ross_studio/domain.py:39:    PLANNED = "Adapter planned"
+src/ross_studio/thd_results.py:15:        return None
+src/ross_studio/thd_results.py:18:        return None
+src/ross_studio/thd_results.py:21:        return None
+src/ross_studio/bearing_native_inventory.py:174:    except Exception:
+src/ross_studio/app_legacy.py:199:        except Exception as exc:
+src/ross_studio/app_legacy.py:227:        return None
+src/ross_studio/app_legacy.py:234:        return None
+src/ross_studio/app_legacy.py:344:        except Exception as exc:
+src/ross_studio/app_legacy.py:369:        except Exception as exc:
+src/ross_studio/app_legacy.py:419:        except Exception as exc:
+src/ross_studio/app_legacy.py:524:            except Exception:
+src/ross_studio/app_legacy.py:525:                pass
+src/ross_studio/frozen_engineering_outputs.py:46:    except Exception:
+src/ross_studio/frozen_engineering_outputs.py:50:        pass
+src/ross_studio/project_file_controller.py:100:        except Exception as exc:
+src/ross_studio/project_file_controller.py:124:        except Exception as exc:
+src/ross_studio/project_file_controller.py:156:        except Exception as exc:
+src/ross_studio/project_file_controller.py:247:        return None
+src/ross_studio/bearing_input_panel.py:275:                fallback = speeds if key == "speed_rpm" else default
+src/ross_studio/bearing_input_panel.py:276:                values[key] = stored.get(key, fallback)
+src/ross_studio/bearing_input_panel.py:447:            except Exception:
+src/ross_studio/multirotor/domain.py:26:    single-rotor builder; no nearest-node fallback is permitted.
+src/ross_studio/static_modal_analysis.py:187:            except Exception:
+src/ross_studio/frozen_entry.py:18:        return None
+src/ross_studio/frozen_entry.py:66:    except Exception as exc:
+src/ross_studio/pages/faults_workspace.py:214:        except Exception as exc:
+src/ross_studio/pages/faults_workspace.py:234:            except Exception as exc:
+src/ross_studio/pages/amb_sensitivity_workspace.py:30:        except Exception as exc:
+src/ross_studio/pages/amb_sensitivity_workspace.py:119:        except Exception as exc:
+src/ross_studio/pages/amb_sensitivity_workspace.py:149:        except Exception as exc:
+src/ross_studio/pages/amb_sensitivity_workspace.py:153:        except Exception as exc:
+src/ross_studio/pages/project_home.py:22:def _package_version(distribution: str, fallback: str = "Unavailable") -> str:
+src/ross_studio/pages/project_home.py:26:        return fallback
+src/ross_studio/pages/rotor_workspace.py:42:            pass
+src/ross_studio/pages/multirotor_workspace.py:70:        except Exception as exc:
+src/ross_studio/pages/multirotor_workspace.py:339:        except Exception as exc:
+src/ross_studio/pages/multirotor_workspace.py:367:        except Exception as exc:
+src/ross_studio/pages/multirotor_workspace.py:376:            except Exception as exc:
+src/ross_studio/pages/multirotor_workspace.py:386:            except Exception as exc:
+src/ross_studio/pages/multirotor_workspace.py:410:        except Exception as exc:
+src/ross_studio/pages/multirotor_workspace.py:457:        except Exception as exc:
+src/ross_studio/pages/time_frequency_workspace.py:106:        except Exception as exc:
+src/ross_studio/pages/time_frequency_workspace.py:300:        except Exception as exc:
+src/ross_studio/pages/time_frequency_workspace.py:389:        except Exception as exc:
+src/ross_studio/pages/time_frequency_workspace.py:449:        except Exception as exc:
+src/ross_studio/pages/time_frequency_workspace.py:492:        except Exception as exc:
+src/ross_studio/pages/time_frequency_workspace.py:558:        except Exception as exc:
+src/ross_studio/pages/time_frequency_workspace.py:626:        except Exception as exc:
+src/ross_studio/pages/time_frequency_workspace.py:669:        except Exception as exc:
+src/ross_studio/pages/time_frequency_workspace.py:714:        except Exception as exc:
+src/ross_studio/pages/stochastic_workspace.py:66:        except Exception as exc:  # pragma: no cover - exercised by Qt integration/frozen smoke
+src/ross_studio/pages/stochastic_workspace.py:356:        except Exception as exc:
+src/ross_studio/pages/stochastic_workspace.py:413:        except Exception as exc:
+src/ross_studio/pages/stochastic_workspace.py:499:        except Exception as exc:
+src/ross_studio/pages/stochastic_workspace.py:529:        except Exception as exc:
+src/ross_studio/pages/stochastic_workspace.py:575:        except Exception as exc:
+src/ross_studio/pages/stochastic_workspace.py:623:        except Exception as exc:
+src/ross_studio/pages/stochastic_workspace.py:649:        except Exception as exc:
+src/ross_studio/pages/stochastic_workspace.py:660:        except Exception as exc:
+src/ross_studio/pages/stochastic_workspace.py:672:        except Exception as exc:
+src/ross_studio/pages/static_modal_workspace.py:71:        except Exception as exc:
+src/ross_studio/pages/static_modal_workspace.py:101:        except Exception as exc:
+src/ross_studio/pages/static_modal_workspace.py:405:        except Exception as exc:
+src/ross_studio/pages/static_modal_workspace.py:437:        except Exception as exc:
+src/ross_studio/pages/static_modal_workspace.py:480:        except Exception:
+src/ross_studio/pages/static_modal_workspace.py:612:        except Exception:
+src/ross_studio/pages/static_modal_workspace.py:653:            return None
+src/ross_studio/pages/static_modal_workspace.py:656:            return None
+src/ross_studio/pages/static_modal_workspace.py:658:        return None if value is None else int(value)
+src/ross_studio/pages/static_modal_workspace.py:679:        except Exception as exc:
+src/ross_studio/pages/static_modal_workspace.py:699:        except Exception as exc:
+src/ross_studio/pages/static_modal_workspace.py:720:        except Exception as exc:
+src/ross_studio/pages/static_modal_workspace.py:736:        return None
+src/ross_studio/pages/static_modal_workspace.py:757:        except Exception as exc:
+src/ross_studio/pages/static_modal_workspace.py:767:        except Exception as exc:
+src/ross_studio/pages/static_modal_workspace.py:777:        except Exception as exc:
+src/ross_studio/pages/static_modal_workspace.py:787:        except Exception as exc:
+src/ross_studio/pages/engineering_results.py:223:        except Exception as exc:
+src/ross_studio/pages/engineering_results.py:297:        except Exception as exc:
+src/ross_studio/pages/engineering_results.py:321:        # The historical mockup carried placeholder export buttons. Hide them in the
+src/ross_studio/pages/engineering_results.py:362:        except Exception as exc:
+src/ross_studio/pages/foundation_workspace.py:422:        except Exception as exc:
+src/ross_studio/pages/foundation_workspace.py:437:        except Exception as exc:
+src/ross_studio/pages/foundation_workspace.py:455:        except Exception as exc:
+src/ross_studio/pages/bearing_workspace_page.py:459:        except Exception as exc:
+src/ross_studio/pages/bearing_studio.py:264:        except Exception:
+src/ross_studio/pages/seal_workspace.py:73:            pass
+src/ross_studio/pages/seal_workspace.py:246:        except Exception as exc:
+src/ross_studio/pages/seal_workspace.py:273:            except Exception as exc:
+src/ross_studio/pages/seal_workspace.py:278:            except Exception as exc:
+src/ross_studio/pages/seal_workspace.py:283:            except Exception as exc:
+src/ross_studio/pages/seal_workspace.py:310:        except Exception as exc:
+src/ross_studio/plotly_native_view.py:89:        except Exception as exc:  # pragma: no cover - platform runtime dependency
+src/ross_studio/plotly_native_view.py:116:        except Exception as exc:
