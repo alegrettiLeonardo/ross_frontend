@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
 
 from ..domain import EngineeringError
 from ..models import ProjectModel
+from ..project_io import project_fingerprint
+from ..result_validity import ResultValidityGuard
 from ..plotly_native_view import NativeRossFigureView
 from ..stochastic_analysis import (
     RandomInputSpec,
@@ -112,6 +114,15 @@ class StochasticWorkspacePage(QWidget):
 
         self._load_targets()
         self._update_variable_table()
+        self._revision = 0
+        self.validity_guard = ResultValidityGuard(self, self._invalidate_all)
+        for name in ("samples", "seed", "camp_min", "camp_max", "camp_points", "camp_freqs", "fr_min", "fr_max", "fr_points", "ub_min", "ub_max", "ub_points", "ub_mag", "ub_phase", "ub_random_mag", "ub_random_phase", "tr_speed", "tr_duration", "tr_points", "tr_force", "tr_frequency", "tr_random_force"):
+            widget = getattr(self, name)
+            for signal_name in ("valueChanged", "currentIndexChanged", "textChanged"):
+                signal = getattr(widget, signal_name, None)
+                if signal is not None:
+                    signal.connect(lambda *_: self._invalidate_all())
+                    break
 
     @property
     def engineering(self):
@@ -458,7 +469,8 @@ class StochasticWorkspacePage(QWidget):
         worker = _CallableWorker(fn)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.completed.connect(done)
+        snapshot = (project_fingerprint(self.project), self._revision)
+        worker.completed.connect(lambda result: done(result) if snapshot == (project_fingerprint(self.project), self._revision) else self._invalidate_all())
         worker.failed.connect(lambda message: self._worker_failed(label, message))
         worker.completed.connect(thread.quit)
         worker.failed.connect(thread.quit)
@@ -670,6 +682,7 @@ class StochasticWorkspacePage(QWidget):
         np.savez_compressed(path, **{key.replace(":", "__"): value for key, value in self._input_build.sampled_values.items()})
 
     def _invalidate_all(self) -> None:
+        self._revision = getattr(self, "_revision", 0) + 1
         self._results.clear()
         self._input_build = None
         for view in (self.input_view, self.camp_view, self.fr_view, self.ub_view, self.tr_view):

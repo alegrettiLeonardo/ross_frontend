@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from ..engineering_figures import EngineeringFigureCatalog
 from ..engineering_outputs import EngineeringOutputsService, EngineeringOutputsSnapshot
 from ..models import ProjectModel
+from ..result_validity import ResultValidityGuard
 from ..plotly_native_view import NativeRossFigureView
 from .results import AnalysisResultsPage
 
@@ -330,6 +331,18 @@ class EngineeringAnalysisResultsPage(AnalysisResultsPage):
         self.engineering_outputs_button.setToolTip("Run the qualified ROSS analysis before opening Engineering Outputs.")
         self.engineering_outputs_button.clicked.connect(self.open_engineering_outputs)
         self.engineering_outputs_button.raise_()
+        self.validity_guard = ResultValidityGuard(self, self._invalidate_results)
+
+    def _invalidate_results(self):
+        self.result = None
+        self.engineering_snapshot = None
+        self.engineering_figure_catalog = None
+        self.engineering_outputs_button.setEnabled(False)
+        self.result_state.setText("Result invalidated: model changed; run again.")
+        self.campbell_chart.clear()
+        for card in (self.kpi_first, self.kpi_second, self.kpi_response, self.kpi_damping):
+            card.set_value("—")
+        self._populate_empty()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -357,6 +370,7 @@ class EngineeringAnalysisResultsPage(AnalysisResultsPage):
         )
 
     def open_engineering_outputs(self) -> None:
+        self.validity_guard.check()
         if self.engineering_snapshot is None or self.engineering_figure_catalog is None:
             return
         dialog = EngineeringOutputsDialog(

@@ -10,7 +10,7 @@ from ross_studio import __version__ as EXPECTED_STUDIO_VERSION
 
 EXPECTED_EXECUTABLE = {
     "BearingElement", "BallBearingElement", "RollerBearingElement", "CylindricalBearing",
-    "PlainJournal", "TiltingPad", "SqueezeFilmDamper", "ThrustPad",
+    "PlainJournal", "TiltingPad", "SqueezeFilmDamper", "ThrustPad", "MagneticBearingElement",
 }
 EXPECTED_GENERAL = {"BearingElement", "BallBearingElement", "RollerBearingElement", "CylindricalBearing"}
 EXPECTED_THD = {"PlainJournal", "TiltingPad", "SqueezeFilmDamper", "ThrustPad"}
@@ -54,7 +54,7 @@ def main() -> int:
     assert self_payload["unresolved_positions_mm"] == [], self_payload
     assert self_payload["native_plot_traces"] > 0, self_payload
     assert set(self_payload["executable_classes"]) == EXPECTED_EXECUTABLE, self_payload
-    assert self_payload["blocked_classes"] == ["MagneticBearingElement"], self_payload
+    assert self_payload["blocked_classes"] == [], self_payload
     assert self_payload["validation_errors"] == [], self_payload
 
     io_output = output.with_name(output.stem + "_project_io" + output.suffix)
@@ -84,7 +84,7 @@ def main() -> int:
     assert gui_payload["bearing_station_inventory"] == [["radial_anchor"], ["radial_anchor"]], gui_payload
     assert set(gui_payload["general_executable"]) == EXPECTED_GENERAL, gui_payload
     assert set(gui_payload["thd_executable"]) == EXPECTED_THD, gui_payload
-    assert gui_payload["amb_blocked"] == ["MagneticBearingElement"], gui_payload
+    assert gui_payload["amb_blocked"] == [], gui_payload
     assert set(gui_payload["sidebar_routes"]) == EXPECTED_LEGACY_SIDEBAR_COMPAT, gui_payload
     assert "shaft" not in set(gui_payload["sidebar_routes"]), gui_payload
     assert gui_payload["bearing_model_icon_count"] == 8, gui_payload
@@ -100,7 +100,7 @@ def main() -> int:
     assert model_builder["concent_sketch_visible"] is True, model_builder
     assert model_builder["concent_inertias_preserved"] is True, model_builder
     assert model_builder["seal_native_class"] == "SealElement", model_builder
-    assert model_builder["coupling_native_mapping"] == "BLOCKED_PENDING_TWO_NODE_CONTRACT", model_builder
+    assert model_builder["coupling_native_mapping"] == "NATIVE_TWO_NODE_COUPLING", model_builder
     assert model_builder["load_realization"] == "ANALYSIS_INPUT_EXACT_NODE", model_builder
     assert model_builder["unresolved_positions_mm"] == [], model_builder
 

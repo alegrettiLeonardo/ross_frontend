@@ -71,7 +71,9 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
                     "FROZEN-COUPLING", 1400.625,
                     left_mass_kg=2.0, right_mass_kg=3.0,
                     left_ip_kg_m2=0.04, right_ip_kg_m2=0.05,
-                    kr_z_n_m_rad=2.0e6,
+                    kr_z_n_m_rad=2.0e6, length_mm=1.0,
+                    kt_x_n_m=1e7, kt_y_n_m=1e7, kt_z_n_m=1e7,
+                    kr_x_n_m_rad=1e6, kr_y_n_m_rad=1e6,
                 ),
             ),
             ("load", LoadSpec("FROZEN-LOAD", "harmonic", 1500.750, 100.0, 15.0, {"order": 1})),
@@ -102,8 +104,10 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
         seal_candidates = [*getattr(final.rotor, "seal_elements", []), *getattr(final.rotor, "bearing_elements", [])]
         if not any(type(element).__name__ == "SealElement" and getattr(element, "tag", None) == "FROZEN-SEAL" for element in seal_candidates):
             raise RuntimeError("Frozen strict Rotor did not realize the new seal as ROSS SealElement.")
-        if any(type(element).__name__ == "CouplingElement" for element in final.rotor.shaft_elements):
-            raise RuntimeError("Frozen single-station coupling was silently mapped to a two-node CouplingElement.")
+        coupling = next((element for element in final.rotor.shaft_elements
+                         if type(element).__name__ == "CouplingElement" and element.tag == "FROZEN-COUPLING"), None)
+        if coupling is None or coupling.n_r != coupling.n_l + 1 or abs(coupling.L - 0.001) > 1e-15:
+            raise RuntimeError("Frozen two-node coupling geometry was not preserved.")
 
         # Rebuild the visible tables from the committed domain and exercise the actual
         # offscreen sketch paint pass so [Concent] cannot disappear only in packaging.
@@ -147,7 +151,7 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
             "concent_sketch_visible": concent_sketch_visible,
             "concent_inertias_preserved": True,
             "seal_native_class": "SealElement",
-            "coupling_native_mapping": "BLOCKED_PENDING_TWO_NODE_CONTRACT",
+            "coupling_native_mapping": "NATIVE_TWO_NODE_COUPLING",
             "load_realization": "ANALYSIS_INPUT_EXACT_NODE",
             "unresolved_positions_mm": final.unresolved_positions_mm,
         }

@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
 
 from ..domain import EngineeringError
 from ..models import ProjectModel
+from ..result_validity import ResultValidityGuard
+from dataclasses import asdict
 from ..multirotor.analysis import (
     CampbellRequest,
     FrequencyResponseRequest,
@@ -120,6 +122,19 @@ class MultiRotorWorkspacePage(AnalysisRoutePage):
         self.tabs.addTab(self._qualification_tab(), "Qualification")
         root.addWidget(self.tabs, 1)
         self._refresh_tables()
+        self.validity_guard = ResultValidityGuard(self, self._invalidate_result, self._result_signature)
+        self.speed.valueChanged.connect(self._invalidate_result)
+        self.analysis_kind.currentIndexChanged.connect(self._invalidate_result)
+
+    def _result_signature(self):
+        return repr((asdict(self.multirotor), self.speed.value(), self.analysis_kind.currentText()))
+
+    def _invalidate_result(self, *_args):
+        self._result = None
+        self._catalog = None
+        self.plot_selector.clear()
+        self.analysis_state.setText("Result invalidated: model or inputs changed; run again.")
+        self.result_view.set_unavailable("Result invalidated; run again.")
 
     def _system_tab(self):
         page = QWidget()
@@ -395,6 +410,7 @@ class MultiRotorWorkspacePage(AnalysisRoutePage):
         except Exception as exc:
             self.analysis_state.setText(f"Input rejected: {exc}")
             return
+        self._running_signature = self._result_signature()
         self.run_button.setEnabled(False)
         self.analysis_state.setText("Building strict native MultiRotor…")
         thread = QThread(self)
@@ -408,12 +424,16 @@ class MultiRotorWorkspacePage(AnalysisRoutePage):
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(lambda: self.run_button.setEnabled(True))
         thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda: setattr(self, "_thread", None))
         self._thread = thread
         self._worker = worker
         thread.start()
 
     @Slot(object)
     def _analysis_done(self, result):
+        if getattr(self, "_running_signature", self._result_signature()) != self._result_signature():
+            self._invalidate_result()
+            return
         self._result = result
         self._catalog = MultiRotorNativeCatalog(result)
         self.analysis_state.setText(f"PASS · {result.kind} · {result.elapsed_s:.3f} s · native ROSS result retained")
@@ -425,6 +445,7 @@ class MultiRotorWorkspacePage(AnalysisRoutePage):
 
     @Slot(str)
     def _analysis_failed(self, message):
+        self._invalidate_result()
         self.analysis_state.setText(f"FAILED · {message}")
         self.result_view.set_unavailable(message)
 

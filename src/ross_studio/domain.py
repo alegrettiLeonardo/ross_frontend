@@ -1,12 +1,31 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
+from numbers import Real
 from enum import StrEnum
 from math import isfinite
 
 
 class EngineeringError(ValueError):
     """Engineering-domain validation error."""
+
+
+def _require_finite(value, path: str) -> None:
+    """Reject non-finite persisted physical inputs before any solver assembly."""
+    if isinstance(value, Real) and not isfinite(value):
+        raise EngineeringError(
+            f"{path}={value!r}; expected a finite physical value in the field's units. "
+            "NaN/Infinity cannot define a physical model. Correct this input before solving."
+        )
+    if is_dataclass(value):
+        for item in fields(value):
+            _require_finite(getattr(value, item.name), f"{path}.{item.name}")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _require_finite(item, f"{path}.{key}")
+    elif isinstance(value, (tuple, list)):
+        for index, item in enumerate(value):
+            _require_finite(item, f"{path}[{index}]")
 
 
 class BearingGroup(StrEnum):
@@ -66,6 +85,7 @@ class MaterialSpec:
         return self.young_pa / (2.0 * (1.0 + self.poisson))
 
     def validate(self) -> None:
+        _require_finite(self, type(self).__name__)
         if self.density_kg_m3 <= 0 or self.young_pa <= 0:
             raise EngineeringError("Material density and Young's modulus must be positive.")
         if not -1.0 < self.poisson < 0.5:
@@ -95,6 +115,7 @@ class ShaftSection:
         return self.id_left_mm if self.id_right_mm is None else self.id_right_mm
 
     def validate(self) -> None:
+        _require_finite(self, type(self).__name__)
         if self.section < 1 or self.length_mm <= 0:
             raise EngineeringError("Shaft section number and length must be positive.")
         if min(self.od_left_mm, self.odr_mm) <= 0:
@@ -273,6 +294,7 @@ class FoundationSpec:
         return self.model_type == FoundationModel.FREQUENCY_DEPENDENT_KC
 
     def validate(self) -> None:
+        _require_finite(self, type(self).__name__)
         if not self.name.strip():
             raise EngineeringError("Foundation name cannot be empty.")
         if not isinstance(self.model_type, FoundationModel):
@@ -472,6 +494,7 @@ class RotorProject:
         return max(0, len(self.topology_split_positions_mm()) - 1)
 
     def validate(self) -> None:
+        _require_finite(self, type(self).__name__)
         if not self.name.strip():
             raise EngineeringError("Project name cannot be empty.")
         if self.poles < 1:
@@ -502,6 +525,9 @@ class RotorProject:
 
         for index, bearing in enumerate(self.bearings, 1):
             position_ok(bearing.position_mm, f"Bearing #{index}")
+            speeds = [point.rpm for point in bearing.coefficients]
+            if any(b <= a for a, b in zip(speeds, speeds[1:])):
+                raise EngineeringError(f"Bearing {bearing.name}: speeds={speeds!r} rpm; expected strictly increasing rows. Remove duplicate rows and sort the coefficient table.")
             for point in bearing.coefficients:
                 if point.rpm < 0:
                     raise EngineeringError(f"Bearing #{index} contains a negative speed point.")
@@ -522,6 +548,9 @@ class RotorProject:
             position_ok(disk.position_mm, f"Disk #{index}")
             if min(disk.mass_kg, disk.id_kg_m2, disk.ip_kg_m2) < 0:
                 raise EngineeringError(f"Disk #{index}: mass and inertias must be non-negative.")
+        names = [support.name for support in self.supports]
+        if len(names) != len(set(names)):
+            raise EngineeringError(f"Support names={names!r}; expected unique names to identify foundation links. Rename duplicate supports before solving.")
         for support in self.supports:
             if not 0 <= support.bearing_index < len(self.bearings):
                 raise EngineeringError(f"Support {support.name!r} references an invalid bearing index.")

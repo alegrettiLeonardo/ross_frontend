@@ -255,7 +255,7 @@ class SealStudioService:
         frequency = np.asarray(value["frequency_rpm"], dtype=float) * 2.0 * pi / 60.0
         common = dict(
             n=node,
-            shaft_diameter=float(value["shaft_diameter_mm"]) / 1000.0,
+            shaft_radius=float(value["shaft_diameter_mm"]) / 2000.0,
             inlet_pressure=float(value["inlet_pressure_pa"]),
             outlet_pressure=float(value["outlet_pressure_pa"]),
             inlet_temperature=float(value["inlet_temperature_k"]),
@@ -274,38 +274,38 @@ class SealStudioService:
                 tooth_width=float(value["tooth_width_mm"]) / 1000.0,
                 seal_type=str(value["seal_type"]),
                 preswirl=float(value["preswirl"]),
-                use_jenny_kanki=bool(value.get("use_jenny_kanki", False)),
+                iopt1=int(bool(value.get("use_jenny_kanki", False))),
             )
         if model is SealModel.HOLE_PATTERN:
             cls = self._class("ross.seals.holepattern_seal", "HolePatternSeal")
             return cls(
                 **common,
                 radial_clearance=float(value["radial_clearance_mm"]) / 1000.0,
-                axial_length=float(value["axial_length_mm"]) / 1000.0,
-                relative_roughness=float(value["relative_roughness"]),
+                length=float(value["axial_length_mm"]) / 1000.0,
+                roughness=float(value["relative_roughness"]),
                 cell_length=float(value["cell_length_mm"]) / 1000.0,
                 cell_width=float(value["cell_width_mm"]) / 1000.0,
                 cell_depth=float(value["cell_depth_mm"]) / 1000.0,
                 preswirl=float(value["preswirl"]),
-                entrance_loss_coefficient=float(value["entrance_loss_coefficient"]),
-                exit_loss_coefficient=float(value["exit_loss_coefficient"]),
-                excitation_ratio=float(value["excitation_ratio"]),
+                entr_coef=float(value["entrance_loss_coefficient"]),
+                exit_coef=float(value["exit_loss_coefficient"]),
+                whirl_ratio=float(value["excitation_ratio"]),
                 nz=int(value["nz"]), max_iterations=int(value["max_iterations"]),
                 tolerance=float(value["tolerance"]), first_step_size=float(value["first_step_size"]),
-                relaxation_factor=float(value["relaxation_factor"]),
+                rlx_factor=float(value["relaxation_factor"]),
             )
 
         cls = self._class("ross.seals.hybrid_seal", "HybridSeal")
         hole = {
             "radial_clearance": float(value["hole_radial_clearance_mm"]) / 1000.0,
-            "axial_length": float(value["hole_axial_length_mm"]) / 1000.0,
-            "relative_roughness": float(value["hole_relative_roughness"]),
+            "length": float(value["hole_axial_length_mm"]) / 1000.0,
+            "roughness": float(value["hole_relative_roughness"]),
             "cell_length": float(value["hole_cell_length_mm"]) / 1000.0,
             "cell_width": float(value["hole_cell_width_mm"]) / 1000.0,
             "cell_depth": float(value["hole_cell_depth_mm"]) / 1000.0,
             "preswirl": float(value["hole_preswirl"]),
-            "entrance_loss_coefficient": float(value["hole_entrance_loss_coefficient"]),
-            "exit_loss_coefficient": float(value["hole_exit_loss_coefficient"]),
+            "entr_coef": float(value["hole_entrance_loss_coefficient"]),
+            "exit_coef": float(value["hole_exit_loss_coefficient"]),
         }
         lab = {
             "radial_clearance": float(value["lab_radial_clearance_mm"]) / 1000.0,

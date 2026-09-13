@@ -134,3 +134,76 @@ def test_time_frequency_project_edit_invalidates_real_result(qtbot):
     page.validity_guard.check()
     assert 'frequency' not in page._results
     qtbot.waitUntil(lambda: not getattr(page,'_threads',{}),timeout=30000)
+
+
+@pytest.mark.parametrize('entity,field',[('material','density_kg_m3'),('shaft','length_mm'),('disk','mass_kg'),('bearing','kxx')])
+def test_nonfinite_physical_input_rejected(entity,field):
+    from dataclasses import replace
+    from ross_studio.domain import EngineeringError
+    p=small_project()
+    if entity=='material': p.materials['Steel']=replace(p.materials['Steel'],**{field:float('nan')})
+    else: setattr({'shaft':p.shaft_sections[0],'disk':p.disks[0],'bearing':p.bearings[0]}[entity],field,float('nan'))
+    with pytest.raises(EngineeringError,match='finite'):
+        p.validate()
+
+
+@pytest.mark.parametrize('model_name',['LABYRINTH','HOLE_PATTERN','HYBRID'])
+def test_native_seal_230_constructor_and_apply(model_name):
+    from ross_studio.pages.seal_workspace import _DEFAULTS
+    from ross_studio.seal_studio_service import SealStudioService
+    from ross_studio.domain import SealSpec, SealModel
+    p=small_project();p.seals=[SealSpec('Seal',300.,1e6,1e6,100.,100.)]
+    model=SealModel[model_name];service=SealStudioService()
+    result=service.calculate(p,0,model,_DEFAULTS[model])
+    assert result.coefficients
+    service.apply(p,0,result)
+    actual=RossBackend().build_rotor(p).rotor
+    element=next(e for e in actual.bearing_elements if e.tag=='Seal')
+    assert type(element).__name__=={'LABYRINTH':'LabyrinthSeal','HOLE_PATTERN':'HolePatternSeal','HYBRID':'HybridSeal'}[model_name]
+    stages = [element.laby, element.hole_pattern] if model_name == 'HYBRID' else [element]
+    for stage in stages:
+        assert stage.shaft_radius==pytest.approx(_DEFAULTS[model]['shaft_diameter_mm']/2000.)
+    if model_name == 'HYBRID':
+        assert element.convergence_history[-1] <= _DEFAULTS[model]['tolerance']
+    for point in result.coefficients:
+        assert np.all(np.isfinite(element.K(point.rpm*np.pi/30)))
+
+
+def test_amb_native_sensitivity_and_plots():
+    from ross_studio.amb_analysis import AMBSensitivityService, AMBSensitivityRequest
+    from test_ross_native_completion_030 import amb_spec
+    p=small_project();p.bearings[0]=amb_spec()
+    result=AMBSensitivityService().run(p,AMBSensitivityRequest(speed_rpm=1000.,t_max_s=1.,dt_s=.001,min_frequency_hz=5.,max_frequency_hz=50.))
+    assert type(result.native).__name__=='SensitivityResults'
+    peaks=[v for axes in result.native.max_abs_sensitivities.values() for v in axes.values()]
+    assert peaks and all(np.isfinite(v) and v>0 for v in peaks)
+    assert len(result.native.plot(frequency_units='Hz',magnitude_scale='decibel',xaxis_type='log').data)>0
+    assert len(result.native.plot_time_results().data)>0
+
+
+def test_frozen_gui_contract_executes_from_source():
+    # Isolated process: full application window owns its QApplication lifecycle.
+    import subprocess,sys,json,tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as tmp:
+        out=Path(tmp)/'gui.json'
+        subprocess.run([sys.executable,'-m','ross_studio.frozen_entry','--gui-smoke','--gui-smoke-output',str(out)],check=True,timeout=180)
+        data=json.loads(out.read_text())
+        assert data['status']=='PASS'
+        assert data['model_builder_014']['coupling_native_mapping']=='NATIVE_TWO_NODE_COUPLING'
+        assert data['amb_blocked']==[]
+
+
+def test_multirotor_real_modal_is_invalidated(qtbot):
+    from ross_studio.pages.multirotor_workspace import MultiRotorWorkspacePage
+    from ross_studio.multirotor.qualification import three_shaft_project
+    from ross_studio.multirotor.analysis import MultiRotorAnalysisService, ModalRequest
+    page=MultiRotorWorkspacePage(ProjectModel.from_engineering(small_project()));qtbot.addWidget(page)
+    page.multirotor=three_shaft_project()
+    result=MultiRotorAnalysisService().run_modal(page.multirotor,ModalRequest(1000.,8))
+    page._analysis_done(result)
+    assert page._result is result
+    page.multirotor.rotors[0].bearings[0].kxx*=1.1
+    page.validity_guard.check()
+    assert page._result is None
+    assert page._catalog is None

@@ -4,11 +4,12 @@ from .project_io import project_fingerprint
 
 
 class ResultValidityGuard(QObject):
-    def __init__(self, owner, invalidate):
+    def __init__(self, owner, invalidate, signature=None):
         super().__init__(owner)
         self.owner = owner
         self.invalidate = invalidate
-        self.fingerprint = project_fingerprint(owner.project)
+        self.signature = signature or (lambda: project_fingerprint(owner.project))
+        self.fingerprint = self.signature()
         owner.installEventFilter(self)
         self.timer = QTimer(self)
         self.timer.setInterval(100)
@@ -16,7 +17,7 @@ class ResultValidityGuard(QObject):
         self.timer.start()
 
     def check(self):
-        current = project_fingerprint(self.owner.project)
+        current = self.signature()
         if current != self.fingerprint:
             self.fingerprint = current
             self.invalidate()

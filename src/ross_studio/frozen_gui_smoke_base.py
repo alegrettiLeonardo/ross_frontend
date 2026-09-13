@@ -95,7 +95,7 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
                 "Frozen THD registry did not retain 4 qualified adapters: "
                 f"{executable_by_group[BearingGroup.THD]}"
             )
-        if blocked_by_group[BearingGroup.AMB] != ["MagneticBearingElement"]:
+        if blocked_by_group[BearingGroup.AMB] or executable_by_group[BearingGroup.AMB] != ["MagneticBearingElement"]:
             raise RuntimeError(f"Frozen AMB gate mismatch: {blocked_by_group[BearingGroup.AMB]}")
 
         for route in ("shaft", "disks", "supports", "loads", "ump", "probes"):
@@ -191,8 +191,15 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
             raise RuntimeError("Imported/General K/C bearing node must not expose THD K/C curves.")
 
         page._select_type("amb", announce=False)
-        if page.calculate_button.isEnabled():
-            raise RuntimeError("Frozen AMB became executable without a qualified controller-domain contract.")
+        if not page.calculate_button.isEnabled():
+            raise RuntimeError("Frozen AMB calculation is unexpectedly disabled.")
+        page.input_panel.fields["g0_mm"].setValue(1.234)
+        window._calculate_bearing()
+        if window.bearing_calculation is None or window.bearing_calculation.source_model != "MagneticBearingElement":
+            raise RuntimeError("Frozen AMB GUI did not execute the native magnetic bearing calculation.")
+        received = window.bearing_calculation.metadata["engineering_input"]["g0_m"]
+        if abs(received - 0.001234) > 1e-15:
+            raise RuntimeError(f"AMB GUI gap conversion failed: received {received!r} m.")
 
         app.processEvents()
         return FrozenGuiSmokeResult(
