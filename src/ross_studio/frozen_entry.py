@@ -154,6 +154,9 @@ def frozen_foundation_024_main(argv: list[str]) -> int:
 
 def main() -> int:
     argv = list(sys.argv[1:])
+    if "--core-output" in argv:
+        from ross_studio.core_qualification import run_core_qualification
+        return _run_callable(argv, "--core-output", run_core_qualification, 11)
     if "--self-test" in argv or "--self-test-output" in argv:
         return frozen_self_test_main(argv)
     if "--project-io-self-test" in argv or "--project-io-output" in argv:

@@ -52,6 +52,9 @@ jobs:
       - name: Qualify exact frozen binary including project I/O, Engineering Outputs, Static/Modal 0.20, Time/Frequency 0.21, Stochastic 0.22 and MultiRotor 0.23 runtime
         run: python tools/qualify_frozen_binary.py dist artifacts/frozen_selftest_${{ runner.os }}.json
 
+      - name: Qualify Core GUI adapters and independent ROSS parity
+        run: python tools/qualify_frozen_core.py dist artifacts/frozen_core_${{ runner.os }}.json
+
       - name: Qualify frozen MultiRotor 0.23 runtime
         run: python tools/qualify_frozen_multirotor_023.py dist artifacts/frozen_selftest_${{ runner.os }}_multirotor_023.json
 
@@ -65,6 +68,7 @@ jobs:
           name: ross-studio-${{ github.sha }}-${{ runner.os }}
           path: |
             dist/ROSS-Studio/
+            artifacts/frozen_core_${{ runner.os }}.json
             artifacts/frozen_selftest_${{ runner.os }}.json
             artifacts/frozen_selftest_${{ runner.os }}_project_io.json
             artifacts/frozen_selftest_${{ runner.os }}_gui.json

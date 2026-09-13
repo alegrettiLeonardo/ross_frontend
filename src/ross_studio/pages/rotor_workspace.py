@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QTableWidgetItem
+from PySide6.QtWidgets import QTableWidgetItem, QPushButton, QDialog, QMessageBox
+from ..model_entity_dialogs import MaterialEditorDialog
 
 from ..bearing_node_inspector import BearingNodeInspector
 from ..rotor_selection import RotorEntityRef
@@ -67,6 +68,31 @@ class RotorModelPage(_LegacyRotorModelPage):
         current = self.selection.current
         if current is not None and current.kind == "bearings":
             self._show_bearing_context(current)
+
+    def _toolbar(self, key):
+        bar = super()._toolbar(key)
+        if key == "shaft":
+            button = QPushButton("Edit material")
+            button.clicked.connect(self._edit_material)
+            bar.addWidget(button)
+        return bar
+
+    def _edit_material(self):
+        engineering = self.project.engineering
+        row = self._selected_row("shaft")
+        if engineering is None or not 0 <= row < len(engineering.shaft_sections):
+            self.status_message.emit("Select a shaft section before editing its material")
+            return
+        name = engineering.shaft_sections[row].material
+        dialog = MaterialEditorDialog(engineering.materials[name], self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            preview = self.model_builder.preview_material_update(engineering, name, dialog.record())
+            audit = self.model_builder.commit(engineering, preview)
+            self._after_model_commit("shaft", audit, selected_row=row)
+        except Exception as exc:
+            QMessageBox.warning(self, "Material edit rejected", str(exc))
 
     def _segments_page(self):
         """Decorate the qualified shaft table with the explicit ROSS geometry family.

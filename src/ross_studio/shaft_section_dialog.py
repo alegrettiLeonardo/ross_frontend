@@ -78,6 +78,9 @@ class GuidedShaftSectionEditorDialog(QDialog):
 
         self.length = _double(section.length_mm, minimum=1.0e-9)
         self.length.setEnabled(False)
+        self.resize_section = QCheckBox("Resize section; keep component absolute positions (mm)")
+        self.resize_section.setToolTip("Changes the section boundary. Bearings, disks and probes keep their absolute coordinates; invalid spans are rejected before commit.")
+        self.resize_section.toggled.connect(self.length.setEnabled)
         self.od_left = _double(section.od_left_mm, minimum=1.0e-9)
         self.od_right = _double(section.odr_mm, minimum=1.0e-9)
         self.id_left = _double(section.id_left_mm, minimum=0.0)
@@ -96,6 +99,7 @@ class GuidedShaftSectionEditorDialog(QDialog):
 
         form.addRow("ROSS shaft type", self.geometry)
         form.addRow("Tutorial contract", self.contract)
+        form.addRow("Resize policy", self.resize_section)
         form.addRow("Length (mm)", self.length)
         form.addRow("OD left / odl (mm)", self.od_left)
         form.addRow("OD right / odr (mm)", self.od_right)
@@ -196,6 +200,7 @@ class GuidedShaftSectionEditorDialog(QDialog):
                 id_right_mm=self.id_right.value(),
             )
         return {
+            **({"length_mm": self.length.value()} if self.resize_section.isChecked() else {}),
             "od_left_mm": od_left,
             "od_right_mm": od_right,
             "id_left_mm": id_left,

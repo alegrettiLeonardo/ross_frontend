@@ -246,6 +246,14 @@ class RotorModelMutationService:
             after_count=len(collection),
         )
 
+    def preview_material_update(self, project, name, material):
+        if name not in project.materials or material.name != name:
+            raise EngineeringError(f"Material {name!r}: expected an existing unchanged material identity.")
+        candidate = deepcopy(project)
+        candidate.materials[name] = material
+        return self._qualify(project, candidate, kind="material", operation="update", index=None,
+                             before_count=len(project.materials), after_count=len(candidate.materials))
+
     @staticmethod
     def commit(project: RotorProject, preview: RotorMutationPreview) -> MutationAudit:
         if project != preview.source_snapshot:

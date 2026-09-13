@@ -537,3 +537,26 @@ __all__ = [
     "ShaftSectionEditorDialog",
     "SupportEditorDialog",
 ]
+
+
+class MaterialEditorDialog(QDialog):
+    """Edit a named material; all sections sharing it change together."""
+    def __init__(self, material, parent=None):
+        super().__init__(parent)
+        self.material_name = material.name
+        self.setWindowTitle(f"Material — {material.name}")
+        root = QVBoxLayout(self)
+        _note(root, "These properties apply to every section using this material. A strict rotor build validates the complete candidate before commit.")
+        form = QFormLayout()
+        self.density = _double(material.density_kg_m3, minimum=1e-9)
+        self.young = _double(material.young_pa, minimum=1e-9)
+        self.poisson = _double(material.poisson, minimum=-0.999999, maximum=0.499999)
+        form.addRow("Density (kg/m³)", self.density)
+        form.addRow("Young modulus (Pa)", self.young)
+        form.addRow("Poisson ratio", self.poisson)
+        root.addLayout(form)
+        root.addWidget(_buttons(self))
+
+    def record(self):
+        from .domain import MaterialSpec
+        return MaterialSpec(self.material_name, self.density.value(), self.young.value(), self.poisson.value())
