@@ -90,6 +90,10 @@ def main() -> int:
     assert gui_payload["bearing_model_icon_count"] == 9, gui_payload
     assert gui_payload["bearing_inline_input"] is True, gui_payload
     assert gui_payload["bearing_results_below"] is True, gui_payload
+    scalar = gui_payload["scalar_bearing_display"]
+    assert scalar["status"] == "PASS" and scalar["ross_version"] == "2.3.0", scalar
+    assert {case["model"] for case in scalar["cases"]} == {"BallBearingElement", "RollerBearingElement"}, scalar
+    assert all(case["status"] == "PASS" for case in scalar["cases"]), scalar
 
     model_builder = gui_payload["model_builder_014"]
     assert model_builder["status"] == "PASS", model_builder

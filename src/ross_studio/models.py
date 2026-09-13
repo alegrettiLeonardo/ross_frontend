@@ -166,6 +166,19 @@ class BearingModel:
             return cls()
         spec = project.bearings[index]
         points = [BearingCoefficientRow.from_point(p) for p in spec.coefficients]
+        # Scalar K/C is the persisted calculation result for rolling bearings.
+        # Keep it visible after Apply/reopen without synthesizing a frequency
+        # table in the scientific domain or recomputing native coefficients.
+        scalar_model = spec.ross_class == "BearingElement" or (
+            spec.ross_class in {"BallBearingElement", "RollerBearingElement"}
+            and spec.metadata.get("source_model") == spec.ross_class
+        )
+        if not points and scalar_model:
+            points = [BearingCoefficientRow(
+                rpm=float(project.operating_cases[0].rated_speed_rpm),
+                kxx=spec.kxx, kxy=spec.kxy, kyx=spec.kyx, kyy=spec.kyy,
+                cxx=spec.cxx, cxy=spec.cxy, cyx=spec.cyx, cyy=spec.cyy,
+            )]
         speeds = [p.rpm for p in spec.coefficients]
         source_model = str(spec.metadata.get("source_model", spec.ross_class))
         speed_metadata = spec.metadata.get("speed_rpm")

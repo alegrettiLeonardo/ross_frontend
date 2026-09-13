@@ -155,6 +155,8 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
             "load_realization": "ANALYSIS_INPUT_EXACT_NODE",
             "unresolved_positions_mm": final.unresolved_positions_mm,
         }
+        from .bearing_scalar_qualification import run_scalar_bearing_qualification
+        base['scalar_bearing_display'] = run_scalar_bearing_qualification()
         return FrozenGuiSmokeResult(base)
     finally:
         WORKSPACE_SELECTION.clear()
