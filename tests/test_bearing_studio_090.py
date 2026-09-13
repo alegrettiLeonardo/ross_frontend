@@ -131,16 +131,16 @@ def test_thd_models_remain_separately_owned_by_their_native_services() -> None:
             service.calculate(project, 0, ross_class, {})
 
 
-def test_qt_bearing_studio_hides_direct_kc_as_calculation_model_but_preserves_imported_kc(qtbot) -> None:
-    """0.15 keeps BearingElement as persistence/application class, not a model tile."""
+def test_qt_bearing_studio_exposes_direct_kc_and_preserves_imported_kc(qtbot) -> None:
+    """Core qualification exposes direct editing without rewriting imported data."""
     pytest.importorskip("ross")
     from ross_studio.app import RossStudioWindow
 
     window = RossStudioWindow()
     qtbot.addWidget(window)
     window._open_bearing_group("General / Parametric")
-    assert "kc" not in window.bearing_page.type_buttons
-    assert window._bearing_key_for_class(window.bearing_page, "BearingElement") is None
+    assert "kc" in window.bearing_page.type_buttons
+    assert window._bearing_key_for_class(window.bearing_page, "BearingElement") == "kc"
 
     spec = window.project.engineering.bearings[0]
     original = deepcopy(spec.coefficients)

@@ -26,13 +26,12 @@ def test_bearing_studio_uses_requested_model_tree_and_vertical_workspace(qtbot) 
     assert hasattr(page, "bearing_rail")
     assert "exact ROSS node" in page.target_node_label.text()
 
-    # Calculation-model surface requested for 0.15. Direct BearingElement K/C is an
-    # application/persistence class, not a Bearing Studio model tile.
+    # Core qualification includes the actual direct K/C editor.
     assert set(page.type_buttons) == {
-        "ball", "roller", "cyl", "plain", "tilting", "thrust", "sfd", "amb"
+        "kc", "ball", "roller", "cyl", "plain", "tilting", "thrust", "sfd", "amb"
     }
-    assert len(page.type_buttons) == 8
-    assert "kc" not in page.type_buttons
+    assert len(page.type_buttons) == 9
+    assert "kc" in page.type_buttons
     assert all(not button.isHidden() for button in page.type_buttons.values())
     for icon_name in (
         "ball_bearing", "roller_bearing", "cylindrical_bearing",

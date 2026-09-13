@@ -246,6 +246,7 @@ def test_qt_engineering_routes_and_bearing_studio_2_workspace() -> None:
         if not button.isHidden()
     }
     assert visible_classes == {
+        "BearingElement",
         "BallBearingElement",
         "RollerBearingElement",
         "CylindricalBearing",
@@ -255,7 +256,7 @@ def test_qt_engineering_routes_and_bearing_studio_2_workspace() -> None:
         "SqueezeFilmDamper",
         "MagneticBearingElement",
     }
-    assert "kc" not in window.bearing_page.type_buttons
+    assert "kc" in window.bearing_page.type_buttons
 
     for key, (_title, _ross_class, _group) in window.bearing_page.type_metadata.items():
         window.bearing_page._select_type(key, announce=False)

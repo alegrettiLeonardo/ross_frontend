@@ -56,3 +56,19 @@ def test_material_page_commit_and_resize_rejection(qtbot):
     with pytest.raises(EngineeringError,match='outside'):
         page.model_builder.preview_update(p,'shaft',0,{'length_mm':300.})
     assert p==before
+
+
+def test_small_load_and_inertia_survive_gui_precision(qtbot):
+    from ross_studio.model_entity_dialogs import LoadEditorDialog, DiskEditorDialog, PointMassEditorDialog
+    dialogs=[LoadEditorDialog(total_length_mm=1000.),DiskEditorDialog(total_length_mm=1000.),PointMassEditorDialog(total_length_mm=1000.)]
+    for dialog in dialogs:qtbot.addWidget(dialog)
+    load,disk,mass=dialogs
+    load.magnitude.setValue(.000123456789)
+    disk.id.setValue(.000000123456);disk.ip.setValue(.000000234567)
+    mass.ix.setValue(.000000345678);mass.iy.setValue(.000000456789);mass.iz.setValue(.000000567891)
+    assert load.record().magnitude==.000123456789
+    assert disk.record().id_kg_m2==.000000123456
+    assert disk.record().ip_kg_m2==.000000234567
+    assert mass.record().ix_kg_m2==.000000345678
+    assert mass.record().iy_kg_m2==.000000456789
+    assert mass.record().iz_kg_m2==.000000567891

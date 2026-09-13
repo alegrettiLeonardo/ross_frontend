@@ -169,10 +169,10 @@ class ProjectFileController:
         return True
 
     def _replace_project(self, result: ProjectOpenResult, *, clean: bool) -> None:
-        from .pages.bearing_studio import BearingStudioPage
+        from .pages.bearing_workspace_page import BearingStudioPage
         from .pages.empty_bearing_studio import EmptyBearingStudioPage
-        from .pages.results import AnalysisResultsPage
-        from .pages.rotor_model import RotorModelPage
+        from .pages.engineering_results import EngineeringAnalysisResultsPage as AnalysisResultsPage
+        from .pages.rotor_workspace import RotorModelPage
 
         window = self.window
         WORKSPACE_SELECTION.clear()

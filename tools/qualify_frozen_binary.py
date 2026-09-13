@@ -87,7 +87,7 @@ def main() -> int:
     assert gui_payload["amb_blocked"] == [], gui_payload
     assert set(gui_payload["sidebar_routes"]) == EXPECTED_LEGACY_SIDEBAR_COMPAT, gui_payload
     assert "shaft" not in set(gui_payload["sidebar_routes"]), gui_payload
-    assert gui_payload["bearing_model_icon_count"] == 8, gui_payload
+    assert gui_payload["bearing_model_icon_count"] == 9, gui_payload
     assert gui_payload["bearing_inline_input"] is True, gui_payload
     assert gui_payload["bearing_results_below"] is True, gui_payload
 

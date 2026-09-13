@@ -38,3 +38,30 @@ PASS = executed for the bounded case; GAP = that link still requires evidence. S
 | Unbalance | GAP complete load editor path | PASS amplitude/phase/projection | PASS phase table | PASS | GAP until new runs | GAP |
 
 New Project shaft/bearing creation is still blocked in the historical workspace. This tranche does not disguise that limitation as a complete new-model journey. Complete Core before moving on to Bearing Studio and subsequent blocks. No PR or merge is authorized.
+
+## Second Core increment — real application paths
+
+Previous exact HEAD b6d97ded71f96d95a437dbdb653c71a027eb3634 passed source run 34771621230 and frozen run 34771621139 (Linux and Windows, including Core). Those results apply to the first increment only.
+
+Defects exposed by exercising application handlers:
+
+| Severity | Defect / root cause | Correction / regression |
+|---|---|---|
+| CRITICAL | Load editor rounded 0.000123456 kg m to 0.000123 with six decimal places, changing linear response by 0.369362%. Small inertias suffered the same precision loss. | Twelve decimals for magnitude and inertia fields; explicit small-value editor regression and independent complex-response comparison. Values below that declared resolution remain outside this tested scope. |
+| CRITICAL | ProjectFileController imported the legacy results page on reopen, losing engineering composition and result validity guard. | Import current application pages; exercise controller open, assert page class, recompute and invalidate seven entity changes. |
+| HIGH | Current Bearing Studio rail omitted the direct K/C tile although its input/backend existed. | Add the ninth, direct K/C tile. Exercise actual Calculate and Apply handlers and retain all eight other model tiles. Update positive source/frozen surface contracts. |
+
+Validation executed: 17 targeted tests passed (Core, inline bearing UI, bearing 090, optional runtime). ROSS remains 2.3.0. Dependency ccp emits REFPROP-to-HEOS initialization warning; this linear fixture uses no thermodynamic fluid calculation. This is not evidence for seals/THD.
+
+The shared source/frozen harness now exercises real modal editor handlers, application K/C Calculate/Apply, threaded SolverConsole, independent native results, static reactions, separately calculated interpolated 1X crossings, controller reopen/recompute, and stale invalidation for material, shaft, disk, Concent, bearing, load and probe. Native critical roots and GUI interpolated crossings remain explicitly distinct quantities.
+
+| Evidence link, existing two-section fixture | Source | New frozen Linux | New frozen Windows |
+|---|---|---|---|
+| GUI edits → domain → ROSS → matrices/native results | PASS | GAP pending exact increment | GAP pending exact increment |
+| Solver Console → result tables/Campbell arrays | PASS | GAP | GAP |
+| Controller save/reopen/recompute | PASS | GAP | GAP |
+| Seven-entity stale invalidation | PASS | GAP | GAP |
+| Nine conversion pairs, forward/reverse primitives | PASS | GAP | GAP |
+| New-project creation and non-core unit editor wiring | GAP | GAP | GAP |
+
+No complete product qualification is claimed. Existing-model scope excludes new shaft/bearing creation, separate analysis-settings editor journeys, and non-core pressure/temperature editor wiring. Frozen results for the new increment must be attached before bounded feature qualification.

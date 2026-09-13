@@ -38,8 +38,8 @@ class BearingStudioPage(_BearingStudioPage):
     User-facing model choices follow the engineering workflow requested for ROSS
     Studio: General (Ball, Roller, Cylindrical), THD (Plain Journal, Tilting Pad,
     Thrust Pad, SFD) and AMB (visible but blocked). Direct ``BearingElement`` K/C
-    remains a persistence/application class for imported models, not a calculation
-    model tile.
+    is editable through the same Calculate/Preview/Apply transaction as the
+    analytical models.
 
     Output ownership is deliberately split in two:
 
@@ -51,6 +51,7 @@ class BearingStudioPage(_BearingStudioPage):
     """
 
     TYPE_DEFINITIONS = (
+        ("kc", "Direct K/C", "bearing_kc", "BearingElement", BearingGroup.GENERAL),
         ("ball", "Ball Bearing", "ball_bearing", "BallBearingElement", BearingGroup.GENERAL),
         ("roller", "Roller Bearing", "roller_bearing", "RollerBearingElement", BearingGroup.GENERAL),
         ("cyl", "Cylindrical", "cylindrical_bearing", "CylindricalBearing", BearingGroup.GENERAL),

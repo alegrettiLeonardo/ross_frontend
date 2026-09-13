@@ -36,8 +36,8 @@ def _double(value: float, *, minimum: float = 0.0, maximum: float = 1.0e12) -> Q
 class GuidedShaftSectionEditorDialog(QDialog):
     """ROSS-tutorial guided editor for one physical shaft section.
 
-    Section length remains read-only in the current topology gate so editing one
-    section cannot silently translate every downstream absolute coordinate. The
+    Section length is read-only until the engineer explicitly chooses to resize
+    while retaining the absolute coordinates of every attached component. The
     user explicitly selects one of the four shaft families documented by ROSS; the
     resulting OD/ID values are then passed through the existing strict-Ross preview
     and commit transaction.
@@ -54,7 +54,7 @@ class GuidedShaftSectionEditorDialog(QDialog):
         note = QLabel(
             "Select a ROSS shaft geometry. The guided contracts follow the Modeling tutorial: "
             "solid/hollow controls ID and cylindrical/conical controls whether OD is constant. "
-            "Length remains read-only in this gate; Apply still requires strict ROSS assembly."
+            "Resize requires the explicit absolute-coordinate policy below; Apply requires strict ROSS assembly."
         )
         note.setWordWrap(True)
         root.addWidget(note)

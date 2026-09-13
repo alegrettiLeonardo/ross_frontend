@@ -143,13 +143,13 @@ def run_frozen_gui_smoke() -> FrozenGuiSmokeResult:
         page = window.bearing_page
         if not page.group_selector.isHidden():
             raise RuntimeError("Frozen Bearing Studio reintroduced the redundant visible family selector.")
-        expected_models = {"ball", "roller", "cyl", "plain", "tilting", "thrust", "sfd", "amb"}
+        expected_models = {"kc", "ball", "roller", "cyl", "plain", "tilting", "thrust", "sfd", "amb"}
         if set(page.type_buttons) != expected_models or any(button.isHidden() for button in page.type_buttons.values()):
             raise RuntimeError(
                 f"Frozen Bearing Studio model surface mismatch: {sorted(page.type_buttons)}"
             )
-        if "kc" in page.type_buttons:
-            raise RuntimeError("Direct BearingElement K/C must not appear as a Bearing Studio calculation-model tile.")
+        if "kc" not in page.type_buttons:
+            raise RuntimeError("Direct BearingElement K/C editor is missing.")
         if page.result_card.isVisible() or not page.result_card.isHidden():
             raise RuntimeError("Frozen Bearing Studio output must start collapsed below the engineering inputs.")
         if "exact ROSS node" not in page.target_node_label.text():

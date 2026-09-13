@@ -2,7 +2,10 @@
 
 This is a test harness, not a production solver or a replacement of ROSS physics.
 """
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from copy import deepcopy
+from PySide6.QtCore import QTimer, QEventLoop
+from .pages.rotor_workspace import RotorModelPage
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import numpy as np
@@ -10,15 +13,10 @@ import ross as rs
 from PySide6.QtWidgets import QApplication, QTableWidgetItem
 from .domain import RotorProject, ShaftSection, BearingSpec, DiskSpec, PointMassSpec, LoadSpec, ProbeSpec, OperatingCase
 from .models import ProjectModel
-from .model_builder_service import RotorModelMutationService
-from .model_entity_dialogs import MaterialEditorDialog, DiskEditorDialog, PointMassEditorDialog, LoadEditorDialog
-from .shaft_section_dialog import GuidedShaftSectionEditorDialog
-from .bearing_input_dialog import BearingInputDialog
-from .bearing_studio_service import BearingStudioService
 from .ross_backend import RossBackend
 from .analysis_pipeline import AnalysisPipelineService, AnalysisPolicy
 from .pages.engineering_results import EngineeringAnalysisResultsPage
-from .project_io import save_project, load_project
+from .project_io import save_project
 
 
 @dataclass
@@ -44,32 +42,53 @@ def run_core_qualification():
         disks=[DiskSpec('Disk',200.246,10.,.05,.1)],point_masses=[PointMassSpec('Concent',400.492,2.,.01,.03,.02)],
         loads=[LoadSpec('U','unbalance',200.246,.000123456,23.456789)],probes=[ProbeSpec('P',200.246,1,13.456789)],
         operating_cases=[OperatingCase('Core',1234.56,100.,12000.,20.576)])
-    mutation=RotorModelMutationService(); widgets=[]
+    model=ProjectModel.from_engineering(p)
+    editor=RotorModelPage(model);widgets=[editor]
+    def edit(key,row,values,material=False):
+        editor.editor_tables[key].selectRow(row)
+        errors=[]
+        def enter():
+            dialog=QApplication.activeModalWidget()
+            try:
+                for name,value in values.items():
+                    field=getattr(dialog,name)
+                    if isinstance(value,bool):field.setChecked(value)
+                    elif isinstance(value,str):field.setText(value)
+                    else:field.setValue(value)
+            except Exception as exc:errors.append(exc)
+            finally:dialog.accept()
+        QTimer.singleShot(0,enter)
+        if material:editor._edit_material()
+        else:editor._edit_entity(key)
+        if errors:raise errors[0]
     for i in range(2):
-        dialog=GuidedShaftSectionEditorDialog(p.shaft_sections[i]);widgets.append(dialog)
-        dialog.resize_section.setChecked(True);dialog.length.setValue(length)
-        dialog.od_left.setValue(41.234567);dialog.id_left.setValue(11.234567)
-        dialog.fe_elements.setValue(3)
-        for key in ('shear_effects','rotary_inertia','gyroscopic'): getattr(dialog,key).setChecked(True)
-        mutation.commit(p,mutation.preview_update(p,'shaft',i,dialog.changes()))
-    material=MaterialEditorDialog(p.materials['Steel']);widgets.append(material)
-    material.density.setValue(7912.345678);material.young.setValue(203456700000.);material.poisson.setValue(.287654)
-    mutation.commit(p,mutation.preview_material_update(p,'Steel',material.record()))
-    disk=DiskEditorDialog(p.disks[0],total_length_mm=total);widgets.append(disk)
-    for key,value in [('position',200.246),('mass',12.345678),('id',.054321),('ip',.098765)]: getattr(disk,key).setValue(value)
-    mutation.commit(p,mutation.preview_update(p,'disk',0,disk.changes()))
-    concent=PointMassEditorDialog(p.point_masses[0],total_length_mm=total);widgets.append(concent)
-    for key,value in [('position',400.492),('mass',2.345678),('ix',.012345),('iy',.034567),('iz',.023456)]:getattr(concent,key).setValue(value)
-    mutation.commit(p,mutation.preview_update(p,'point_mass',0,concent.changes()))
+        edit('shaft',i,dict(resize_section=True,length=300.369,od_left=41.234567,id_left=11.234567,fe_elements=3,shear_effects=True,rotary_inertia=True,gyroscopic=True))
+    edit('shaft',0,dict(density=7912.345678,young=203456700000.,poisson=.287654),material=True)
+    edit('disks',0,dict(position=200.246,mass=12.345678,id=.054321,ip=.098765))
+    edit('disks',1,dict(position=400.492,mass=2.345678,ix=.012345,iy=.034567,iz=.023456))
+    edit('loads',0,dict(position=200.246,magnitude=.000123456,phase=23.456789))
+    assert p.loads[0].magnitude==.000123456
+    edit('probes',0,dict(position=200.246,orientation=13.456789))
     # Non-round coefficients, including cross terms, are entered into the real table.
     coefficients=[12345670.,23456.,-34567.,14567890.,123.456,2.345,-3.456,234.567]
+    from .app import RossStudioWindow
+    from .project_file_controller import ProjectFileController
+    from .project_file_service import ProjectOpenResult
+    from .models import BearingModel
+    window=RossStudioWindow();widgets.append(window)
+    controller=ProjectFileController(window)
+    controller._replace_project(ProjectOpenResult(model,Path('core.rossproj'),None,'qualification',False),clean=False)
     for i in range(2):
-        dialog=BearingInputDialog(p,i,'BearingElement');widgets.append(dialog)
-        dialog.kc_table.setRowCount(2)
+        window.bearing_index=i;window.bearing=BearingModel.from_project(p,i)
+        window._refresh_bearing_page(selected_class='BearingElement')
+        table=window.bearing_page.input_panel.kc_table;table.setRowCount(2)
         for row,rpm in enumerate((100.,12000.)):
-            for col,value in enumerate([rpm,*coefficients]):dialog.kc_table.setItem(row,col,QTableWidgetItem(str(value)))
-        service=BearingStudioService();service.apply(p,i,service.calculate(p,i,'BearingElement',dialog.values()))
-    model=ProjectModel.from_engineering(p)
+            for col,value in enumerate([rpm,*coefficients]):table.setItem(row,col,QTableWidgetItem(str(value)))
+        window._calculate_bearing()
+        assert window.bearing_calculation is not None
+        assert window.bearing_page.apply_button.isEnabled()
+        window._apply_bearing()
+        assert p.bearings[i].coefficients[0].kxx==12345670.
     actual=RossBackend().build_rotor(p).rotor
     mat=rs.Material(name='Steel',rho=7912.345678,E=203456700000.,Poisson=.287654)
     class IndependentConcent(rs.DiskElement):
@@ -96,7 +115,21 @@ def run_core_qualification():
         compare(name,getattr(actual,name)(*args),expected,1e-12,floor)
     compare('mass',actual.m,reference.m);compare('nodes',actual.nodes_pos,reference.nodes_pos)
     policy=AnalysisPolicy(modal_num_modes=12,campbell_frequencies=4,campbell_points=17,response_points=11)
-    result=AnalysisPipelineService(policy=policy).run(p)
+    from .solver_console import SolverConsole
+    def gui_solve(project_model):
+        console=SolverConsole(project_model,service=AnalysisPipelineService(policy=policy),autostart=False)
+        widgets.append(console);console.show()
+        loop=QEventLoop();watch=QTimer();watch.setInterval(20)
+        watch.timeout.connect(lambda:loop.quit() if console._thread is None else None)
+        timeout=QTimer();timeout.setSingleShot(True);timeout.timeout.connect(loop.quit)
+        console.start();watch.start();timeout.start(120000);loop.exec()
+        expired=not timeout.isActive();timeout.stop();watch.stop()
+        if expired:
+            console._stop();raise RuntimeError('Core GUI solver exceeded 120 s')
+        assert console.analysis_result is not None,console.status_detail.text()
+        console.open_results.click()
+        return console.analysis_result
+    result=gui_solve(model)
     direct_modal=reference.run_modal(1234.56*np.pi/30,num_modes=12)
     compare('natural frequencies',result.modal.wn,direct_modal.wn,1e-7,1e-7)
     v=result.modal.evectors[:actual.ndof,:len(result.modal.wn)];w=direct_modal.evectors[:reference.ndof,:len(direct_modal.wn)]
@@ -105,6 +138,17 @@ def run_core_qualification():
     direct_static=reference.run_static();compare('static deflection',result.static.deformation,direct_static.deformation,1e-8,1e-13)
     direct_campbell=reference.run_campbell(result.campbell.speed_range,frequencies=4)
     compare('Campbell',result.campbell.wd,direct_campbell.wd,1e-7,1e-7)
+    roots=[]
+    omega=direct_campbell.speed_range
+    for branch in range(direct_campbell.wd.shape[1]):
+        residual=direct_campbell.wd[:,branch]-omega
+        for idx in np.flatnonzero(residual[:-1]*residual[1:]<0):
+            a,b=residual[idx:idx+2]
+            roots.append((omega[idx]*b-omega[idx+1]*a)/(b-a)*30/np.pi)
+    roots.sort()
+    assert roots
+    assert min(np.diff(roots),default=100)>policy.critical_dedup_rpm
+    compare('critical interpolated 1X crossings',[c.speed_rpm for c in result.critical_speeds],roots,1e-7,1e-6)
     # Separate native critical result; GUI pipeline explicitly uses interpolated 1X crossings.
     compare('native critical',actual.run_critical_speed(num_modes=4)._wd,reference.run_critical_speed(num_modes=4)._wd,1e-6,1e-6)
     direct_ub=reference.run_unbalance_response(2,.000123456,23.456789*np.pi/180,result.speed_rpm*np.pi/30)
@@ -112,13 +156,16 @@ def run_core_qualification():
     compare('unbalance amplitude',abs(result.unbalance.forced_resp),abs(direct_ub.forced_resp),1e-7,1e-13)
     mask=abs(direct_ub.forced_resp)>1e-12
     compare('unbalance phase wrapped',np.angle(result.unbalance.forced_resp[mask]/direct_ub.forced_resp[mask]),np.zeros(mask.sum()),0.,1e-7)
-    page=EngineeringAnalysisResultsPage(model);widgets.append(page);page.set_results(result)
+    page=window.results_page;assert isinstance(page,EngineeringAnalysisResultsPage);page.set_results(result)
     page._select_analysis('modal')
     for row,freq in enumerate(direct_modal.wn):assert page.table.item(row,1).text()==f'{freq/(2*np.pi):.3f}'
     compare('GUI Campbell frequencies Hz',page.campbell_chart._frequency_hz,direct_campbell.wd/(2*np.pi),1e-7,1e-7)
     compare('GUI Campbell speed rpm',page.campbell_chart._speed_rpm,direct_campbell.speed_range*30/np.pi)
     page._select_analysis('static')
     assert page.table.item(0,1).text()==f'{np.max(abs(direct_static.deformation))*1e6:.6g}'
+    compare('static bearing reactions',list(result.static.bearing_forces.values()),list(direct_static.bearing_forces.values()),1e-8,1e-8)
+    for row,force in enumerate(direct_static.bearing_forces.values(),1):
+        assert page.table.item(row,1).text()==f'{force:.6g}'
     for row,c in enumerate(result.critical_speeds):
         page._select_analysis('critical')
         assert page.table.item(row,1).text()==f'{c.speed_rpm:.2f}'
@@ -129,13 +176,31 @@ def run_core_qualification():
     page._select_analysis('unbalance')
     assert page.table.item(0,8).text()==f'{result.probe_responses[0].rated_phase_deg:.2f}' 
     with TemporaryDirectory() as directory:
-        saved=save_project(model,Path(directory)/'core.rossproj');reopened=load_project(saved)
+        saved=save_project(model,Path(directory)/'core.rossproj')
+        assert controller.open_path(saved)
+        reopened=window.project
+        assert isinstance(window.results_page,EngineeringAnalysisResultsPage)
         assert asdict(reopened.engineering)==asdict(p)
-        again=AnalysisPipelineService(policy=policy).run(reopened.engineering)
+        again=gui_solve(reopened)
         compare('reopened modal',again.modal.wn,result.modal.wn,1e-7,1e-7)
         compare('reopened unbalance',again.unbalance.forced_resp,result.unbalance.forced_resp,1e-7,1e-13)
-    p.materials['Steel']=type(p.materials['Steel'])('Steel',8000.,203456700000.,.287654)
-    page.validity_guard.check();assert page.result is None
+        compare('reopened Campbell',again.campbell.wd,result.campbell.wd,1e-7,1e-7)
+        compare('reopened static',again.static.deformation,result.static.deformation,1e-8,1e-13)
+        model=reopened;page=window.results_page;page.set_results(again)
+    baseline=deepcopy(p)
+    mutations={
+        'material':lambda e:e.materials.update(Steel=replace(e.materials['Steel'],density_kg_m3=8000.)),
+        'shaft':lambda e:setattr(e.shaft_sections[0],'od_left_mm',42.),
+        'disk':lambda e:setattr(e.disks[0],'mass_kg',13.),
+        'concent':lambda e:setattr(e.point_masses[0],'ix_kg_m2',.015),
+        'bearing':lambda e:e.bearings[0].coefficients.__setitem__(0,replace(e.bearings[0].coefficients[0],kxx=1.3e7)),
+        'unbalance':lambda e:setattr(e.loads[0],'phase_deg',25.),
+        'probe':lambda e:setattr(e.probes[0],'orientation_deg',15.)}
+    for name,mutate in mutations.items():
+        model.engineering=deepcopy(baseline);page.validity_guard.check();page.set_results(result)
+        mutate(model.engineering);page.validity_guard.check()
+        assert page.result is None and page.campbell_chart._frequency_hz is None,name
+        rows.append(dict(quantity=f'stale {name}',status='PASS'))
     from ross.units import Q_
     for value,source,target,expected in [
         (123.456789,'mm','m',.123456789),
@@ -153,5 +218,5 @@ def run_core_qualification():
     for widget in widgets:widget.close();widget.deleteLater()
     app.processEvents()
     return CoreEvidence(dict(status='PASS',ross_version=rs.__version__,comparisons=rows,
-        scope='Existing two-section hollow linear rotor; GUI material/shaft/disk/concent/KC adaptation; native solver parity; modal table; save/recompute and material stale invalidation.',
-        gaps=['New-project shaft/bearing creation journey','Complete GUI plots/tables for all analyses','Critical GUI 1X crossing versus native root distinction','Full unit-editor matrix beyond core SI fields','All-entity stale mutation matrix']))
+        scope='Existing two-section hollow linear rotor; real GUI editing, K/C Calculate/Apply, SolverConsole, result tables and Campbell data, controller reopen/recompute and seven-entity stale invalidation.',
+        gaps=['New-project shaft/bearing creation journey outside existing-model scope','Separate analysis request/settings editors','Full unit-editor matrix beyond core SI fields']))
