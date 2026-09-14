@@ -111,8 +111,15 @@ def _coefficient_evidence(table, applied, expected, speeds_rpm, *, rtol=1e-12, a
         omega = float(rpm) * np.pi / 30.0
         studio_values = _kc_values(applied, omega)
         reference_values = _kc_values(expected, omega)
-        gui_rpm = float(table.item(row, 0).text().replace(",", ""))
-        np.testing.assert_allclose(gui_rpm, float(rpm), rtol=0.0, atol=1e-12, err_msg=f"GUI RPM row {row}")
+        gui_rpm_text = table.item(row, 0).text()
+        # The production results table intentionally renders RPM with the Python
+        # ``:g`` presentation contract.  Audit that contract exactly, while all
+        # solver/interpolation comparisons below continue to use the unrounded
+        # engineering speed and tight numerical tolerances.
+        assert gui_rpm_text == f"{float(rpm):g}", (
+            f"GUI RPM row {row} does not match the declared :g display contract: "
+            f"text={gui_rpm_text!r}, engineering_rpm={float(rpm)!r}"
+        )
         for col, (name, studio, reference) in enumerate(
             zip(_COEFFICIENT_NAMES, studio_values, reference_values), 1
         ):
@@ -136,6 +143,7 @@ def _coefficient_evidence(table, applied, expected, speeds_rpm, *, rtol=1e-12, a
                 {
                     "rpm": float(rpm),
                     "frequency_rad_s": omega,
+                    "gui_rpm_display": gui_rpm_text,
                     "coefficient": name,
                     "gui_display": gui_text,
                     "gui_value": gui_value,
