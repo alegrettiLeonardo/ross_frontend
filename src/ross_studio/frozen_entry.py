@@ -152,6 +152,17 @@ def frozen_foundation_024_main(argv: list[str]) -> int:
     )
 
 
+def frozen_coupling_025_main(argv: list[str]) -> int:
+    from ross_studio.frozen_coupling_025 import run_frozen_coupling_025_test
+
+    return _run_callable(
+        argv,
+        "--coupling-025-output",
+        run_frozen_coupling_025_test,
+        12,
+    )
+
+
 def main() -> int:
     argv = list(sys.argv[1:])
     if "--core-output" in argv:
@@ -175,6 +186,8 @@ def main() -> int:
         return frozen_multirotor_023_main(argv)
     if "--foundation-024-self-test" in argv or "--foundation-024-output" in argv:
         return frozen_foundation_024_main(argv)
+    if "--coupling-025-self-test" in argv or "--coupling-025-output" in argv:
+        return frozen_coupling_025_main(argv)
 
     from ross_studio.app import launch
 

@@ -61,6 +61,9 @@ jobs:
       - name: Qualify frozen Foundation Studio 0.24 runtime
         run: python tools/qualify_frozen_foundation_024.py dist artifacts/frozen_selftest_${{ runner.os }}_foundation_024.json
 
+      - name: Qualify frozen native ROSS CouplingElement 0.25 runtime
+        run: python tools/qualify_frozen_coupling_025.py dist artifacts/frozen_selftest_${{ runner.os }}_coupling_025.json
+
       - name: Upload frozen executable and qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -78,4 +81,5 @@ jobs:
             artifacts/frozen_selftest_${{ runner.os }}_stochastic_022.json
             artifacts/frozen_selftest_${{ runner.os }}_multirotor_023.json
             artifacts/frozen_selftest_${{ runner.os }}_foundation_024.json
+            artifacts/frozen_selftest_${{ runner.os }}_coupling_025.json
           if-no-files-found: error
