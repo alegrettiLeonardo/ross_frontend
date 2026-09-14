@@ -87,6 +87,22 @@ def _kc_values(element, omega):
     return (k[0, 0], k[0, 1], k[1, 0], k[1, 1], c[0, 0], c[0, 1], c[1, 0], c[1, 1])
 
 
+def _display_quantization_tolerance(text, value):
+    """Return half one displayed ULP for the table's scientific ``.2e`` format.
+
+    The scientific parity remains governed by the much tighter rtol/atol checks
+    below. This tolerance applies only to the intentionally rounded GUI text and
+    prevents a binary interpolation round-off at an exact tabulated station from
+    flipping the last displayed digit (for example 2.345 around a rounding tie).
+    """
+    if value == 0.0:
+        return 0.0
+    if "e" not in text.lower():
+        raise AssertionError(f"Expected scientific-notation K/C display, received {text!r}")
+    exponent = int(text.lower().split("e", 1)[1])
+    return 0.5000001 * 10.0 ** (exponent - 2)
+
+
 def _coefficient_evidence(table, applied, expected, speeds_rpm, *, rtol=1e-12, atol=1e-9):
     """Audit all eight displayed/applied coefficients at every solved speed station."""
     assert table.rowCount() == len(speeds_rpm)
@@ -95,13 +111,21 @@ def _coefficient_evidence(table, applied, expected, speeds_rpm, *, rtol=1e-12, a
         omega = float(rpm) * np.pi / 30.0
         studio_values = _kc_values(applied, omega)
         reference_values = _kc_values(expected, omega)
-        assert table.item(row, 0).text() == f"{rpm:g}"
+        gui_rpm = float(table.item(row, 0).text().replace(",", ""))
+        np.testing.assert_allclose(gui_rpm, float(rpm), rtol=0.0, atol=1e-12, err_msg=f"GUI RPM row {row}")
         for col, (name, studio, reference) in enumerate(
             zip(_COEFFICIENT_NAMES, studio_values, reference_values), 1
         ):
             studio = float(studio)
             reference = float(reference)
-            assert table.item(row, col).text() == f"{reference:.2e}"
+            gui_text = table.item(row, col).text()
+            gui_value = float(gui_text)
+            display_tolerance = _display_quantization_tolerance(gui_text, studio)
+            display_roundoff = np.finfo(float).eps * max(1.0, abs(studio))
+            assert abs(gui_value - studio) <= display_tolerance + display_roundoff, (
+                f"{name} GUI display at {rpm:g} rpm differs from the Studio value beyond the declared .2e display precision: "
+                f"text={gui_text!r}, gui={gui_value!r}, studio={studio!r}, display_tolerance={display_tolerance!r}"
+            )
             np.testing.assert_allclose(studio, reference, rtol=rtol, atol=atol, err_msg=f"{name} at {rpm:g} rpm")
             absolute_error = abs(studio - reference)
             relative_error = 0.0 if reference == 0.0 and absolute_error == 0.0 else (
@@ -113,7 +137,9 @@ def _coefficient_evidence(table, applied, expected, speeds_rpm, *, rtol=1e-12, a
                     "rpm": float(rpm),
                     "frequency_rad_s": omega,
                     "coefficient": name,
-                    "gui_display": table.item(row, col).text(),
+                    "gui_display": gui_text,
+                    "gui_value": gui_value,
+                    "gui_display_tolerance": display_tolerance,
                     "studio_value": studio,
                     "reference_value": reference,
                     "absolute_error": absolute_error,
