@@ -64,7 +64,8 @@ jobs:
         run: python tools/qualify_foundation_024.py
       - name: Qualify native ROSS CouplingElement 0.25
         run: python tools/qualify_coupling_025.py
-
+      - name: Qualify native ROSS Seals 0.26
+        run: python tools/qualify_seals_026.py
       - name: Qualify native ROSS completion 0.30
         run: python tools/qualify_ross_native_completion_030.py
       - name: Qualify Engineering Outputs 0.18 package
@@ -106,6 +107,7 @@ jobs:
             artifacts/multirotor_023_qualification.json
             artifacts/foundation_024_qualification.json
             artifacts/coupling_025_qualification.json
+            artifacts/seals_026_qualification.json
             artifacts/engineering_outputs_018_qualification.json
             artifacts/engineering_outputs_018/**
             artifacts/op_w60_pipeline_summary.json
