@@ -28,7 +28,10 @@ def main() -> int:
     payload = json.loads(output.read_text(encoding="utf-8"))
     if proc.returncode != 0 or payload.get("status") != "PASS" or payload.get("frozen") is not True:
         raise SystemExit(json.dumps(payload, indent=2, ensure_ascii=False))
+
+    # Previously qualified scientific Foundation 0.24 gates remain mandatory.
     assert payload["ross_version"] == "2.3.0"
+    assert payload["legacy_scientific_status"] == "PASS"
     assert payload["rigid_exact_m_parity"] is True
     assert payload["rigid_exact_k_parity"] is True
     assert payload["rigid_exact_c_parity"] is True
@@ -53,6 +56,44 @@ def main() -> int:
     assert payload["frequency_interpolation_pass"] is True
     assert payload["unsupported_contracts_blocked"] is True
     assert payload["exact_support_ownership_pass"] is True
+
+    # New end-to-end feature chain closes the GUI/domain/native/persistence/staleness gap.
+    feature = payload["feature_chain"]
+    assert feature["status"] == "PASS", feature
+    assert feature["ross_version"] == "2.3.0", feature
+    required_gates = {
+        "distinct_bearing_support_foundation_sentinels",
+        "gui_input_to_domain_commit",
+        "unit_identity_si_boundary",
+        "frequency_hz_to_rad_s_conversion",
+        "identity_topology_station_dof_signs",
+        "independent_global_mck_parity",
+        "matrix_structural_properties",
+        "four_case_physical_response",
+        "native_modal_numeric_result",
+        "gui_result_rendering",
+        "save_reopen_recompute",
+        "stale_result_invalidation",
+        "async_race_obsolete_result_rejected",
+        "no_silent_fallback",
+    }
+    assert set(feature["gates"]) == required_gates, feature["gates"]
+    assert all(feature["gates"].values()), feature["gates"]
+    assert feature["frequency_conversion"]["pass"] is True
+    assert feature["topology"]["foundation_dof_contract"] == 2
+    assert feature["topology"]["foundation_n_link"] is None
+    assert feature["global_matrix_parity"]["M"]["pass"] is True
+    assert feature["global_matrix_parity"]["K0"]["pass"] is True
+    assert feature["global_matrix_parity"]["C0"]["pass"] is True
+    assert feature["cases"]["physically_coherent_response_pass"] is True
+    assert feature["gui_result"]["pass"] is True
+    assert feature["persistence"]["foundation_equal"] is True
+    assert feature["persistence"]["support_equal"] is True
+    assert feature["persistence"]["bearing_equal"] is True
+    assert feature["stale_results"]["pass"] is True
+    assert feature["race_protection"]["pass"] is True
+    assert feature["no_silent_fallback"] is True
+
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     return 0
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .foundation_qualification import run_foundation_qualification
+from .foundation_feature_qualification import run_foundation_feature_qualification
 
 
 @dataclass(slots=True)
@@ -14,10 +14,10 @@ class FrozenFoundation024Result:
 
 
 def run_frozen_foundation_024_test() -> FrozenFoundation024Result:
-    result = run_foundation_qualification()
+    result = run_foundation_feature_qualification()
     payload = result.to_dict()
     if payload.get("status") != "PASS":
-        raise RuntimeError(f"Frozen Foundation Studio 0.24 qualification failed: {payload}")
+        raise RuntimeError(f"Frozen Foundation Studio 0.24 feature qualification failed: {payload}")
     return FrozenFoundation024Result(payload)
 
 
