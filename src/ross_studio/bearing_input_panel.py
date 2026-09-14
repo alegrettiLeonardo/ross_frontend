@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import pi
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -44,6 +44,7 @@ class BearingInputPanel(QWidget):
     Values stay in engineering units until the existing scientific service boundary.
     """
 
+    inputs_changed = Signal()
     KC_HEADERS = ("RPM", "Kxx", "Kxy", "Kyx", "Kyy", "Cxx", "Cxy", "Cyx", "Cyy")
     VECTOR_KEYS = {"speed_rpm", "groove_factor", "pivot_angles_deg"}
 
@@ -80,6 +81,9 @@ class BearingInputPanel(QWidget):
         self.error_label.hide()
         root.addWidget(self.error_label)
         self.set_model(project, bearing_index, ross_class)
+
+    def _notify_inputs_changed(self, *_args) -> None:
+        self.inputs_changed.emit()
 
     @staticmethod
     def _double(
@@ -152,6 +156,14 @@ class BearingInputPanel(QWidget):
                 widget.setObjectName(key)
                 widget.setToolTip(f"{ross_class} engineering input: {key}")
                 self.fields[key] = widget
+                if isinstance(widget, (QDoubleSpinBox, QSpinBox)):
+                    widget.valueChanged.connect(self._notify_inputs_changed)
+                elif isinstance(widget, QLineEdit):
+                    widget.textChanged.connect(self._notify_inputs_changed)
+                elif isinstance(widget, QComboBox):
+                    widget.currentIndexChanged.connect(self._notify_inputs_changed)
+                elif isinstance(widget, QCheckBox):
+                    widget.toggled.connect(self._notify_inputs_changed)
                 form.addRow(label, widget)
             card.layout().addLayout(form)
             self.sections.addWidget(card, i // 3, i % 3)
@@ -430,6 +442,7 @@ class BearingInputPanel(QWidget):
         if points:
             table.selectRow(0)
         self.kc_table = table
+        table.cellChanged.connect(self._notify_inputs_changed)
         layout.addWidget(table)
         self.sections.addWidget(card, 0, 0, 1, 3)
         for col in range(3):
@@ -458,6 +471,7 @@ class BearingInputPanel(QWidget):
         if row < 0:
             row = self.kc_table.rowCount() - 1
         self.kc_table.removeRow(row)
+        self.inputs_changed.emit()
 
     def _kc_values(self) -> list[BearingCoefficientPoint]:
         if self.kc_table is None:

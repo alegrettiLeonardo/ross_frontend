@@ -92,7 +92,7 @@ def main() -> int:
     assert gui_payload["bearing_results_below"] is True, gui_payload
     scalar = gui_payload["scalar_bearing_display"]
     assert scalar["status"] == "PASS" and scalar["ross_version"] == "2.3.0", scalar
-    assert {case["model"] for case in scalar["cases"]} == {"BallBearingElement", "RollerBearingElement"}, scalar
+    assert {case["model"] for case in scalar["cases"]} == {"BallBearingElement", "RollerBearingElement", "CylindricalBearing"}, scalar
     assert all(case["status"] == "PASS" for case in scalar["cases"]), scalar
 
     model_builder = gui_payload["model_builder_014"]

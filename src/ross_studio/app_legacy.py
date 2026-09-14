@@ -172,6 +172,7 @@ class RossStudioWindow(QMainWindow):
         self.sidebar.set_active("rotor")
 
     def _wire_bearing_page(self) -> None:
+        self.bearing_page.input_panel.inputs_changed.connect(self._bearing_type_changed)
         self.bearing_page.status_message.connect(lambda text: self.status.set_status(text))
         self.bearing_page.bearing_selected.connect(self._select_bearing)
         self.bearing_page.calculate_button.clicked.connect(self._calculate_bearing)
@@ -371,7 +372,7 @@ class RossStudioWindow(QMainWindow):
             return
 
         self.bearing_calculation = result
-        self.bearing_context = BearingCalculationContext(service, result, bearing_index, snapshot)
+        self.bearing_context = BearingCalculationContext(service, result, bearing_index, snapshot, deepcopy(inputs))
         self.bearing_field_result = result if isinstance(result, (THDBearingCalculationResult, ThrustPadCalculationResult)) else None
 
         # Update only result widgets. Rebuilding the complete page here would erase
@@ -410,6 +411,8 @@ class RossStudioWindow(QMainWindow):
                 raise ValueError("The selected class has changed; calculate again before Apply.")
             if engineering != context.project_snapshot:
                 raise ValueError("The rotor inputs have changed since Calculate; calculate again before Apply.")
+            if self.bearing_page.input_values() != context.input_snapshot:
+                raise ValueError("Visible bearing inputs differ from the calculated inputs. Calculate again before Apply.")
             candidate = deepcopy(engineering)
             applied = context.service.apply(candidate, context.bearing_index, result)
             issues = self.validation_service.validate(candidate)

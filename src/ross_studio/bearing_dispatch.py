@@ -17,6 +17,7 @@ class BearingCalculationContext:
     result: BearingResult
     bearing_index: int
     project_snapshot: object
+    input_snapshot: object
 
 
 class BearingServiceDispatcher:

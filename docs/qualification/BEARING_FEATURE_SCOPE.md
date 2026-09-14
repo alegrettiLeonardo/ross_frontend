@@ -20,3 +20,19 @@ The same runner is mandatory inside the frozen GUI process; the external binary 
 | Other Bearing Studio models | Follow their assigned THD/AMB blocks | GAP full feature chain | GAP | GAP | GAP | NOT QUALIFIED |
 
 No new full Feature Qualification claim is made. Next work is the complete solver/result chain for these models, independent Cylindrical parameter/table/assembly comparison, and input-error/preview invalidation cases. Flexible supports are assigned to Foundation; THD and AMB retain their separate ordered blocks.
+
+## Second increment: independent rotor, full GUI solve and stale-input rejection
+
+The first increment 2d038b4a79c86dd7f515acdeb685ad29c0a3a64f passed source run 34788195492 (job 103807435906), and frozen run 34788195485 (Linux 103807436024, Windows 103807435942). No scientific stage skipped.
+
+CRITICAL finding: editing a visible input after Calculate did not invalidate the calculation context or disable Apply. All three new native cases reproduced the stale Apply state. The scientific snapshot checked the rotor but omitted the input editor snapshot. Fixed by emitting input-change notifications for scalar/vector/choice controls and K/C table edits/removals, invalidating previews via the existing application handler, and comparing a deep copy of calculated inputs at the Apply boundary. Formulation/coordinate selectors also invalidate the preview. A zero-load rejection and a suppressed-notification edit verify that invalid/stale input cannot commit.
+
+The shared source/frozen runner now includes Ball, Roller and Cylindrical. It compares element and assembled K/C at nine speeds against a separately constructed ROSS rotor. Cylindrical uses five frequency stations and four interpolation points, with independent literal reference geometry/load/viscosity. It invokes the real window.run_analysis handler and SolverConsole (small requested grids, native solver unchanged), compares modal frequencies and complex unbalance response, inspects the modal table, reopens through the controller and recomputes. Scope: one existing station, rigid ground support, native default damping for rolling models. Other bearing models, support links and expanded fluid-model ranges are excluded.
+
+Executed locally: three expanded cases passed; nineteen related tests passed with the input-invalidation fix; final three cases with invalid-input and suppressed-notification checks passed. No numerical tolerance was loosened. The new exact HEAD still requires complete source and frozen gates before declaring its bounded features qualified.
+
+| Feature, declared case | Inputs/native K/C | Assembly/native solver | GUI modal result | Reopen/recompute | Error/stale gates | New frozen evidence |
+|---|---|---|---|---|---|---|
+| Ball | PASS | PASS | PASS | PASS | PASS | GAP until exact SHA runs |
+| Roller | PASS | PASS | PASS | PASS | PASS | GAP until exact SHA runs |
+| Cylindrical, five stations/interpolation | PASS | PASS | PASS | PASS | PASS | GAP until exact SHA runs |

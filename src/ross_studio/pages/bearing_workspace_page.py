@@ -180,6 +180,8 @@ class BearingStudioPage(_BearingStudioPage):
         outer.addWidget(self.parity_status)
         self.analysis_formulation.currentIndexChanged.connect(lambda _row: self._sync_parity_contract())
         self.coordinate_convention.currentIndexChanged.connect(lambda _row: self._sync_parity_contract())
+        self.analysis_formulation.currentIndexChanged.connect(lambda _row: self.input_panel.inputs_changed.emit())
+        self.coordinate_convention.currentIndexChanged.connect(lambda _row: self.input_panel.inputs_changed.emit())
 
         line2 = QFrame()
         line2.setFrameShape(QFrame.Shape.HLine)
