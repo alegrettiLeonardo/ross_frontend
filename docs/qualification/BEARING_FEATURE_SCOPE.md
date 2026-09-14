@@ -36,3 +36,9 @@ Executed locally: three expanded cases passed; nineteen related tests passed wit
 | Ball | PASS | PASS | PASS | PASS | PASS | GAP until exact SHA runs |
 | Roller | PASS | PASS | PASS | PASS | PASS | GAP until exact SHA runs |
 | Cylindrical, five stations/interpolation | PASS | PASS | PASS | PASS | PASS | GAP until exact SHA runs |
+
+## CI regression closure
+
+Source run 34828754596 at b6f30d971e0c5e8627c0682b1994788edd636c48 failed in test_controller_new_creates_truthful_empty_workspace: the new input notification wiring assumed input_panel existed on EmptyBearingStudioPage. Subsequent qualification scripts were skipped, so that source run is FAIL, not partial PASS. The empty page legitimately has no input editor; wiring now explicitly excludes that page type. Its disabled scientific controls remain unchanged.
+
+The shared frozen regression now invokes controller.new() (engineering domain is explicitly None), then loads its populated fixture and executes each native case. This closes the missing frozen path that allowed the source-only failure. Twelve project-I/O and bearing tests passed after correction. The case now also compares every displayed K/C table column and all converted bearing metadata sent through the adapter. The external binary checker requires at least 40 successful numerical comparisons per bearing case. Exact successor CI remains required.

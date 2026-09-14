@@ -69,6 +69,8 @@ def run_scalar_bearing_case(model, tmp_path):
     window=RossStudioWindow()
     try:
         controller=ProjectFileController(window)
+        assert controller.new()
+        assert window.project.engineering is None
         controller._replace_project(ProjectOpenResult(ProjectModel.from_engineering(p),tmp_path/'fixture.rossproj',None,'qualification',False),clean=False)
         window._refresh_bearing_page(selected_class=model)
         if model == 'CylindricalBearing':
@@ -111,13 +113,29 @@ def run_scalar_bearing_case(model, tmp_path):
         assert window.bearing_calculation is not None
         window._apply_bearing()
         assert p.bearings[0].ross_class==model
+        parameters=({'speed_rpm':np.linspace(900.123,4500.789,5),'weight_n':525.123456,
+            'bearing_length_m':.030123456,'journal_diameter_m':.100234567,
+            'radial_clearance_m':.000123456789,'oil_viscosity_pa_s':.123456789}
+            if model=='CylindricalBearing' else {count_key:9,
+                ('d_balls_m' if model=='BallBearingElement' else 'roller_length_m'):.023456789,
+                'static_load_n':1234.56789,'contact_angle_rad':13.456789*np.pi/180})
+        for key,value in parameters.items():
+            np.testing.assert_allclose(p.bearings[0].metadata[key],value,rtol=1e-14,atol=1e-15,err_msg=key)
         rotor=RossBackend().build_rotor(p).rotor
         applied=rotor.bearing_elements[0]
         assert type(applied).__name__==model
         np.testing.assert_allclose(applied.K(123.456),expected.K(123.456),rtol=1e-12,atol=1e-12)
         np.testing.assert_allclose(applied.C(123.456),expected.C(123.456),rtol=1e-12,atol=1e-12)
-        assert window.bearing_page.kc_table.rowCount()==(5 if model == 'CylindricalBearing' else 1)
-        assert window.bearing_page.kc_table.item(0,1).text()==f'{expected.kxx[0]:.2e}'
+        def check_coefficient_table():
+            speeds=np.linspace(900.123,4500.789,5) if model=='CylindricalBearing' else [1800.345]
+            table=window.bearing_page.kc_table
+            assert table.rowCount()==len(speeds)
+            for row,rpm in enumerate(speeds):
+                k,c=expected.K(rpm*np.pi/30),expected.C(rpm*np.pi/30)
+                assert table.item(row,0).text()==f'{rpm:g}'
+                for col,value in enumerate([k[0,0],k[0,1],k[1,0],k[1,1],c[0,0],c[0,1],c[1,0],c[1,1]],1):
+                    assert table.item(row,col).text()==f'{value:.2e}'
+        check_coefficient_table()
         reference=rs.Rotor(
             [rs.ShaftElement(L=.125,idl=0.,odl=.04,n=n,
                 material=rs.Material(name='Steel',rho=7850.,E=207e9,Poisson=.3)) for n in range(4)],
@@ -144,8 +162,7 @@ def run_scalar_bearing_case(model, tmp_path):
             assert page.table.item(row,1).text()==f'{freq/(2*np.pi):.3f}'
         saved=save_project(window.project,tmp_path/'saved.rossproj')
         assert controller.open_path(saved)
-        assert window.bearing_page.kc_table.rowCount()==(5 if model == 'CylindricalBearing' else 1)
-        assert window.bearing_page.kc_table.item(0,1).text()==f'{expected.kxx[0]:.2e}'
+        check_coefficient_table()
         reopened=RossBackend().build_rotor(window.project.engineering).rotor.bearing_elements[0]
         np.testing.assert_array_equal(reopened.K(123.456),applied.K(123.456))
         np.testing.assert_array_equal(reopened.C(123.456),applied.C(123.456))

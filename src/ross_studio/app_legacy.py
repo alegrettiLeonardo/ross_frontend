@@ -172,7 +172,11 @@ class RossStudioWindow(QMainWindow):
         self.sidebar.set_active("rotor")
 
     def _wire_bearing_page(self) -> None:
-        self.bearing_page.input_panel.inputs_changed.connect(self._bearing_type_changed)
+        from .pages.empty_bearing_studio import EmptyBearingStudioPage
+
+        # New Project has an explicit empty page with no physical input editor.
+        if not isinstance(self.bearing_page, EmptyBearingStudioPage):
+            self.bearing_page.input_panel.inputs_changed.connect(self._bearing_type_changed)
         self.bearing_page.status_message.connect(lambda text: self.status.set_status(text))
         self.bearing_page.bearing_selected.connect(self._select_bearing)
         self.bearing_page.calculate_button.clicked.connect(self._calculate_bearing)

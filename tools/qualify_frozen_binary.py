@@ -94,6 +94,8 @@ def main() -> int:
     assert scalar["status"] == "PASS" and scalar["ross_version"] == "2.3.0", scalar
     assert {case["model"] for case in scalar["cases"]} == {"BallBearingElement", "RollerBearingElement", "CylindricalBearing"}, scalar
     assert all(case["status"] == "PASS" for case in scalar["cases"]), scalar
+    assert all(len(case["comparisons"]) >= 40 for case in scalar["cases"]), scalar
+    assert all(row["status"] == "PASS" for case in scalar["cases"] for row in case["comparisons"]), scalar
 
     model_builder = gui_payload["model_builder_014"]
     assert model_builder["status"] == "PASS", model_builder
