@@ -55,6 +55,20 @@ class THDBearingStudioService:
 
     SUPPORTED_CLASSES = {"PlainJournal", "TiltingPad", "SqueezeFilmDamper"}
     TARGET_ROSS_VERSION = "2.3.0"
+    # Fixed before the corrective CI rerun. This is deliberately separate from
+    # scipy.optimize's solver-termination tolerance. The Studio accepts a solved
+    # PlainJournal equilibrium only when the remaining resultant force imbalance
+    # is <= 0.1% of the applied resultant load.
+    PLAIN_EQUILIBRIUM_RELATIVE_RESIDUAL_MAX = 1.0e-3
+    PLAIN_EQUILIBRIUM_THRESHOLD_RATIONALE = (
+        "ROSS Studio declared engineering acceptance criterion, fixed before rerun: "
+        "remaining resultant force imbalance <= 0.1% of applied resultant load. "
+        "ROSS 2.3 does not publish a separate physical force-balance acceptance limit; "
+        "this conservative Studio criterion is independent of scipy.optimize tol."
+    )
+    PLAIN_SOLVER_METHOD = "Nelder-Mead"
+    PLAIN_SOLVER_TERMINATION_TOLERANCE = 0.8
+    PLAIN_SOLVER_MAX_ITERATIONS = int(1.0e10)
 
     def __init__(self, ross_module: Any | None = None) -> None:
         self.rs = ross_module
@@ -226,8 +240,8 @@ class THDBearingStudioService:
         return element, diagnostics
 
     @staticmethod
-    def _property_backend(lubricant: str, *, thermal: bool) -> dict[str, Any]:
-        """Record the real ROSS lubricant database used by the native bearing model."""
+    def _property_backend(lubricant: str, *, thermal: bool, element: Any) -> dict[str, Any]:
+        """Record the native ROSS lubricant source and effective values actually used."""
         from ross.bearings.lubricants import lubricants_dict
 
         if lubricant not in lubricants_dict:
@@ -253,55 +267,158 @@ class THDBearingStudioService:
                 selected[key] = float(value)
             except (TypeError, ValueError):
                 selected[key] = str(value)
+
+        native_effective: dict[str, object] = {}
+        for key in (
+            "rho",
+            "reference_viscosity",
+            "mu_0",
+            "Cp",
+            "cp",
+            "k_t",
+            "kt",
+            "reference_temperature",
+            "oil_supply_temperature",
+        ):
+            if not hasattr(element, key):
+                continue
+            value = getattr(element, key)
+            try:
+                native_effective[key] = float(value)
+            except (TypeError, ValueError):
+                native_effective[key] = str(value)
+        if element.__class__.__name__ == "SqueezeFilmDamper":
+            native_effective["dynamic_viscosity_used_pa_s"] = float(element.lubricant)
+
         return {
             "requested_lubricant": lubricant,
             "configured_backend": "ROSS lubricants_dict",
             "effective_backend": "ross.bearings.lubricants.lubricants_dict",
             "ccp_refprop_heos_applicable": False,
             "temperature_dependent_properties_used": bool(thermal),
-            "properties": selected,
+            "database_properties": selected,
+            "native_effective_values": native_effective,
             "status": "NATIVE_ROSS_PROPERTY_MODEL",
         }
 
-    @staticmethod
-    def _plain_convergence(element: Any) -> list[dict[str, object]]:
-        # These values come from ROSS 2.3 PlainJournal.run_thermo_hydro_dynamic.
-        native_tolerance = 0.8
-        native_max_iterations = int(1.0e10)
+    @classmethod
+    def _plain_convergence(cls, element: Any) -> list[dict[str, object]]:
+        """Validate solver termination and physical equilibrium as separate contracts.
+
+        ROSS 2.3 PlainJournal defines _score as
+
+            sqrt((fxs_load + Fhx)**2 + (fys_load + Fhy)**2)
+
+        where Fhx/Fhy are integrated hydrodynamic forces in N. Therefore
+        OptimizeResult.fun is the Euclidean norm of the physical force-equilibrium
+        residual vector, in N. The scipy tol=0.8 passed to Nelder-Mead is only
+        a solver-termination tolerance; it is never compared to fun here.
+        """
         opt_results = getattr(element, "_opt_results", {})
-        evidence: list[dict[str, object]] = []
+        eq_by_speed = getattr(element, "_equilibrium_pos_by_speed", {})
         frequencies = np.asarray(element.frequency, dtype=float).reshape(-1)
+        applied = np.asarray([element.fxs_load, element.fys_load], dtype=float)
+        load_magnitude = float(np.linalg.norm(applied))
+        if not np.isfinite(load_magnitude) or load_magnitude <= 0.0:
+            raise EngineeringError(
+                f"PlainJournal applied resultant load must be finite and > 0 N for normalized equilibrium acceptance; "
+                f"received Fx={element.fxs_load!r} N, Fy={element.fys_load!r} N. "
+                "Specify a non-zero supported load and recalculate."
+            )
+
+        evidence: list[dict[str, object]] = []
         for omega in frequencies:
-            opt = opt_results.get(float(omega)) if isinstance(opt_results, dict) else None
-            if opt is None:
+            key = float(omega)
+            opt = opt_results.get(key) if isinstance(opt_results, dict) else None
+            eq = eq_by_speed.get(key) if isinstance(eq_by_speed, dict) else None
+            if opt is None or eq is None:
                 raise EngineeringError(
-                    f"PlainJournal convergence result is unavailable at omega={omega:.12g} rad/s; "
-                    "expected the ROSS 2.3 OptimizeResult retained in _opt_results."
+                    f"PlainJournal convergence evidence is unavailable at omega={omega:.12g} rad/s; "
+                    "expected both the ROSS 2.3 OptimizeResult and equilibrium position retained by the native solver."
                 )
-            residual = float(opt.fun)
-            iterations = int(opt.nit)
+
+            fun = float(opt.fun)
             success = bool(opt.success)
-            if (
-                not success
-                or not np.isfinite(residual)
-                or residual > native_tolerance * (1.0 + 1.0e-12)
-                or iterations > native_max_iterations
-            ):
+            status_code = int(opt.status) if hasattr(opt, "status") else None
+            nit = int(opt.nit) if hasattr(opt, "nit") else None
+            state = np.asarray(opt.x, dtype=float).reshape(-1)
+            eq_state = np.asarray(eq, dtype=float).reshape(-1)
+
+            solver_ok = bool(
+                success
+                and np.isfinite(fun)
+                and nit is not None
+                and 0 <= nit <= cls.PLAIN_SOLVER_MAX_ITERATIONS
+                and state.size == 2
+                and np.all(np.isfinite(state))
+                and eq_state.size == 2
+                and np.all(np.isfinite(eq_state))
+            )
+            if not solver_ok:
                 raise EngineeringError(
-                    f"PlainJournal native equilibrium did not satisfy the ROSS 2.3 acceptance contract at "
-                    f"omega={omega:.12g} rad/s: success={success}, residual={residual:.6e} N, "
-                    f"requested tolerance={native_tolerance:.6e} N, iterations={iterations}, "
-                    f"max_iterations={native_max_iterations}. Result rejected."
+                    f"PlainJournal solver termination failed at omega={omega:.12g} rad/s: "
+                    f"success={success}, status={status_code}, nit={nit}, fun={fun!r} N, "
+                    f"method={cls.PLAIN_SOLVER_METHOD}, termination_tol={cls.PLAIN_SOLVER_TERMINATION_TOLERANCE}, "
+                    f"max_iterations={cls.PLAIN_SOLVER_MAX_ITERATIONS}. "
+                    "Expected a successful finite native OptimizeResult; correct inputs and recalculate."
                 )
+
+            fhx, fhy = element._forces(eq_state, key)
+            hydro = np.asarray([fhx, fhy], dtype=float)
+            residual_vector = applied + hydro
+            physical_residual_norm = float(np.linalg.norm(residual_vector))
+            relative = physical_residual_norm / load_magnitude
+            objective_matches_physics = bool(
+                np.isclose(physical_residual_norm, fun, rtol=1.0e-8, atol=1.0e-6)
+            )
+            physical_ok = bool(
+                np.all(np.isfinite(hydro))
+                and np.all(np.isfinite(residual_vector))
+                and np.isfinite(relative)
+                and objective_matches_physics
+                and relative <= cls.PLAIN_EQUILIBRIUM_RELATIVE_RESIDUAL_MAX
+            )
+            if not physical_ok:
+                raise EngineeringError(
+                    f"PlainJournal solver terminated successfully but physical equilibrium is rejected at "
+                    f"omega={omega:.12g} rad/s: load_magnitude={load_magnitude:.6e} N, "
+                    f"residual_vector=[{residual_vector[0]:.6e}, {residual_vector[1]:.6e}] N, "
+                    f"residual_norm={physical_residual_norm:.6e} N, relative_residual={relative:.6e}, "
+                    f"acceptance_threshold={cls.PLAIN_EQUILIBRIUM_RELATIVE_RESIDUAL_MAX:.6e}. "
+                    f"Threshold rationale: {cls.PLAIN_EQUILIBRIUM_THRESHOLD_RATIONALE} "
+                    "The scipy termination tol is not a physical force-residual limit."
+                )
+
             evidence.append(
                 {
-                    "omega_rad_s": float(omega),
-                    "requested_tolerance": native_tolerance,
-                    "final_residual": residual,
-                    "iterations": iterations,
-                    "max_iterations": native_max_iterations,
-                    "success": success,
-                    "message": str(opt.message),
+                    "omega_rad_s": key,
+                    "solver_termination": {
+                        "success": success,
+                        "message": str(opt.message),
+                        "status_code": status_code,
+                        "iterations": nit,
+                        "method": cls.PLAIN_SOLVER_METHOD,
+                        "termination_tolerance": cls.PLAIN_SOLVER_TERMINATION_TOLERANCE,
+                        "termination_tolerance_semantics": "SOLVER TERMINATION TOLERANCE; not a force-residual acceptance limit",
+                        "max_iterations": cls.PLAIN_SOLVER_MAX_ITERATIONS,
+                        "final_objective_fun_n": fun,
+                        "result_state": [float(v) for v in state],
+                        "status": "PASS",
+                    },
+                    "physical_equilibrium": {
+                        "objective_definition": "sqrt((Fx_applied + Fhx_hydrodynamic)^2 + (Fy_applied + Fhy_hydrodynamic)^2)",
+                        "objective_units": "N",
+                        "applied_load_vector_n": [float(v) for v in applied],
+                        "hydrodynamic_force_vector_n": [float(v) for v in hydro],
+                        "equilibrium_residual_vector_n": [float(v) for v in residual_vector],
+                        "load_magnitude_n": load_magnitude,
+                        "equilibrium_residual_norm_n": physical_residual_norm,
+                        "optimizer_fun_matches_residual_norm": objective_matches_physics,
+                        "relative_equilibrium_residual": relative,
+                        "acceptance_threshold": cls.PLAIN_EQUILIBRIUM_RELATIVE_RESIDUAL_MAX,
+                        "threshold_source": cls.PLAIN_EQUILIBRIUM_THRESHOLD_RATIONALE,
+                        "status": "PASS",
+                    },
                     "status": "PASS",
                 }
             )
@@ -572,7 +689,8 @@ class THDBearingStudioService:
                 "initial_guess": initial_guess.tolist(),
                 "diagnostics": diagnostics,
                 "convergence": convergence_evidence,
-                "property_backend": self._property_backend(lubricant, thermal=True),
+                "property_backend": self._property_backend(lubricant, thermal=True, element=element),
+                "scientific_model_classification": "THERMO-HYDRO-DYNAMIC (THD)",
             },
             ops,
             "Native ROSS 2.3 PlainJournal THD/Reynolds solution; solved K/C is cached as BearingElement for rotor execution.",
@@ -740,7 +858,8 @@ class THDBearingStudioService:
                 "hot_oil_carry_over": hot_oil_carry_over,
                 "diagnostics": diagnostics,
                 "convergence": convergence_evidence,
-                "property_backend": self._property_backend(lubricant, thermal=True),
+                "property_backend": self._property_backend(lubricant, thermal=True, element=element),
+                "scientific_model_classification": "THERMO-HYDRO-DYNAMIC (THD)",
             },
             ops,
             "Native ROSS 2.3 TiltingPad THD solution; solved K/C is cached as BearingElement for rotor execution.",
@@ -800,7 +919,8 @@ class THDBearingStudioService:
                     "status": "NOT APPLICABLE",
                     "reason": "ROSS 2.3 SqueezeFilmDamper is an analytical hydrodynamic short-bearing formulation.",
                 },
-                "property_backend": self._property_backend(lubricant, thermal=False),
+                "property_backend": self._property_backend(lubricant, thermal=False, element=element),
+                "scientific_model_classification": "HYDRODYNAMIC ANALYTICAL MODEL — NOT THERMAL THD",
             },
             ops,
             "Native ROSS 2.3 SqueezeFilmDamper solution; solved K/C is cached as BearingElement for rotor execution.",

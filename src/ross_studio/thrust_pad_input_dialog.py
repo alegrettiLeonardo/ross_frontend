@@ -35,8 +35,8 @@ FIELDS = [
     ("radial_inclination_angle_mrad", "Initial radial inclination (mrad)", -0.275),
     ("circumferential_inclination_angle_mrad", "Initial circumferential inclination (mrad)", -0.017),
     ("initial_film_thickness_um", "Initial pivot film thickness (µm)", 200.0),
-    ("tolerance_force_moment_n", "Force / moment convergence tolerance (N)", 0.1),
-    ("residual_force_moment_n", "Initial residual force / moment (N)", 50.0),
+    ("tolerance_force_moment_n", "Native force/moment objective tolerance (ROSS 2.3 scalar)", 0.1),
+    ("residual_force_moment_n", "Initial native force/moment objective (ROSS 2.3 scalar)", 50.0),
 ]
 
 

@@ -216,7 +216,7 @@ class ThrustPadStudioService:
         return element, diagnostics
 
     @staticmethod
-    def _property_backend(lubricant: str) -> dict[str, Any]:
+    def _property_backend(lubricant: str, element: Any) -> dict[str, Any]:
         from ross.bearings.lubricants import lubricants_dict
 
         if lubricant not in lubricants_dict:
@@ -241,18 +241,36 @@ class ThrustPadStudioService:
                 selected[key] = float(value)
             except (TypeError, ValueError):
                 selected[key] = str(value)
+        native_effective: dict[str, object] = {}
+        for key in ("rho", "reference_viscosity", "cp", "kt", "reference_temperature", "oil_supply_temperature"):
+            if not hasattr(element, key):
+                continue
+            value = getattr(element, key)
+            try:
+                native_effective[key] = float(value)
+            except (TypeError, ValueError):
+                native_effective[key] = str(value)
         return {
             "requested_lubricant": lubricant,
             "configured_backend": "ROSS lubricants_dict",
             "effective_backend": "ross.bearings.lubricants.lubricants_dict",
             "ccp_refprop_heos_applicable": False,
             "temperature_dependent_properties_used": True,
-            "properties": selected,
+            "database_properties": selected,
+            "native_effective_values": native_effective,
             "status": "NATIVE_ROSS_PROPERTY_MODEL",
         }
 
     @staticmethod
     def _convergence_evidence(element: Any, tolerance: float) -> list[dict[str, object]]:
+        """Validate the explicit ROSS 2.3 ThrustPad outer equilibrium criterion.
+
+        The upstream loop terminates only when its combined force/moment objective is
+        below tolerance_force_moment. ROSS retains that scalar history but does not
+        retain the final individual moment-x, moment-y and axial-force residual
+        components as public/result attributes. Those components are therefore
+        reported as unavailable rather than reconstructed or invented.
+        """
         histories = getattr(getattr(element, "_results", None), "optimization_history", {})
         frequencies = np.asarray(element.frequency, dtype=float).reshape(-1)
         evidence: list[dict[str, object]] = []
@@ -264,20 +282,31 @@ class ThrustPadStudioService:
                     f"ThrustPad did not retain a finite force/moment residual history at speed index {index}; result rejected."
                 )
             residual = finite[-1]
-            if not np.isfinite(residual) or residual > tolerance * (1.0 + 1.0e-12):
+            converged = bool(np.isfinite(residual) and residual < tolerance)
+            if not converged:
                 raise EngineeringError(
-                    f"ThrustPad returned with final force/moment residual={residual:.6e}; "
-                    f"expected <= requested tolerance={tolerance:.6e}. Result rejected."
+                    f"ThrustPad returned with final native combined force/moment objective={residual:.6e}; "
+                    f"expected < requested tolerance={tolerance:.6e} per ROSS 2.3 run_thermo_hydro_dynamic. "
+                    "Axial THD solution rejected."
                 )
             evidence.append(
                 {
                     "omega_rad_s": float(omega),
                     "requested_tolerance": float(tolerance),
-                    "final_residual": residual,
+                    "native_combined_force_moment_objective": residual,
+                    "objective_definition": (
+                        "calculate mode: norm([moment_x, moment_y, axial_force_residual]); "
+                        "imposed mode: norm([moment_x, moment_y])"
+                    ),
+                    "individual_axial_force_residual_n": None,
+                    "individual_moment_residual_x_n_m": None,
+                    "individual_moment_residual_y_n_m": None,
+                    "component_availability": "Not retained separately by ROSS 2.3 ThrustPad results.",
                     "recorded_outer_iterations": len(finite),
+                    "history": finite,
                     "max_iterations": None,
                     "max_iterations_contract": "ROSS 2.3 ThrustPad outer force/moment loop exposes no max-iteration parameter.",
-                    "success": True,
+                    "convergence_state": "PASS",
                     "status": "PASS",
                 }
             )
@@ -448,7 +477,8 @@ class ThrustPadStudioService:
             "solved_axial_kc_cache": 1,
             "diagnostics": diagnostics,
             "convergence": convergence_evidence,
-            "property_backend": self._property_backend(lubricant),
+            "property_backend": self._property_backend(lubricant, element),
+            "scientific_model_classification": "AXIAL THERMO-HYDRO-DYNAMIC (THD)",
             "axial_coefficients": [
                 {"rpm": p.rpm, "kzz": p.kzz, "czz": p.czz} for p in axial_points
             ],

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+import inspect
 import json
 from math import pi
 from pathlib import Path
@@ -392,59 +393,124 @@ def _parity(rs, model: str, studio, independent, speeds: list[float]) -> tuple[l
 
 
 def _unit_binding(model: str, inputs: Mapping[str, Any], native) -> list[dict[str, object]]:
+    """Audit values sent from real GUI engineering units to the native ROSS object."""
     rows: list[dict[str, object]] = []
 
-    def add(name: str, gui: float, unit: str, si: float, native_value: float, native_unit: str) -> None:
+    def add(
+        quantity: str,
+        gui_value: float,
+        gui_unit: str,
+        expected_native_value: float,
+        native_value: float,
+        native_unit: str,
+        *,
+        conversion: str,
+        si_audit_value: float | None = None,
+        atol: float = 1.0e-12,
+    ) -> None:
+        expected = float(expected_native_value)
+        actual = float(native_value)
         rows.append(
             {
-                "quantity": name,
-                "gui_value": float(gui),
-                "gui_unit": unit,
-                "converted_si_value": float(si),
-                "native_value": float(native_value),
+                "quantity": quantity,
+                "gui_value": float(gui_value),
+                "gui_unit": gui_unit,
+                "conversion": conversion,
+                "expected_native_value": expected,
+                "native_value": actual,
                 "native_unit": native_unit,
-                "pass": bool(np.isclose(float(si), float(native_value)) if native_unit == "SI" else True),
+                "si_audit_value": None if si_audit_value is None else float(si_audit_value),
+                "absolute_error": abs(actual - expected),
+                "pass": bool(np.isclose(actual, expected, rtol=1.0e-12, atol=atol)),
             }
         )
 
     if model in LATERAL_MODELS:
         add(
-            "journal_diameter_to_radius",
+            "journal_diameter_to_native_radius",
             inputs["journal_diameter_mm"],
             "mm diameter",
             float(inputs["journal_diameter_mm"]) / 2000.0,
-            float(native.journal_radius),
-            "SI",
+            native.journal_radius,
+            "m radius",
+            conversion="diameter_mm / 2000",
         )
         add(
             "radial_clearance",
             inputs["radial_clearance_um"],
             "um",
             float(inputs["radial_clearance_um"]) * 1.0e-6,
-            float(native.radial_clearance),
-            "SI",
+            native.radial_clearance,
+            "m",
+            conversion="um * 1e-6",
         )
         omega = np.asarray(native.frequency, dtype=float).reshape(-1)
         for rpm, actual in zip(inputs["speed_rpm"], omega):
-            add("speed", rpm, "rpm", float(rpm) * 2.0 * pi / 60.0, actual, "SI")
+            add(
+                "speed",
+                rpm,
+                "rpm",
+                float(rpm) * 2.0 * pi / 60.0,
+                actual,
+                "rad/s",
+                conversion="rpm * 2*pi/60",
+            )
+
         if model == "PlainJournal":
-            add("axial_length", inputs["axial_length_mm"], "mm", float(inputs["axial_length_mm"]) / 1000.0, native.axial_length, "SI")
-            add("reference_temperature", inputs["reference_temperature_c"], "degC", float(inputs["reference_temperature_c"]) + 273.15, native.reference_temperature, "degC native contract")
-            add("oil_supply_pressure", inputs["oil_supply_pressure_bar"], "bar", float(inputs["oil_supply_pressure_bar"]) * 1.0e5, native.oil_supply_pressure, "SI")
+            add("axial_length", inputs["axial_length_mm"], "mm", float(inputs["axial_length_mm"]) / 1000.0, native.axial_length, "m", conversion="mm / 1000")
+            add(
+                "reference_temperature",
+                inputs["reference_temperature_c"],
+                "degC",
+                float(inputs["reference_temperature_c"]),
+                native.reference_temperature,
+                "degC native ROSS contract",
+                conversion="degC retained by ROSS constructor; SI audit K = degC + 273.15",
+                si_audit_value=float(inputs["reference_temperature_c"]) + 273.15,
+            )
+            add("load_x", inputs["fxs_load_n"], "N", float(inputs["fxs_load_n"]), native.fxs_load, "N", conversion="identity")
+            add("load_y", inputs["fys_load_n"], "N", float(inputs["fys_load_n"]), native.fys_load, "N", conversion="identity")
+            add("oil_supply_pressure", inputs["oil_supply_pressure_bar"], "bar", float(inputs["oil_supply_pressure_bar"]) * 1.0e5, native.oil_supply_pressure, "Pa", conversion="bar * 1e5")
+            add("preload", inputs["preload"], "1", float(inputs["preload"]), native.preload, "1", conversion="identity")
         elif model == "TiltingPad":
-            add("pad_thickness", inputs["pad_thickness_mm"], "mm", float(inputs["pad_thickness_mm"]) / 1000.0, native.pad_thickness, "SI")
-            add("oil_supply_temperature", inputs["oil_supply_temperature_c"], "degC", float(inputs["oil_supply_temperature_c"]) + 273.15, native.oil_supply_temperature, "degC native contract")
+            add("pad_thickness", inputs["pad_thickness_mm"], "mm", float(inputs["pad_thickness_mm"]) / 1000.0, native.pad_thickness, "m", conversion="mm / 1000")
+            add(
+                "oil_supply_temperature",
+                inputs["oil_supply_temperature_c"],
+                "degC",
+                float(inputs["oil_supply_temperature_c"]),
+                native.oil_supply_temperature,
+                "degC native ROSS contract",
+                conversion="degC retained internally after Pint conversion; SI audit K = degC + 273.15",
+                si_audit_value=float(inputs["oil_supply_temperature_c"]) + 273.15,
+            )
+            add("load_x", inputs["fxs_load_n"], "N", float(inputs["fxs_load_n"]), native.fxs_load, "N", conversion="identity")
+            add("load_y", inputs["fys_load_n"], "N", float(inputs["fys_load_n"]), native.fys_load, "N", conversion="identity")
+            add("preload", inputs["preload"], "1", float(inputs["preload"]), 1.0 - native.radial_clearance / (native.pad_radius - native.journal_radius), "1", conversion="identity through pad-radius geometry", atol=1.0e-10)
+            add("eccentricity_ratio", inputs["eccentricity_ratio"], "1", float(inputs["eccentricity_ratio"]), native.eccentricity, "1", conversion="identity")
         else:
-            add("axial_length", inputs["axial_length_mm"], "mm", float(inputs["axial_length_mm"]) / 1000.0, native.axial_length, "SI")
+            add("axial_length", inputs["axial_length_mm"], "mm", float(inputs["axial_length_mm"]) / 1000.0, native.axial_length, "m", conversion="mm / 1000")
+            add("eccentricity_ratio", inputs["eccentricity_ratio"], "1", float(inputs["eccentricity_ratio"]), native.eccentricity_ratio, "1", conversion="identity")
     else:
-        add("pad_inner_radius", inputs["pad_inner_radius_mm"], "mm", float(inputs["pad_inner_radius_mm"]) / 1000.0, native.pad_inner_radius, "SI")
-        add("pad_outer_radius", inputs["pad_outer_radius_mm"], "mm", float(inputs["pad_outer_radius_mm"]) / 1000.0, native.pad_outer_radius, "SI")
-        add("pad_pivot_radius", inputs["pad_pivot_radius_mm"], "mm", float(inputs["pad_pivot_radius_mm"]) / 1000.0, native.pad_pivot_radius, "SI")
-        add("initial_film_thickness", inputs["initial_film_thickness_um"], "um", float(inputs["initial_film_thickness_um"]) * 1.0e-6, native.initial_film_thickness, "SI")
+        add("pad_inner_radius", inputs["pad_inner_radius_mm"], "mm", float(inputs["pad_inner_radius_mm"]) / 1000.0, native.pad_inner_radius, "m", conversion="mm / 1000")
+        add("pad_outer_radius", inputs["pad_outer_radius_mm"], "mm", float(inputs["pad_outer_radius_mm"]) / 1000.0, native.pad_outer_radius, "m", conversion="mm / 1000")
+        add("pad_pivot_radius", inputs["pad_pivot_radius_mm"], "mm", float(inputs["pad_pivot_radius_mm"]) / 1000.0, native.pad_pivot_radius, "m", conversion="mm / 1000")
+        add("initial_film_thickness", inputs["initial_film_thickness_um"], "um", float(inputs["initial_film_thickness_um"]) * 1.0e-6, native.initial_film_thickness, "m", conversion="um * 1e-6")
         omega = np.asarray(native.frequency, dtype=float).reshape(-1)
         for rpm, actual in zip(inputs["speed_rpm"], omega):
-            add("speed", rpm, "rpm", float(rpm) * 2.0 * pi / 60.0, actual, "SI")
-        add("oil_supply_temperature", inputs["oil_supply_temperature_c"], "degC", float(inputs["oil_supply_temperature_c"]) + 273.15, native.oil_supply_temperature, "degC native contract")
+            add("speed", rpm, "rpm", float(rpm) * 2.0 * pi / 60.0, actual, "rad/s", conversion="rpm * 2*pi/60")
+        add(
+            "oil_supply_temperature",
+            inputs["oil_supply_temperature_c"],
+            "degC",
+            float(inputs["oil_supply_temperature_c"]),
+            native.oil_supply_temperature,
+            "degC native ROSS contract",
+            conversion="degC retained internally after Pint conversion; SI audit K = degC + 273.15",
+            si_audit_value=float(inputs["oil_supply_temperature_c"]) + 273.15,
+        )
+        add("axial_load", inputs["axial_load_n"], "N", float(inputs["axial_load_n"]), native.axial_load, "N", conversion="identity")
+
     return rows
 
 
@@ -656,6 +722,8 @@ def _qualify_one(rs, model: str, *, frozen_mode: bool) -> dict[str, object]:
     app.processEvents()
 
     gui_inputs = _set_gui_inputs(window, model, INPUTS[model])
+    gui_model_description = window.bearing_page.input_panel.description.text()
+    gui_editor_note = window.bearing_page.editor_note.text()
     project_before = deepcopy(window.project.engineering)
     window.bearing_page.calculate_button.click()
     app.processEvents()
@@ -727,6 +795,7 @@ def _qualify_one(rs, model: str, *, frozen_mode: bool) -> dict[str, object]:
 
     convergence = deepcopy(final_result.metadata.get("convergence"))
     backend = deepcopy(final_result.metadata.get("property_backend"))
+    scientific_classification = final_result.metadata.get("scientific_model_classification")
     diagnostics = deepcopy(final_result.metadata.get("diagnostics", []))
     warning_classes = {
         "INFORMATIONAL": sum(1 for x in diagnostics if x.get("classification") == "INFORMATIONAL"),
@@ -779,8 +848,31 @@ def _qualify_one(rs, model: str, *, frozen_mode: bool) -> dict[str, object]:
         "stale_analysis_async_race": bool(stale_analysis["pass"]),
         "controlled_physical_or_thermal_sensitivity": bool(variation["pass"]),
         "no_scientific_failure_warning": warning_classes["SCIENTIFIC FAILURE"] == 0,
-        "property_backend_visible": bool(backend and backend.get("effective_backend")),
+        "property_backend_visible": bool(
+            backend
+            and backend.get("effective_backend") == "ross.bearings.lubricants.lubricants_dict"
+            and backend.get("ccp_refprop_heos_applicable") is False
+            and bool(backend.get("native_effective_values"))
+        ),
+        "scientific_model_classification": bool(
+            scientific_classification
+            == {
+                "PlainJournal": "THERMO-HYDRO-DYNAMIC (THD)",
+                "TiltingPad": "THERMO-HYDRO-DYNAMIC (THD)",
+                "SqueezeFilmDamper": "HYDRODYNAMIC ANALYTICAL MODEL — NOT THERMAL THD",
+                "ThrustPad": "AXIAL THERMO-HYDRO-DYNAMIC (THD)",
+            }[model]
+        ),
     }
+    if model == "SqueezeFilmDamper":
+        gates["sfd_gui_semantic_not_false_thd"] = bool(
+            "hydrodynamic" in gui_model_description.casefold()
+            and "not" in gui_model_description.casefold()
+            and "thd" in gui_model_description.casefold()
+            and "hydrodynamic" in gui_editor_note.casefold()
+            and "not" in gui_editor_note.casefold()
+            and "thd" in gui_editor_note.casefold()
+        )
     if axial_contract is not None:
         gates["axial_not_lateralized"] = bool(axial_contract["pass"])
 
@@ -801,6 +893,9 @@ def _qualify_one(rs, model: str, *, frozen_mode: bool) -> dict[str, object]:
         "diagnostics": diagnostics,
         "warning_classification": warning_classes,
         "property_backend": backend,
+        "scientific_model_classification": scientific_classification,
+        "gui_model_description": gui_model_description,
+        "gui_editor_note": gui_editor_note,
         "rotor_node": node_evidence,
         "global_matrix_deltas": matrix,
         "solver": solver,
@@ -810,6 +905,106 @@ def _qualify_one(rs, model: str, *, frozen_mode: bool) -> dict[str, object]:
         "stale_analysis": stale_analysis,
         "controlled_variation": variation,
         "axial_contract": axial_contract,
+    }
+
+
+def _plain_historical_failure_regression(rs) -> dict[str, object]:
+    """Reproduce the d40b485 failure case with corrected semantics.
+
+    Historical source run 35336650952 observed, at 1000 rpm:
+    success=True, fun=1.271480 N, nit=30, load=112814.91 N. The previous
+    validator incorrectly compared fun with scipy tol=0.8. The corrected
+    contract must accept solver termination independently and then apply the
+    fixed 1e-3 relative physical-equilibrium criterion.
+    """
+    window = RossStudioWindow()
+    project = deepcopy(window.project.engineering)
+    window.close()
+    values = deepcopy(INPUTS["PlainJournal"])
+    values["speed_rpm"] = [900.0, 1000.0]
+    values["sommerfeld_type"] = "1"
+    result = THDBearingStudioService(rs).calculate(project, 0, "PlainJournal", values)
+    evidence = result.metadata["convergence"][1]
+    solver = evidence["solver_termination"]
+    physical = evidence["physical_equilibrium"]
+    historical_fun_match = bool(np.isclose(solver["final_objective_fun_n"], 1.271480, rtol=5.0e-4, atol=5.0e-4))
+    historical_nit_match = solver["iterations"] == 30
+    load_match = bool(np.isclose(physical["load_magnitude_n"], 112814.91, rtol=0.0, atol=1.0e-6))
+    semantic_separation = bool(
+        solver["termination_tolerance"] == 0.8
+        and solver["final_objective_fun_n"] > solver["termination_tolerance"]
+        and solver["status"] == "PASS"
+        and physical["status"] == "PASS"
+        and physical["relative_equilibrium_residual"] <= physical["acceptance_threshold"]
+    )
+    return {
+        "historical_failed_sha": "d40b485742190559601df83697b35d619168f0aa",
+        "historical_source_run": 35336650952,
+        "historical_source_job": 105572921577,
+        "expected_historical_case": {
+            "success": True,
+            "final_objective_fun_n": 1.271480,
+            "iterations": 30,
+            "load_magnitude_n": 112814.91,
+        },
+        "measured_solver_termination": solver,
+        "measured_physical_equilibrium": physical,
+        "historical_fun_match": historical_fun_match,
+        "historical_iterations_match": historical_nit_match,
+        "historical_load_match": load_match,
+        "tol_not_used_as_force_limit": semantic_separation,
+        "pass": bool(historical_fun_match and historical_nit_match and load_match and semantic_separation),
+    }
+
+
+def _plain_deliberate_physical_rejection(rs) -> dict[str, object]:
+    """Use a real native solve whose termination can succeed but physical balance is unacceptable."""
+    values = deepcopy(INPUTS["PlainJournal"])
+    values.update(
+        {
+            "speed_rpm": [1000.0],
+            "sommerfeld_type": "1",
+            "fxs_load_n": 0.0,
+            "fys_load_n": -1.0,
+        }
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        native = _manual_native(rs, "PlainJournal", values)
+    omega = float(np.asarray(native.frequency, dtype=float).reshape(-1)[0])
+    opt = native._opt_results[omega]
+    native_terminated = bool(
+        opt.success
+        and np.isfinite(float(opt.fun))
+        and hasattr(opt, "nit")
+        and np.isfinite(float(opt.nit))
+    )
+    rejected = False
+    message = ""
+    try:
+        THDBearingStudioService._plain_convergence(native)
+    except EngineeringError as exc:
+        message = str(exc)
+        rejected = (
+            "solver terminated successfully but physical equilibrium is rejected" in message.casefold()
+            and "relative_residual" in message
+            and "acceptance_threshold" in message
+        )
+    return {
+        "native_case": values,
+        "native_solver_success": bool(opt.success),
+        "native_solver_message": str(opt.message),
+        "native_solver_iterations": int(opt.nit),
+        "native_final_objective_fun_n": float(opt.fun),
+        "native_solver_returned_and_terminated": native_terminated,
+        "production_validator_rejected": bool(rejected),
+        "preview_ready": False,
+        "apply_enabled": False,
+        "message": message,
+        "warnings": [str(item.message) for item in caught],
+        "acceptance_threshold": THDBearingStudioService.PLAIN_EQUILIBRIUM_RELATIVE_RESIDUAL_MAX,
+        "threshold_source": THDBearingStudioService.PLAIN_EQUILIBRIUM_THRESHOLD_RATIONALE,
+        "pass": bool(native_terminated and rejected),
     }
 
 
@@ -852,6 +1047,50 @@ def _tilting_nonconvergence_regression(rs) -> dict[str, object]:
     }
 
 
+def _ross_230_api_inventory(rs) -> dict[str, object]:
+    return {
+        "PlainJournal": {
+            "class": f"{rs.PlainJournal.__module__}.{rs.PlainJournal.__name__}",
+            "signature": str(inspect.signature(rs.PlainJournal)),
+            "scientific_classification": "THERMO-HYDRO-DYNAMIC (THD)",
+            "solver": "scipy.optimize.minimize(method='Nelder-Mead', tol=0.8, maxiter=1e10) for equilibrium; thermal Reynolds/energy solution inside _forces",
+            "objective": "sqrt((fxs_load + Fhx)^2 + (fys_load + Fhy)^2), N",
+            "dynamic_coefficients": list(LATERAL_COEFFS),
+            "speed_dependent": True,
+            "thermal_dependency": "temperature-dependent viscosity from ross.bearings.lubricants.lubricants_dict participates in the coupled thermal solution",
+        },
+        "TiltingPad": {
+            "class": f"{rs.TiltingPad.__module__}.{rs.TiltingPad.__name__}",
+            "signature": str(inspect.signature(rs.TiltingPad)),
+            "scientific_classification": "THERMO-HYDRO-DYNAMIC (THD)",
+            "solver": "native ROSS equilibrium fmin plus Reynolds/energy thermal loops; solver_options, inlet/journal thermal controls are native 2.3.0 inputs",
+            "optimizer_diagnostics_limit": "ROSS 2.3 does not retain scipy.fmin warnflag or final optimizer iteration count in results",
+            "dynamic_coefficients": list(LATERAL_COEFFS),
+            "speed_dependent": True,
+            "thermal_dependency": "oil supply/journal temperatures and temperature-dependent viscosity enter the native thermal solution",
+        },
+        "SqueezeFilmDamper": {
+            "class": f"{rs.SqueezeFilmDamper.__module__}.{rs.SqueezeFilmDamper.__name__}",
+            "signature": str(inspect.signature(rs.SqueezeFilmDamper)),
+            "scientific_classification": "HYDRODYNAMIC ANALYTICAL MODEL — NOT THERMAL THD",
+            "solver": "analytical hydrodynamic short-bearing formulation; no iterative thermal convergence loop",
+            "dynamic_coefficients": list(LATERAL_COEFFS),
+            "speed_dependent": True,
+            "thermal_dependency": "none claimed; ROSS 2.3 uses database liquid_viscosity1 directly",
+        },
+        "ThrustPad": {
+            "class": f"{rs.ThrustPad.__module__}.{rs.ThrustPad.__name__}",
+            "signature": str(inspect.signature(rs.ThrustPad)),
+            "scientific_classification": "AXIAL THERMO-HYDRO-DYNAMIC (THD)",
+            "solver": "native outer force/moment equilibrium loop plus pressure/temperature/viscosity coupling",
+            "objective": "calculate mode norm([moment_x, moment_y, axial_force_residual]); imposed mode norm([moment_x, moment_y])",
+            "dynamic_coefficients": ["kzz", "czz"],
+            "speed_dependent": True,
+            "thermal_dependency": "temperature-dependent viscosity and energy solution participate in the native axial THD solve",
+        },
+    }
+
+
 def _input_validation(rs) -> dict[str, object]:
     window = RossStudioWindow()
     project = deepcopy(window.project.engineering)
@@ -873,11 +1112,23 @@ def _input_validation(rs) -> dict[str, object]:
             service.calculate(deepcopy(project), 0, model, values)
         except EngineeringError as exc:
             message = str(exc)
+            has_received = "received" in message.casefold() or any(str(v) in message for v in patch.values())
+            has_expected = any(token in message.casefold() for token in ("must", "expected", "positive", "finite", "increasing", "> 0"))
+            has_reason = any(
+                token in message.casefold()
+                for token in ("nonphysical", "undefined", "ambiguous", "optimizer", "thermal", "equations", "interpolation")
+            )
+            has_correction = any(
+                token in message.casefold()
+                for token in ("enter", "correct", "increase", "choose", "recalculate", "use ")
+            )
             results[label] = {
-                "pass": True,
+                "pass": bool(has_received and has_expected and has_reason and has_correction),
                 "message": message,
-                "has_received_or_value": "received" in message.casefold() or any(str(v) in message for v in patch.values()),
-                "has_expected_condition": any(token in message.casefold() for token in ("must", "expected", "positive", "finite", "increasing", "> 0")),
+                "has_received_value": has_received,
+                "has_expected_condition": has_expected,
+                "has_reason": has_reason,
+                "has_corrective_action": has_correction,
             }
         else:
             results[label] = {"pass": False, "message": "unexpectedly accepted"}
@@ -895,16 +1146,20 @@ def run_thd_bearings_027_qualification(*, frozen_mode: bool = False) -> THDBeari
     for model in ALL_MODELS:
         ledgers[model] = _qualify_one(rs, model, frozen_mode=frozen_mode)
 
+    plain_historical = _plain_historical_failure_regression(rs)
+    plain_rejection = _plain_deliberate_physical_rejection(rs)
     nonconvergence = _tilting_nonconvergence_regression(rs)
     validation = _input_validation(rs)
     matrix = {
-        "PLAIN JOURNAL": ledgers["PlainJournal"]["status"],
-        "TILTING PAD": ledgers["TiltingPad"]["status"],
-        "SQUEEZE FILM DAMPER": ledgers["SqueezeFilmDamper"]["status"],
-        "THRUST PAD (AXIAL)": ledgers["ThrustPad"]["status"],
+        "PLAIN JOURNAL — THD": ledgers["PlainJournal"]["status"],
+        "TILTING PAD — THD": ledgers["TiltingPad"]["status"],
+        "SQUEEZE FILM DAMPER — HD ANALYTICAL": ledgers["SqueezeFilmDamper"]["status"],
+        "THRUST PAD — AXIAL THD": ledgers["ThrustPad"]["status"],
     }
     release_pass = bool(
         all(status == "PASS" for status in matrix.values())
+        and plain_historical["pass"]
+        and plain_rejection["pass"]
         and nonconvergence["pass"]
         and validation["pass"]
     )
@@ -919,13 +1174,24 @@ def run_thd_bearings_027_qualification(*, frozen_mode: bool = False) -> THDBeari
             "tables for rotor execution without re-solving fields."
         ),
         "scope_notes": [
-            "SqueezeFilmDamper is classified as an analytical hydrodynamic model; no thermal field is claimed.",
+            "PlainJournal solver termination and physical equilibrium are separate gates. scipy tol=0.8 is recorded only as a Nelder-Mead termination tolerance; physical acceptance uses the predeclared <=1e-3 resultant-force-imbalance/load criterion.",
+            "SqueezeFilmDamper is classified as an analytical hydrodynamic model (HD); no thermal THD field or thermal coupling is claimed.",
             "TiltingPad ROSS 2.3 does not retain scipy.fmin warnflag/iteration count. Native thermal nonconvergence warnings are fail-closed; finite objective history is reported without fabricating a success flag.",
             "ThrustPad remains axial-only; Kzz/Czz are never mapped into lateral K/C.",
             "Lubricant properties come from ross.bearings.lubricants.lubricants_dict; ccp/REFPROP/HEOS is not used by these bearing models.",
         ],
         "qualification_matrix": matrix,
+        "ross_230_api_inventory": _ross_230_api_inventory(rs),
+        "plain_journal_physical_acceptance_contract": {
+            "metric_definition": "||[Fx_applied + Fhx_hydrodynamic, Fy_applied + Fhy_hydrodynamic]|| / ||[Fx_applied, Fy_applied]||",
+            "acceptance_threshold": THDBearingStudioService.PLAIN_EQUILIBRIUM_RELATIVE_RESIDUAL_MAX,
+            "threshold_source": THDBearingStudioService.PLAIN_EQUILIBRIUM_THRESHOLD_RATIONALE,
+            "solver_termination_tolerance": THDBearingStudioService.PLAIN_SOLVER_TERMINATION_TOLERANCE,
+            "solver_termination_tolerance_semantics": "Nelder-Mead solver termination only; never compared directly to force residual in N",
+        },
         "models": ledgers,
+        "plain_journal_historical_failure_regression": plain_historical,
+        "plain_journal_deliberate_physical_rejection": plain_rejection,
         "tilting_pad_intentional_nonconvergence": nonconvergence,
         "input_validation": validation,
         "unit_contract": {

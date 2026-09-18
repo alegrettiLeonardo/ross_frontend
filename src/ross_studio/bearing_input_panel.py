@@ -197,8 +197,9 @@ class BearingInputPanel(QWidget):
                 "and discretization are edited directly in this workspace."
             ),
             "SqueezeFilmDamper": (
-                "Native ROSS squeeze-film-damper input. Geometry and cavitation settings are edited here; "
-                "the solved K/C and available fields are displayed in Results below."
+                "Native ROSS 2.3 analytical hydrodynamic squeeze-film-damper input. This model is HD, not a "
+                "thermally coupled THD solution. Geometry and cavitation settings are edited here; solved K/C "
+                "is displayed in Results below."
             ),
             "ThrustPad": (
                 "Axial-only ROSS ThrustPad input. The selected radial bearing is a placement anchor only; "

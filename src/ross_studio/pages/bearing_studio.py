@@ -162,7 +162,10 @@ class BearingStudioPage(QWidget):
             button.setCheckable(True)
             button.setIcon(engineering_icon(icon, 42))
             button.setIconSize(QSize(42, 42))
-            button.setToolTip(f"{group.value} · ROSS {ross_class}")
+            if ross_class == "SqueezeFilmDamper":
+                button.setToolTip("Fluid-film · ROSS SqueezeFilmDamper · hydrodynamic analytical (not thermal THD)")
+            else:
+                button.setToolTip(f"{group.value} · ROSS {ross_class}")
             button.clicked.connect(lambda checked=False, k=key: self._select_type(k))
             self.type_buttons[key] = button
             self.type_metadata[key] = (text, ross_class, group)
@@ -327,9 +330,14 @@ class BearingStudioPage(QWidget):
                 f"Target station: {station_name}. ThrustPad is axial-only. Apply adds/updates an independent Kzz/Czz "
                 "BearingElement at this shaft station and never overwrites the existing radial K/C or lateral n_link."
             )
+        elif ross_class == "SqueezeFilmDamper":
+            self.editor_note.setText(
+                f"Target station: {station_name}. ROSS 2.3 SqueezeFilmDamper is an analytical hydrodynamic (HD) "
+                "fluid-film model, not a thermal THD solve. Apply commits its solved K/C table to the selected radial bearing."
+            )
         elif group == BearingGroup.THD:
             self.editor_note.setText(
-                f"Target station: {station_name}. Lateral THD retains native fields and solved K/C speed stations. "
+                f"Target station: {station_name}. Native thermo-hydrodynamic solution retains available fields and solved K/C speed stations. "
                 "Apply commits the solved BearingElement table only to the selected radial bearing."
             )
         else:

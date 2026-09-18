@@ -139,5 +139,29 @@ class THDResultTab(QWidget):
             self._rows(["rpm", "Eccentricity ratio (1)", "Attitude (deg)"], [[f"{p.rpm:g}", shown(p.eccentricity_ratio), shown(p.attitude_angle_rad, 180/np.pi)] for p in self.result.operating_points])
         else:
             info = convergence(self.result, index)
-            self.summary.setText(prefix + f"Optimizer iterations: {info['iterations'] if info['iterations'] is not None else UNAVAILABLE}; recorded evaluations: {info['samples']}; final residual: {shown(info['residual_final'])}. {info['residual_contract']}. {info['message']}")
-            self._rows(["Recorded evaluation", "Native residual"], [[i, shown(v)] for i,v in enumerate(info['history'])])
+            if self.result.source_model == "PlainJournal":
+                self.summary.setText(
+                    prefix
+                    + f"Solver termination: success={info['success']}; iterations={info['iterations']}; "
+                    + f"final objective={shown(info['solver_final_objective_n'])} N; "
+                    + f"termination tol={shown(info['solver_termination_tolerance'])} ({info['solver_tolerance_semantics']}). "
+                    + f"Physical equilibrium: residual norm={shown(info['physical_residual_norm_n'])} N; "
+                    + f"relative residual={shown(info['physical_relative_residual'])}; "
+                    + f"acceptance <= {shown(info['physical_acceptance_threshold'])}; status={info['physical_status']}."
+                )
+            elif self.result.source_model == "ThrustPad":
+                self.summary.setText(
+                    prefix
+                    + f"Outer equilibrium iterations recorded={info['iterations']}; "
+                    + f"combined native force/moment objective={shown(info['physical_residual_norm_n'])}; "
+                    + f"requested criterion < {shown(info['physical_acceptance_threshold'])}; status={info['physical_status']}. "
+                    + f"{info['message']}"
+                )
+            else:
+                self.summary.setText(
+                    prefix
+                    + f"Optimizer iterations: {info['iterations'] if info['iterations'] is not None else UNAVAILABLE}; "
+                    + f"recorded evaluations: {info['samples']}; final native objective: {shown(info['solver_final_objective_n'])}. "
+                    + f"{info['residual_contract']}. {info['message']}"
+                )
+            self._rows(["Recorded evaluation", "Native objective / residual"], [[i, shown(v)] for i,v in enumerate(info['history'])])
