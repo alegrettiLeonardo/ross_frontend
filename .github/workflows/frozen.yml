@@ -56,6 +56,8 @@ jobs:
         run: python tools/qualify_frozen_coupling_025.py dist artifacts/frozen_selftest_${{ runner.os }}_coupling_025.json
       - name: Qualify frozen native ROSS Seals 0.26 runtime
         run: python tools/qualify_frozen_seals_026.py dist artifacts/frozen_selftest_${{ runner.os }}_seals_026.json
+      - name: Qualify frozen native ROSS THD Bearings 0.27 runtime
+        run: python tools/qualify_frozen_thd_027.py dist artifacts/frozen_selftest_${{ runner.os }}_thd_027.json
       - name: Upload frozen executable and qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -75,4 +77,5 @@ jobs:
             artifacts/frozen_selftest_${{ runner.os }}_foundation_024.json
             artifacts/frozen_selftest_${{ runner.os }}_coupling_025.json
             artifacts/frozen_selftest_${{ runner.os }}_seals_026.json
+            artifacts/frozen_selftest_${{ runner.os }}_thd_027.json
           if-no-files-found: error

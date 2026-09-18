@@ -337,12 +337,15 @@ class BearingInputPanel(QWidget):
         lubrication = {
             "lubricant", "reference_temperature_c", "oil_supply_temperature_c",
             "oil_flow_l_min", "oil_supply_pressure_bar", "oil_viscosity_pa_s",
-            "operating_type", "thermal_type",
+            "operating_type", "thermal_type", "journal_temperature_c", "hot_oil_carry_over",
         }
         numerical = {
             "method", "sommerfeld_type", "equilibrium_type", "equilibrium_position_mode",
             "elements_circumferential", "elements_axial", "nx", "nz", "n_theta", "n_radial",
             "tolerance_force_moment_n", "residual_force_moment_n",
+            "solver_xtol", "solver_ftol", "solver_maxiter",
+            "inlet_temperature_tolerance_c", "max_inlet_iterations",
+            "max_jtemp_iter", "journal_temperature_tolerance_c",
         }
         if key in operation:
             return "Operation"

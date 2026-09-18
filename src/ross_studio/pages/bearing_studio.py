@@ -424,10 +424,19 @@ class BearingStudioPage(QWidget):
         rated = self.project.engineering.operating_cases[0].rated_speed_rpm
         for tab in self.result_tabs.values():
             tab.set_result(result, rated)
+        diagnostics = list(result.metadata.get("diagnostics", ()))
+        review = [item for item in diagnostics if item.get("classification") == "ENGINEERING REVIEW REQUIRED"]
+        diagnostic_note = (
+            " · ENGINEERING REVIEW REQUIRED: " + " | ".join(item.get("message", "") for item in review)
+            if review else ""
+        )
+        backend = result.metadata.get("property_backend", {})
+        backend_note = backend.get("effective_backend", "ROSS native")
         self.input_summary.setText(
             f"Preview for {self.bearing.name}: {result.source_model} → {result.application_class} · "
             f"ROSS {result.metadata['ross_api_contract']} · {len(result.coefficients)} solved stations · "
-            f"lubricant: {result.metadata['lubricant']}. Apply is required to commit this station."
+            f"lubricant: {result.metadata['lubricant']} · properties: {backend_note}{diagnostic_note}. "
+            "Apply is required to commit this station."
         )
         self.set_results_available(True)
 
@@ -460,11 +469,19 @@ class BearingStudioPage(QWidget):
             )
         self.kc_table.resizeColumnsToContents()
         self.chart_card.setVisible(False)
+        diagnostics = list(result.metadata.get("diagnostics", ()))
+        review = [item for item in diagnostics if item.get("classification") == "ENGINEERING REVIEW REQUIRED"]
+        diagnostic_note = (
+            " · ENGINEERING REVIEW REQUIRED: " + " | ".join(item.get("message", "") for item in review)
+            if review else ""
+        )
+        backend = result.metadata.get("property_backend", {})
+        backend_note = backend.get("effective_backend", "ROSS native")
         self.input_summary.setText(
             f"Preview for {self.bearing.name}: ThrustPad → BearingElement (axial-only) · "
             f"ROSS {result.metadata['ross_api_contract']} · {len(result.axial_coefficients)} solved Kzz/Czz station(s) · "
-            f"axial load: {result.metadata['axial_load_n']:.6g} N · lubricant: {result.metadata['lubricant']}. "
-            "The radial bearing remains separate after Apply."
+            f"axial load: {result.metadata['axial_load_n']:.6g} N · lubricant: {result.metadata['lubricant']} · "
+            f"properties: {backend_note}{diagnostic_note}. The radial bearing remains separate after Apply."
         )
         self.set_results_available(True)
 

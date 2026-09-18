@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 from dataclasses import dataclass, replace
 from importlib import import_module
+from io import StringIO
 from math import pi
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
+import warnings
 
 import numpy as np
 
@@ -70,7 +73,7 @@ class THDBearingStudioService:
     def _finite(value: Any, name: str) -> float:
         number = float(value)
         if not np.isfinite(number):
-            raise EngineeringError(f"{name} must be finite; received {value!r}.")
+            raise EngineeringError(f"{name} must be finite; received {value!r}. Non-finite THD input makes the physical equations undefined. Enter a finite engineering value and recalculate.")
         return number
 
     @classmethod
@@ -78,9 +81,9 @@ class THDBearingStudioService:
         number = cls._finite(value, name)
         if allow_zero:
             if number < 0.0:
-                raise EngineeringError(f"{name} must be non-negative; received {number:g}.")
+                raise EngineeringError(f"{name} must be non-negative; received {number:g}. Negative geometry/property values are nonphysical for this THD contract. Enter a value >= 0 and recalculate.")
         elif number <= 0.0:
-            raise EngineeringError(f"{name} must be positive; received {number:g}.")
+            raise EngineeringError(f"{name} must be positive; received {number:g}. Zero/negative geometry or property values are nonphysical and invalidate the fluid-film equations. Enter a value > 0 and recalculate.")
         return number
 
     @staticmethod
@@ -104,9 +107,9 @@ class THDBearingStudioService:
             values = np.linspace(low, high, count)
         speeds = np.asarray(values, dtype=float)
         if speeds.ndim != 1 or speeds.size < minimum_count or not np.all(np.isfinite(speeds)):
-            raise EngineeringError("THD speed vector must be a finite one-dimensional array.")
+            raise EngineeringError(f"THD speed vector must be a finite one-dimensional array with at least {minimum_count} point(s); received {values!r}. Non-finite/malformed speed grids cannot define the native frequency-dependent bearing. Enter finite rpm stations and recalculate.")
         if np.any(speeds <= 0.0) or (speeds.size > 1 and np.any(np.diff(speeds) <= 0.0)):
-            raise EngineeringError("THD speeds must be positive and strictly increasing.")
+            raise EngineeringError(f"THD speeds must be positive and strictly increasing; received {speeds.tolist()!r}. A nonmonotonic grid makes native interpolation ambiguous. Enter ordered positive rpm stations and recalculate.")
         return speeds
 
     def _matrix_kc(self, element: Any, omega: float) -> tuple[float, float, float, float, float, float, float, float]:
@@ -158,6 +161,197 @@ class THDBearingStudioService:
         except (IndexError, TypeError, ValueError):
             return None
         return float(value) if np.isfinite(value) else None
+
+    @staticmethod
+    def _diagnostic_classification(message: str) -> str:
+        lower = message.casefold()
+        scientific = (
+            "did not converge",
+            "maximum number of iterations",
+            "error in pressure calculation",
+            "invalid value encountered",
+            "non-finite",
+            "nan",
+        )
+        if any(token in lower for token in scientific):
+            return "SCIENTIFIC FAILURE"
+        review = (
+            "covariance of the parameters could not be estimated",
+            "ill-conditioned",
+            "poorly conditioned",
+        )
+        if any(token in lower for token in review):
+            return "ENGINEERING REVIEW REQUIRED"
+        return "INFORMATIONAL"
+
+    @classmethod
+    def _capture_native(cls, model: str, factory: Callable[[], Any]) -> tuple[Any, list[dict[str, str]]]:
+        """Capture native solver diagnostics and reject explicit scientific failures."""
+        stream = StringIO()
+        with warnings.catch_warnings(record=True) as caught, redirect_stdout(stream):
+            warnings.simplefilter("always")
+            element = factory()
+
+        diagnostics: list[dict[str, str]] = []
+        for item in caught:
+            message = str(item.message)
+            diagnostics.append(
+                {
+                    "source": "python_warning",
+                    "category": item.category.__name__,
+                    "classification": cls._diagnostic_classification(message),
+                    "message": message,
+                }
+            )
+        for line in stream.getvalue().splitlines():
+            text = line.strip()
+            if not text or ("warning" not in text.casefold() and "error" not in text.casefold()):
+                continue
+            diagnostics.append(
+                {
+                    "source": "native_stdout",
+                    "category": "ROSS native diagnostic",
+                    "classification": cls._diagnostic_classification(text),
+                    "message": text,
+                }
+            )
+
+        failures = [item for item in diagnostics if item["classification"] == "SCIENTIFIC FAILURE"]
+        if failures:
+            detail = " | ".join(item["message"] for item in failures)
+            raise EngineeringError(
+                f"{model} returned from the native ROSS 2.3 solver with a scientific-failure diagnostic: {detail}. "
+                "Expected a converged finite solution; correct solver controls/physical inputs and recalculate."
+            )
+        return element, diagnostics
+
+    @staticmethod
+    def _property_backend(lubricant: str, *, thermal: bool) -> dict[str, Any]:
+        """Record the real ROSS lubricant database used by the native bearing model."""
+        from ross.bearings.lubricants import lubricants_dict
+
+        if lubricant not in lubricants_dict:
+            raise EngineeringError(
+                f"Lubricant {lubricant!r} is not present in ross.bearings.lubricants.lubricants_dict; "
+                "choose a native ROSS 2.3 lubricant identifier."
+            )
+        raw = lubricants_dict[lubricant]
+        selected: dict[str, object] = {}
+        for key in (
+            "liquid_density",
+            "liquid_viscosity1",
+            "liquid_viscosity2",
+            "temperature1",
+            "temperature2",
+            "liquid_thermal_conductivity",
+            "liquid_specific_heat",
+        ):
+            if key not in raw:
+                continue
+            value = raw[key]
+            try:
+                selected[key] = float(value)
+            except (TypeError, ValueError):
+                selected[key] = str(value)
+        return {
+            "requested_lubricant": lubricant,
+            "configured_backend": "ROSS lubricants_dict",
+            "effective_backend": "ross.bearings.lubricants.lubricants_dict",
+            "ccp_refprop_heos_applicable": False,
+            "temperature_dependent_properties_used": bool(thermal),
+            "properties": selected,
+            "status": "NATIVE_ROSS_PROPERTY_MODEL",
+        }
+
+    @staticmethod
+    def _plain_convergence(element: Any) -> list[dict[str, object]]:
+        # These values come from ROSS 2.3 PlainJournal.run_thermo_hydro_dynamic.
+        native_tolerance = 0.8
+        native_max_iterations = int(1.0e10)
+        opt_results = getattr(element, "_opt_results", {})
+        evidence: list[dict[str, object]] = []
+        frequencies = np.asarray(element.frequency, dtype=float).reshape(-1)
+        for omega in frequencies:
+            opt = opt_results.get(float(omega)) if isinstance(opt_results, dict) else None
+            if opt is None:
+                raise EngineeringError(
+                    f"PlainJournal convergence result is unavailable at omega={omega:.12g} rad/s; "
+                    "expected the ROSS 2.3 OptimizeResult retained in _opt_results."
+                )
+            residual = float(opt.fun)
+            iterations = int(opt.nit)
+            success = bool(opt.success)
+            if (
+                not success
+                or not np.isfinite(residual)
+                or residual > native_tolerance * (1.0 + 1.0e-12)
+                or iterations > native_max_iterations
+            ):
+                raise EngineeringError(
+                    f"PlainJournal native equilibrium did not satisfy the ROSS 2.3 acceptance contract at "
+                    f"omega={omega:.12g} rad/s: success={success}, residual={residual:.6e} N, "
+                    f"requested tolerance={native_tolerance:.6e} N, iterations={iterations}, "
+                    f"max_iterations={native_max_iterations}. Result rejected."
+                )
+            evidence.append(
+                {
+                    "omega_rad_s": float(omega),
+                    "requested_tolerance": native_tolerance,
+                    "final_residual": residual,
+                    "iterations": iterations,
+                    "max_iterations": native_max_iterations,
+                    "success": success,
+                    "message": str(opt.message),
+                    "status": "PASS",
+                }
+            )
+        return evidence
+
+    @staticmethod
+    def _tilting_convergence(
+        element: Any,
+        *,
+        solver_options: Mapping[str, float | int],
+        diagnostics: list[dict[str, str]],
+    ) -> list[dict[str, object]]:
+        """Report only convergence facts retained by the pinned native API.
+
+        ROSS 2.3 TiltingPad retains objective histories but discards scipy.fmin's
+        warnflag and iteration count. Thermal-loop failures are printed as WARNING
+        messages and are rejected by _capture_native. We record that limitation
+        rather than inventing a native success flag.
+        """
+        histories = getattr(getattr(element, "_results", None), "optimization_history", {})
+        evidence: list[dict[str, object]] = []
+        frequencies = np.asarray(element.frequency, dtype=float).reshape(-1)
+        for index, omega in enumerate(frequencies):
+            history = histories.get(index, []) if isinstance(histories, dict) else []
+            finite = [float(v) for v in history if v is not None and np.isfinite(v)]
+            if not finite:
+                raise EngineeringError(
+                    f"TiltingPad did not retain a finite native objective history at speed index {index}; result rejected."
+                )
+            evidence.append(
+                {
+                    "omega_rad_s": float(omega),
+                    "solver_xtol": float(solver_options["xtol"]),
+                    "solver_ftol": float(solver_options["ftol"]),
+                    "solver_max_iterations": int(solver_options["maxiter"]),
+                    "recorded_objective_evaluations": len(finite),
+                    "final_recorded_objective": finite[-1],
+                    "native_optimizer_success_flag": None,
+                    "native_optimizer_iteration_count": None,
+                    "native_status_contract": (
+                        "ROSS 2.3 TiltingPad does not retain scipy.fmin warnflag/iteration count; "
+                        "thermal nonconvergence warnings are fail-closed and native objective history must be finite."
+                    ),
+                    "scientific_failure_diagnostics": [
+                        item for item in diagnostics if item["classification"] == "SCIENTIFIC FAILURE"
+                    ],
+                    "status": "PASS",
+                }
+            )
+        return evidence
 
     def calculate(
         self,
@@ -284,6 +478,11 @@ class THDBearingStudioService:
         radial_clearance = self._positive(inputs.get("radial_clearance_m", 1.95e-4), "Radial clearance")
         preload = self._positive(inputs.get("preload", 0.0), "Preload", allow_zero=True)
         reference_temperature_c = self._finite(inputs.get("oil_supply_temperature_c", inputs.get("reference_temperature_c", 50.0)), "Reference temperature")
+        if reference_temperature_c <= -273.15:
+            raise EngineeringError(
+                f"PlainJournal absolute temperature must be > 0 K; received {reference_temperature_c:g} °C. "
+                "A non-positive absolute temperature is nonphysical for lubricant properties; enter a higher temperature and recalculate."
+            )
         fxs_load = self._finite(inputs.get("fxs_load_n", 0.0), "Static load X")
         fys_load = self._finite(inputs.get("fys_load_n", -112814.91), "Static load Y")
         lubricant = str(inputs.get("lubricant", "ISOVG32"))
@@ -302,7 +501,7 @@ class THDBearingStudioService:
 
         if not 0 <= initial_guess[0] < 1:
             raise EngineeringError("Initial eccentricity ratio must satisfy 0 <= epsilon < 1.")
-        element = rs.PlainJournal(
+        element, diagnostics = self._capture_native("PlainJournal", lambda: rs.PlainJournal(
             n=0,
             axial_length=axial_length,
             journal_radius=journal_diameter / 2.0,
@@ -325,7 +524,8 @@ class THDBearingStudioService:
             operating_type=operating_type,
             oil_supply_pressure=oil_supply_pressure_pa,
             oil_flow_v=rs.Q_(oil_flow_l_min, "l/min"),
-        )
+        ))
+        convergence_evidence = self._plain_convergence(element)
         results = element._results
         pressure_fields = getattr(results, "pressure_fields", [])
         temperature_fields = getattr(results, "temperature_fields", [])
@@ -370,6 +570,9 @@ class THDBearingStudioService:
                 "groove_factor": groove.tolist(),
                 "sommerfeld_type": int(inputs.get("sommerfeld_type", 2)),
                 "initial_guess": initial_guess.tolist(),
+                "diagnostics": diagnostics,
+                "convergence": convergence_evidence,
+                "property_backend": self._property_backend(lubricant, thermal=True),
             },
             ops,
             "Native ROSS 2.3 PlainJournal THD/Reynolds solution; solved K/C is cached as BearingElement for rotor execution.",
@@ -414,7 +617,48 @@ class THDBearingStudioService:
         if equilibrium_type not in {"match_eccentricity", "determine_eccentricity"}:
             raise EngineeringError("TiltingPad equilibrium_type is invalid.")
 
-        element = rs.TiltingPad(
+        solver_xtol = self._positive(inputs.get("solver_xtol", 1.0e-3), "TiltingPad solver xtol")
+        solver_ftol = self._positive(inputs.get("solver_ftol", 1.0e-3), "TiltingPad solver ftol")
+        solver_maxiter = int(inputs.get("solver_maxiter", 1000))
+        if solver_maxiter < 1:
+            raise EngineeringError(
+                f"TiltingPad solver_maxiter must be an integer >= 1; received {solver_maxiter}. "
+                "The native optimizer needs at least one iteration; increase the limit and recalculate."
+            )
+        inlet_tolerance = self._positive(
+            inputs.get("inlet_temperature_tolerance_c", 0.5),
+            "TiltingPad inlet-temperature tolerance",
+        )
+        max_inlet_iterations = int(inputs.get("max_inlet_iterations", 25))
+        max_jtemp_iter = int(inputs.get("max_jtemp_iter", 100))
+        if max_inlet_iterations < 1 or max_jtemp_iter < 1:
+            raise EngineeringError(
+                f"TiltingPad thermal iteration limits must be >= 1; received "
+                f"max_inlet_iterations={max_inlet_iterations}, max_jtemp_iter={max_jtemp_iter}. "
+                "Increase the limits before solving the coupled thermal model."
+            )
+        journal_temperature_tolerance = self._positive(
+            inputs.get("journal_temperature_tolerance_c", 1.0),
+            "TiltingPad journal-temperature tolerance",
+        )
+        journal_temperature_c = self._finite(
+            inputs.get("journal_temperature_c", 25.0),
+            "TiltingPad journal temperature",
+        )
+        if journal_temperature_c <= -273.15 or oil_supply_temperature_c <= -273.15:
+            raise EngineeringError(
+                f"TiltingPad absolute temperature must be > 0 K; received oil={oil_supply_temperature_c:g} °C "
+                f"and journal={journal_temperature_c:g} °C. Correct the temperatures and recalculate."
+            )
+        hot_oil_carry_over = self._finite(inputs.get("hot_oil_carry_over", 0.8), "TiltingPad hot-oil carry-over")
+        if not 0.0 <= hot_oil_carry_over <= 1.0:
+            raise EngineeringError(
+                f"TiltingPad hot_oil_carry_over must be in [0, 1]; received {hot_oil_carry_over:g}. "
+                "Use a physical mixing fraction."
+            )
+        solver_options = {"xtol": solver_xtol, "ftol": solver_ftol, "maxiter": solver_maxiter}
+
+        element, diagnostics = self._capture_native("TiltingPad", lambda: rs.TiltingPad(
             n=0,
             journal_diameter=journal_diameter,
             pre_load=[preload] * n_pads,
@@ -434,6 +678,18 @@ class THDBearingStudioService:
             attitude_angle=rs.Q_(attitude_deg, "deg"),
             load=[fxs_load, fys_load],
             thermal_type=thermal_type,
+            solver_options=solver_options,
+            hot_oil_carry_over=hot_oil_carry_over,
+            inlet_temperature_tolerance=inlet_tolerance,
+            max_inlet_iterations=max_inlet_iterations,
+            max_jtemp_iter=max_jtemp_iter,
+            jtemp_error=journal_temperature_tolerance,
+            journal_temperature=journal_temperature_c,
+        ))
+        convergence_evidence = self._tilting_convergence(
+            element,
+            solver_options=solver_options,
+            diagnostics=diagnostics,
         )
         results = element._results
         pressure_fields = getattr(results, "pressure_fields", [])
@@ -475,6 +731,16 @@ class THDBearingStudioService:
                 "thermal_type": thermal_type,
                 "nx": nx,
                 "nz": nz,
+                "solver_options": dict(solver_options),
+                "inlet_temperature_tolerance_c": inlet_tolerance,
+                "max_inlet_iterations": max_inlet_iterations,
+                "max_jtemp_iter": max_jtemp_iter,
+                "journal_temperature_tolerance_c": journal_temperature_tolerance,
+                "journal_temperature_c": journal_temperature_c,
+                "hot_oil_carry_over": hot_oil_carry_over,
+                "diagnostics": diagnostics,
+                "convergence": convergence_evidence,
+                "property_backend": self._property_backend(lubricant, thermal=True),
             },
             ops,
             "Native ROSS 2.3 TiltingPad THD solution; solved K/C is cached as BearingElement for rotor execution.",
@@ -494,7 +760,7 @@ class THDBearingStudioService:
         radial_clearance = self._positive(inputs.get("radial_clearance_m", 7.62e-5), "Radial clearance")
         lubricant = str(inputs.get("lubricant", "ISOVG32"))
         cavitation = bool(inputs.get("cavitation", True))
-        element = rs.SqueezeFilmDamper(
+        element, diagnostics = self._capture_native("SqueezeFilmDamper", lambda: rs.SqueezeFilmDamper(
             n=0,
             frequency=rs.Q_(speeds, "RPM"),
             axial_length=axial_length,
@@ -504,7 +770,7 @@ class THDBearingStudioService:
             lubricant=lubricant,
             geometry=geometry,
             cavitation=cavitation,
-        )
+        ))
         pressure = np.asarray(getattr(element, "p_max", []), dtype=float).reshape(-1)
         h_min = radial_clearance * (1.0 - eccentricity_ratio)
         ops = [
@@ -528,6 +794,13 @@ class THDBearingStudioService:
                 "lubricant": lubricant,
                 "geometry": geometry,
                 "cavitation": int(cavitation),
+                "diagnostics": diagnostics,
+                "convergence": {
+                    "iterative_solver": False,
+                    "status": "NOT APPLICABLE",
+                    "reason": "ROSS 2.3 SqueezeFilmDamper is an analytical hydrodynamic short-bearing formulation.",
+                },
+                "property_backend": self._property_backend(lubricant, thermal=False),
             },
             ops,
             "Native ROSS 2.3 SqueezeFilmDamper solution; solved K/C is cached as BearingElement for rotor execution.",

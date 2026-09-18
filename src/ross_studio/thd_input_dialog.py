@@ -55,6 +55,15 @@ TILTING = [
     ("thermal_type", "Thermal model", ("adiabatic", "full")),
     ("nx", "Circumferential volumes nx (count)", 10),
     ("nz", "Axial volumes nz (count)", 10),
+    ("solver_xtol", "Native optimizer x tolerance", 1.0e-3),
+    ("solver_ftol", "Native optimizer objective-change tolerance", 1.0e-3),
+    ("solver_maxiter", "Native optimizer max iterations", 1000),
+    ("inlet_temperature_tolerance_c", "Inlet-temperature tolerance (°C)", 0.5),
+    ("max_inlet_iterations", "Maximum inlet-temperature iterations", 25),
+    ("max_jtemp_iter", "Maximum journal-temperature iterations", 100),
+    ("journal_temperature_tolerance_c", "Journal-temperature tolerance (°C)", 1.0),
+    ("journal_temperature_c", "Initial journal temperature (°C)", 25.0),
+    ("hot_oil_carry_over", "Hot-oil carry-over fraction", 0.8),
 ]
 SFD = [
     ("axial_length_mm", "Axial length (mm)", 22.86),

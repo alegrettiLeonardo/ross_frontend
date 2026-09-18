@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 from dataclasses import dataclass
 from importlib import import_module
+from io import StringIO
 from math import pi
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
+import warnings
 
 import numpy as np
 
@@ -83,7 +86,7 @@ class ThrustPadStudioService:
     def _finite(value: Any, name: str) -> float:
         number = float(value)
         if not np.isfinite(number):
-            raise EngineeringError(f"{name} must be finite; received {value!r}.")
+            raise EngineeringError(f"{name} must be finite; received {value!r}. Non-finite axial THD input makes the physical equations undefined. Enter a finite engineering value and recalculate.")
         return number
 
     @classmethod
@@ -91,9 +94,9 @@ class ThrustPadStudioService:
         number = cls._finite(value, name)
         if allow_zero:
             if number < 0.0:
-                raise EngineeringError(f"{name} must be non-negative; received {number:g}.")
+                raise EngineeringError(f"{name} must be non-negative; received {number:g}. Negative geometry/property values are nonphysical for this axial THD contract. Enter a value >= 0 and recalculate.")
         elif number <= 0.0:
-            raise EngineeringError(f"{name} must be positive; received {number:g}.")
+            raise EngineeringError(f"{name} must be positive; received {number:g}. Zero/negative geometry, load or convergence values are nonphysical for this axial THD contract. Enter a value > 0 and recalculate.")
         return number
 
     @classmethod
@@ -111,9 +114,9 @@ class ThrustPadStudioService:
             values = np.linspace(low, high, count)
         speeds = np.asarray(values, dtype=float)
         if speeds.ndim != 1 or not speeds.size or not np.all(np.isfinite(speeds)):
-            raise EngineeringError("ThrustPad speed vector must be a finite one-dimensional array.")
+            raise EngineeringError(f"ThrustPad speed vector must be a finite one-dimensional array; received {values!r}. Enter finite rpm stations and recalculate.")
         if np.any(speeds <= 0.0) or (speeds.size > 1 and np.any(np.diff(speeds) <= 0.0)):
-            raise EngineeringError("ThrustPad speeds must be positive and strictly increasing.")
+            raise EngineeringError(f"ThrustPad speeds must be positive and strictly increasing; received {speeds.tolist()!r}. A nonmonotonic grid makes native interpolation ambiguous. Enter ordered positive rpm stations and recalculate.")
         return speeds
 
     @staticmethod
@@ -155,6 +158,131 @@ class ThrustPadStudioService:
             return None
         return float(value) if np.isfinite(value) else None
 
+    @staticmethod
+    def _diagnostic_classification(message: str) -> str:
+        lower = message.casefold()
+        if any(
+            token in lower
+            for token in (
+                "did not converge",
+                "maximum number of iterations",
+                "error in pressure calculation",
+                "invalid value encountered",
+                "non-finite",
+                "nan",
+            )
+        ):
+            return "SCIENTIFIC FAILURE"
+        if any(token in lower for token in ("ill-conditioned", "poorly conditioned")):
+            return "ENGINEERING REVIEW REQUIRED"
+        return "INFORMATIONAL"
+
+    @classmethod
+    def _capture_native(cls, factory: Callable[[], Any]) -> tuple[Any, list[dict[str, str]]]:
+        stream = StringIO()
+        with warnings.catch_warnings(record=True) as caught, redirect_stdout(stream):
+            warnings.simplefilter("always")
+            element = factory()
+        diagnostics: list[dict[str, str]] = []
+        for item in caught:
+            message = str(item.message)
+            diagnostics.append(
+                {
+                    "source": "python_warning",
+                    "category": item.category.__name__,
+                    "classification": cls._diagnostic_classification(message),
+                    "message": message,
+                }
+            )
+        for line in stream.getvalue().splitlines():
+            text = line.strip()
+            if not text or ("warning" not in text.casefold() and "error" not in text.casefold()):
+                continue
+            diagnostics.append(
+                {
+                    "source": "native_stdout",
+                    "category": "ROSS native diagnostic",
+                    "classification": cls._diagnostic_classification(text),
+                    "message": text,
+                }
+            )
+        failures = [item for item in diagnostics if item["classification"] == "SCIENTIFIC FAILURE"]
+        if failures:
+            raise EngineeringError(
+                "ThrustPad native ROSS 2.3 solve emitted a scientific-failure diagnostic: "
+                + " | ".join(item["message"] for item in failures)
+                + ". Expected a converged finite axial THD solution; correct inputs and recalculate."
+            )
+        return element, diagnostics
+
+    @staticmethod
+    def _property_backend(lubricant: str) -> dict[str, Any]:
+        from ross.bearings.lubricants import lubricants_dict
+
+        if lubricant not in lubricants_dict:
+            raise EngineeringError(
+                f"Lubricant {lubricant!r} is not available in ROSS 2.3 lubricants_dict; choose a native lubricant."
+            )
+        raw = lubricants_dict[lubricant]
+        selected: dict[str, object] = {}
+        for key in (
+            "liquid_density",
+            "liquid_viscosity1",
+            "liquid_viscosity2",
+            "temperature1",
+            "temperature2",
+            "liquid_thermal_conductivity",
+            "liquid_specific_heat",
+        ):
+            if key not in raw:
+                continue
+            value = raw[key]
+            try:
+                selected[key] = float(value)
+            except (TypeError, ValueError):
+                selected[key] = str(value)
+        return {
+            "requested_lubricant": lubricant,
+            "configured_backend": "ROSS lubricants_dict",
+            "effective_backend": "ross.bearings.lubricants.lubricants_dict",
+            "ccp_refprop_heos_applicable": False,
+            "temperature_dependent_properties_used": True,
+            "properties": selected,
+            "status": "NATIVE_ROSS_PROPERTY_MODEL",
+        }
+
+    @staticmethod
+    def _convergence_evidence(element: Any, tolerance: float) -> list[dict[str, object]]:
+        histories = getattr(getattr(element, "_results", None), "optimization_history", {})
+        frequencies = np.asarray(element.frequency, dtype=float).reshape(-1)
+        evidence: list[dict[str, object]] = []
+        for index, omega in enumerate(frequencies):
+            history = histories.get(index, []) if isinstance(histories, dict) else []
+            finite = [float(value) for value in history if value is not None and np.isfinite(value)]
+            if not finite:
+                raise EngineeringError(
+                    f"ThrustPad did not retain a finite force/moment residual history at speed index {index}; result rejected."
+                )
+            residual = finite[-1]
+            if not np.isfinite(residual) or residual > tolerance * (1.0 + 1.0e-12):
+                raise EngineeringError(
+                    f"ThrustPad returned with final force/moment residual={residual:.6e}; "
+                    f"expected <= requested tolerance={tolerance:.6e}. Result rejected."
+                )
+            evidence.append(
+                {
+                    "omega_rad_s": float(omega),
+                    "requested_tolerance": float(tolerance),
+                    "final_residual": residual,
+                    "recorded_outer_iterations": len(finite),
+                    "max_iterations": None,
+                    "max_iterations_contract": "ROSS 2.3 ThrustPad outer force/moment loop exposes no max-iteration parameter.",
+                    "success": True,
+                    "status": "PASS",
+                }
+            )
+        return evidence
+
     def calculate(
         self,
         project: RotorProject,
@@ -192,6 +320,11 @@ class ThrustPadStudioService:
             raise EngineeringError("ThrustPad equilibrium_position_mode must be calculate or imposed.")
 
         oil_temperature_c = self._finite(values.get("oil_supply_temperature_c", 40.0), "Oil supply temperature")
+        if oil_temperature_c <= -273.15:
+            raise EngineeringError(
+                f"ThrustPad absolute temperature must be > 0 K; received {oil_temperature_c:g} °C. "
+                "A non-positive absolute temperature is nonphysical for lubricant properties; enter a higher temperature and recalculate."
+            )
         lubricant = str(values.get("lubricant", "ISOVG68"))
         axial_load_n = self._positive(values.get("axial_load_n", 13.320e6), "Axial load")
         radial_angle = self._finite(values.get("radial_inclination_angle_rad", -2.75e-4), "Radial inclination angle")
@@ -203,7 +336,7 @@ class ThrustPadStudioService:
         tolerance_n = self._positive(values.get("tolerance_force_moment_n", 0.1), "Force/moment tolerance")
         residual_n = self._positive(values.get("residual_force_moment_n", 50.0), "Initial residual force/moment")
 
-        element = rs.ThrustPad(
+        element, diagnostics = self._capture_native(lambda: rs.ThrustPad(
             n=0,
             pad_inner_radius=rs.Q_(r_i, "m"),
             pad_outer_radius=rs.Q_(r_o, "m"),
@@ -224,8 +357,8 @@ class ThrustPadStudioService:
             initial_film_thickness=rs.Q_(initial_film_m, "m"),
             tolerance_force_moment=tolerance_n,
             residual_force_moment=residual_n,
-        )
-
+        ))
+        convergence_evidence = self._convergence_evidence(element, tolerance_n)
         omegas = speeds * 2.0 * pi / 60.0
         axial_points: list[AxialBearingCoefficientPoint] = []
         for rpm, omega in zip(speeds, omegas):
@@ -264,6 +397,29 @@ class ThrustPadStudioService:
                 )
             )
 
+        for point in operating_points:
+            if point.max_pressure_pa is not None and (
+                not np.isfinite(point.max_pressure_pa) or point.max_pressure_pa < 0.0
+            ):
+                raise EngineeringError(
+                    f"ThrustPad returned invalid maximum pressure={point.max_pressure_pa!r} Pa at {point.rpm:g} rpm; "
+                    "expected a finite non-negative pressure field."
+                )
+            if point.max_temperature_c is not None and (
+                not np.isfinite(point.max_temperature_c) or point.max_temperature_c <= -273.15
+            ):
+                raise EngineeringError(
+                    f"ThrustPad returned invalid temperature={point.max_temperature_c!r} °C at {point.rpm:g} rpm; "
+                    "expected a finite temperature above absolute zero."
+                )
+            if point.min_film_thickness_m is not None and (
+                not np.isfinite(point.min_film_thickness_m) or point.min_film_thickness_m <= 0.0
+            ):
+                raise EngineeringError(
+                    f"ThrustPad returned minimum film thickness={point.min_film_thickness_m!r} m at {point.rpm:g} rpm; "
+                    "expected a finite positive lubricating film."
+                )
+
         metadata: dict[str, Any] = {
             "source_model": "ThrustPad",
             "application_class": "BearingElement",
@@ -290,6 +446,9 @@ class ThrustPadStudioService:
             "tolerance_force_moment_n": tolerance_n,
             "residual_force_moment_n": residual_n,
             "solved_axial_kc_cache": 1,
+            "diagnostics": diagnostics,
+            "convergence": convergence_evidence,
+            "property_backend": self._property_backend(lubricant),
             "axial_coefficients": [
                 {"rpm": p.rpm, "kzz": p.kzz, "czz": p.czz} for p in axial_points
             ],

@@ -116,6 +116,11 @@ def frozen_seals_026_main(argv: list[str]) -> int:
     return _run_callable(argv, "--seals-026-output", run_frozen_seals_026_test, 13)
 
 
+def frozen_thd_027_main(argv: list[str]) -> int:
+    from ross_studio.frozen_thd_027 import run_frozen_thd_027_test
+    return _run_callable(argv, "--thd-027-output", run_frozen_thd_027_test, 14)
+
+
 def main() -> int:
     argv = list(sys.argv[1:])
     if "--core-output" in argv:
@@ -143,6 +148,8 @@ def main() -> int:
         return frozen_coupling_025_main(argv)
     if "--seals-026-self-test" in argv or "--seals-026-output" in argv:
         return frozen_seals_026_main(argv)
+    if "--thd-027-self-test" in argv or "--thd-027-output" in argv:
+        return frozen_thd_027_main(argv)
 
     from ross_studio.app import launch
     return int(launch())
