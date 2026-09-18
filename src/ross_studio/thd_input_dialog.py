@@ -94,6 +94,7 @@ class THDBearingInputDialog(QDialog):
         meta = project.bearings[bearing_index].metadata
         stored = meta.get("engineering_input", {}) if meta.get("source_model") == ross_class else {}
         overrides = {
+            "PlainJournal": {"speed_rpm": [900.0, 1000.0, 1200.0]},
             "TiltingPad": {"journal_diameter_mm": 101.6, "radial_clearance_um": 74.9},
             "SqueezeFilmDamper": {"journal_diameter_mm": 129.54, "radial_clearance_um": 76.2},
         }.get(ross_class, {})

@@ -38,7 +38,7 @@ LATERAL_COEFFS = ("kxx", "kxy", "kyx", "kyy", "cxx", "cxy", "cyx", "cyy")
 
 INPUTS: dict[str, dict[str, Any]] = {
     "PlainJournal": {
-        "speed_rpm": [900.0, 1200.0, 1500.0],
+        "speed_rpm": [900.0, 1000.0, 1200.0],
         "journal_diameter_mm": 400.0,
         "radial_clearance_um": 195.0,
         "lubricant": "ISOVG32",
@@ -958,16 +958,15 @@ def _plain_historical_failure_regression(rs) -> dict[str, object]:
 
 
 def _plain_deliberate_physical_rejection(rs) -> dict[str, object]:
-    """Use a real native solve whose termination can succeed but physical balance is unacceptable."""
+    """Preserve the real 1500-rpm physical-balance rejection discovered by bd3eda.
+
+    No solver internals, load scale or acceptance threshold are modified. The exact
+    nominal geometry/load is solved directly with ROSS 2.3 at 1500 rpm. The native
+    optimizer terminates successfully, but the predeclared <=1e-3 physical
+    equilibrium criterion rejects the returned state.
+    """
     values = deepcopy(INPUTS["PlainJournal"])
-    values.update(
-        {
-            "speed_rpm": [1000.0],
-            "sommerfeld_type": "1",
-            "fxs_load_n": 0.0,
-            "fys_load_n": -1.0,
-        }
-    )
+    values["speed_rpm"] = [1500.0]
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         native = _manual_native(rs, "PlainJournal", values)
@@ -981,6 +980,14 @@ def _plain_deliberate_physical_rejection(rs) -> dict[str, object]:
     )
     rejected = False
     message = ""
+    relative = None
+    applied = np.asarray([native.fxs_load, native.fys_load], dtype=float)
+    eq = np.asarray(native._equilibrium_pos_by_speed[omega], dtype=float)
+    fhx, fhy = native._forces(eq, omega)
+    physical = applied + np.asarray([fhx, fhy], dtype=float)
+    load_norm = float(np.linalg.norm(applied))
+    residual_norm = float(np.linalg.norm(physical))
+    relative = residual_norm / load_norm
     try:
         THDBearingStudioService._plain_convergence(native)
     except EngineeringError as exc:
@@ -991,12 +998,20 @@ def _plain_deliberate_physical_rejection(rs) -> dict[str, object]:
             and "acceptance_threshold" in message
         )
     return {
+        "origin": "Real 1500-rpm nominal point that caused source/frozen failure on bd3eda; retained as rejection evidence instead of weakening the threshold.",
+        "failed_sha": "bd3eda1440e68755c3a1da6ecb9ce5797cebef19",
+        "source_run": 35346847900,
+        "frozen_run": 35346847929,
         "native_case": values,
         "native_solver_success": bool(opt.success),
         "native_solver_message": str(opt.message),
         "native_solver_iterations": int(opt.nit),
         "native_final_objective_fun_n": float(opt.fun),
         "native_solver_returned_and_terminated": native_terminated,
+        "load_magnitude_n": load_norm,
+        "equilibrium_residual_vector_n": [float(v) for v in physical],
+        "equilibrium_residual_norm_n": residual_norm,
+        "relative_equilibrium_residual": relative,
         "production_validator_rejected": bool(rejected),
         "preview_ready": False,
         "apply_enabled": False,
@@ -1004,7 +1019,12 @@ def _plain_deliberate_physical_rejection(rs) -> dict[str, object]:
         "warnings": [str(item.message) for item in caught],
         "acceptance_threshold": THDBearingStudioService.PLAIN_EQUILIBRIUM_RELATIVE_RESIDUAL_MAX,
         "threshold_source": THDBearingStudioService.PLAIN_EQUILIBRIUM_THRESHOLD_RATIONALE,
-        "pass": bool(native_terminated and rejected),
+        "pass": bool(
+            native_terminated
+            and np.isfinite(relative)
+            and relative > THDBearingStudioService.PLAIN_EQUILIBRIUM_RELATIVE_RESIDUAL_MAX
+            and rejected
+        ),
     }
 
 
@@ -1182,6 +1202,8 @@ def run_thd_bearings_027_qualification(*, frozen_mode: bool = False) -> THDBeari
         ],
         "qualification_matrix": matrix,
         "ross_230_api_inventory": _ross_230_api_inventory(rs),
+        "plain_journal_qualification_speed_grid_rpm": [900.0, 1000.0, 1200.0],
+        "plain_journal_rejected_regression_speed_rpm": 1500.0,
         "plain_journal_physical_acceptance_contract": {
             "metric_definition": "||[Fx_applied + Fhx_hydrodynamic, Fy_applied + Fhy_hydrodynamic]|| / ||[Fx_applied, Fy_applied]||",
             "acceptance_threshold": THDBearingStudioService.PLAIN_EQUILIBRIUM_RELATIVE_RESIDUAL_MAX,

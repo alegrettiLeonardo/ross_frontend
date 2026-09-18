@@ -266,6 +266,7 @@ class BearingInputPanel(QWidget):
         if self.ross_class in THD_FIELDS:
             stored = metadata.get("engineering_input", {}) if metadata.get("source_model") == self.ross_class else {}
             overrides = {
+                "PlainJournal": {"speed_rpm": [900.0, 1000.0, 1200.0]},
                 "TiltingPad": {"journal_diameter_mm": 101.6, "radial_clearance_um": 74.9},
                 "SqueezeFilmDamper": {"journal_diameter_mm": 129.54, "radial_clearance_um": 76.2},
             }.get(self.ross_class, {})
