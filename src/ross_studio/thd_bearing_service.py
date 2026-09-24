@@ -766,7 +766,9 @@ class THDBearingStudioService:
         if journal_temperature_c <= -273.15 or oil_supply_temperature_c <= -273.15:
             raise EngineeringError(
                 f"TiltingPad absolute temperature must be > 0 K; received oil={oil_supply_temperature_c:g} °C "
-                f"and journal={journal_temperature_c:g} °C. Correct the temperatures and recalculate."
+                f"and journal={journal_temperature_c:g} °C. A non-positive absolute temperature is nonphysical "
+                "for lubricant properties and invalidates the coupled thermal model; enter temperatures above "
+                "-273.15 °C and recalculate."
             )
         hot_oil_carry_over = self._finite(inputs.get("hot_oil_carry_over", 0.8), "TiltingPad hot-oil carry-over")
         if not 0.0 <= hot_oil_carry_over <= 1.0:
