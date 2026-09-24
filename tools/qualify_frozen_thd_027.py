@@ -34,7 +34,15 @@ def main(argv: list[str]) -> int:
         )
     if not output.exists():
         raise RuntimeError(f"Frozen THD Bearings 0.27 executable did not create {output}.")
-    print(output.read_text(encoding="utf-8"))
+    data = output.read_bytes()
+    stream = getattr(sys.stdout, "buffer", None)
+    if stream is not None:
+        stream.write(data)
+        if not data.endswith(b"\n"):
+            stream.write(b"\n")
+        stream.flush()
+    else:
+        print(data.decode("utf-8"))
     return 0
 
 
